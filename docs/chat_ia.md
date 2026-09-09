@@ -79,3 +79,18 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Ejecuté y depuré las pruebas unitarias automáticas con el runner de pruebas de Django (`manage.py test --settings=config.settings.test`), resolviendo aserciones y asegurando un 100% de aprobación antes de publicar los cambios.
 
 ---
+
+## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini
+
+**Contexto:** Sprint 2 — Actualización de los documentos de diseño UML y especificación de pruebas (SCRUM-42)
+
+**Resumen:**
+- Analicé las especificaciones del Sprint 2 y procedí a actualizar integralmente los documentos formales de diseño:
+  - `EQUIPO_88_B_DIS_CLA_01`: Detallé la entidad `CustomerUserAssignment` (atributos, restricciones `unique_together`, asignación de representante principal y métodos de ciclo de vida), las clases para la gestión de cliente activo (`ActiveCustomerMiddleware`, context processor, `CustomerSwitchActiveView`) y la vista del visualizador Sphinx (`ServeSphinxDocsView`).
+  - `EQUIPO_88_B_DIS_PAQ_01`: Refactoricé la arquitectura de paquetes en `apps.customers`, agregué el flujo de cliente activo, integré el visualizador de documentación en `global_exchange_core`, generé el diagrama Mermaid de capas y sincronicé la matriz de responsabilidades.
+  - `EQUIPO_88_B_DIS_CPR_01`: Diseñé e incorporé la Matriz Formal de Casos de Prueba con 18 casos de prueba estructurados (CPR-CUA-001..006, CPR-ACT-001..006, CPR-DOC-001..006).
+  - `EQUIPO_08_A_ERS_01`: Actualicé los requerimientos funcionales RF04/RF05, RF-21, incorporé RF-27 (Visualizador Sphinx) y registré la versión ERS v3.1 en el historial de cambios.
+- Elaboré los documentos de registro `SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md` y `RESOLUCION_TAREAS_IA.md` en `docs/documentacion/` para mantener la trazabilidad ordenada exigida por el equipo.
+
+---
+
