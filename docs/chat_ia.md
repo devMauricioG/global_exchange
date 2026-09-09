@@ -79,3 +79,17 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Ejecuté y depuré las pruebas unitarias automáticas con el runner de pruebas de Django (`manage.py test --settings=config.settings.test`), resolviendo aserciones y asegurando un 100% de aprobación antes de publicar los cambios.
 
 ---
+
+## Pablo Elizeche — 09/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Estandarización de docstrings estructurados (Sphinx/Google style), actualización de bitácora y compilación del árbol HTML (SCRUM-32)
+
+**Resumen:**
+- Revisión y estandarización integral de docstrings estructurados (compatibles con directivas Sphinx y Google docstrings) en todas las clases, métodos, servicios, context processors, template tags, formularios y vistas desarrolladas/ampliadas en el Sprint 2 (`authentication` y `customers`).
+- Creación de la configuración de aplicación `AuthenticationConfig` en `authentication/apps.py` e incorporación completa de la documentación del paquete `authentication` al índice maestro de Sphinx (`docs/sphinx/source/authentication.rst` y `authentication.templatetags.rst`).
+- Actualización de la estructura de documentación en `docs/sphinx/source/customers.rst`, `modules.rst` e `index.rst`, vinculando todos los submódulos (`admin`, `apps`, `forms`, `models`, `services`, `signals`, `tests`, `urls`, `views`).
+- Integración de extensiones Sphinx (`sphinx.ext.viewcode`, `sphinx.ext.napoleon`, `sphinx.ext.autodoc`), corrección de directivas rst de docstrings (formato de roles e indentaciones) y resolución de advertencias de compilación para lograr una salida limpia (0 errores, 0 advertencias).
+- Recompilación exitosa del árbol completo de documentación HTML en `docs/sphinx/build/html/` y verificación de consistencia mediante la ejecución de la suite de pruebas automatizadas del proyecto.
+
+---
+

@@ -24,13 +24,15 @@ def vincular_cliente_keycloak(
     Vincula automáticamente la identidad de Keycloak con la ficha de cliente en Django.
 
     Estrategia de vinculación:
-    1. Si se provee `keycloak_id` (claim ``sub``), busca una ficha existente con dicho identificador.
+
+    1. Si se provee ``keycloak_id`` (claim ``sub``), busca una ficha existente con dicho identificador.
        Si existe, asocia o actualiza la referencia al usuario Django (:class:`django.contrib.auth.models.User`).
-    2. Si no se encuentra por `keycloak_id` y se dispone de un `email`, busca por coincidencia exacta
-       (insensible a mayúsculas/minúsculas) en el campo `correo`. Si existe la ficha, le asigna el
-       `keycloak_id` y vincula el `usuario`.
+    2. Si no se encuentra por ``keycloak_id`` y se dispone de un ``email``, busca por coincidencia exacta
+       (insensible a mayúsculas/minúsculas) en el campo ``correo``. Si existe la ficha, le asigna el
+       ``keycloak_id`` y vincula el ``usuario``.
     3. Si no existe ninguna ficha previa, crea una nueva entidad :class:`~customers.models.Cliente`
-       utilizando los datos extraídos de las claims de Keycloak (`nombre`, `correo`, `keycloak_id`, etc.).
+       utilizando los datos extraídos de las claims de Keycloak (``nombre``, ``correo``, ``keycloak_id``, etc.).
+
 
     :param user: Instancia del usuario autenticado en Django.
     :type user: django.contrib.auth.models.AbstractBaseUser

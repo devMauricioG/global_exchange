@@ -28,6 +28,14 @@ customers.apps module
    :show-inheritance:
    :undoc-members:
 
+customers.forms module
+----------------------
+
+.. automodule:: customers.forms
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 customers.models module
 -----------------------
 
@@ -36,10 +44,34 @@ customers.models module
    :show-inheritance:
    :undoc-members:
 
+customers.services module
+-------------------------
+
+.. automodule:: customers.services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+customers.signals module
+------------------------
+
+.. automodule:: customers.signals
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 customers.tests module
 ----------------------
 
 .. automodule:: customers.tests
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+customers.urls module
+---------------------
+
+.. automodule:: customers.urls
    :members:
    :show-inheritance:
    :undoc-members:
