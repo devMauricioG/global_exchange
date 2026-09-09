@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block title %}Eliminar Medio de Pago - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .delete-container {
+        max-width: 580px;
+        margin: 2rem auto;
+    }
+
+    .delete-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        border-radius: 1.25rem;
+        padding: 2.5rem;
+        box-shadow: 0 16px 36px -8px rgba(239, 68, 68, 0.2);
+        text-align: center;
+    }
+
+    .delete-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background-color: var(--danger-bg);
+        border: 2px solid rgba(239, 68, 68, 0.4);
+        color: var(--danger);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        margin: 0 auto 1.5rem auto;
+    }
+
+    .delete-title {
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: #f8fafc;
+        margin-bottom: 0.75rem;
+    }
+
+    .delete-message {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+        line-height: 1.6;
+    }
+
+    .item-summary {
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid var(--border-color);
+        border-radius: 0.875rem;
+        padding: 1.25rem;
+        margin-bottom: 2rem;
+        text-align: left;
+    }
+
+    .item-summary-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.4rem 0;
+        font-size: 0.9rem;
+    }
+
+    .item-summary-row:not(:last-child) {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .item-label {
+        color: var(--text-subtle);
+    }
+
+    .item-value {
+        color: #f8fafc;
+        font-weight: 600;
+    }
+
+    .delete-actions {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="delete-container">
+    <div class="delete-card">
+        <div class="delete-icon">⚠️</div>
+        <h1 class="delete-title">¿Eliminar este Medio de Pago?</h1>
+        <p class="delete-message">
+            Esta acción eliminará de forma permanente el registro del medio de pago en la plataforma.
+            No podrá ser seleccionado para futuras transferencias ni operaciones.
+        </p>
+
+        <div class="item-summary">
+            <div class="item-summary-row">
+                <span class="item-label">Tipo:</span>
+                <span class="item-value">{{ object.get_tipo_medio_display }}</span>
+            </div>
+            <div class="item-summary-row">
+                <span class="item-label">Entidad:</span>
+                <span class="item-value">{{ object.entidad_bancaria }}</span>
+            </div>
+            <div class="item-summary-row">
+                <span class="item-label">Cuenta / Teléfono:</span>
+                <span class="item-value" style="font-family: monospace; color: var(--primary);">{{ object.numero_cuenta }}</span>
+            </div>
+            <div class="item-summary-row">
+                <span class="item-label">Titular:</span>
+                <span class="item-value">{{ object.titular }}</span>
+            </div>
+            {% if object.es_predeterminado %}
+                <div class="item-summary-row">
+                    <span class="item-label">Estado:</span>
+                    <span class="item-value" style="color: #fbbf24;">⭐ Medio Predeterminado</span>
+                </div>
+            {% endif %}
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="delete-actions">
+                <a href="{% url 'payments:paymentmethod-list' %}" class="btn btn-secondary">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-danger">
+                    <span>🗑️</span>
+                    <span>Confirmar Eliminación</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

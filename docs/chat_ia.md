@@ -79,3 +79,19 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Ejecuté y depuré las pruebas unitarias automáticas con el runner de pruebas de Django (`manage.py test --settings=config.settings.test`), resolviendo aserciones y asegurando un 100% de aprobación antes de publicar los cambios.
 
 ---
+
+## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (SCRUM-55)
+
+**Resumen:**
+- Diseñé y creé la aplicación Django `payments` con el modelo `PaymentMethod` incorporando los campos requeridos: `cliente`, `tipo_medio`, `entidad_bancaria`, `numero_cuenta`, `titular`, `documento_titular`, `es_predeterminado` y `activo`.
+- Diseñé la lógica de negocio de exclusividad para medios predeterminados en `PaymentMethod.save()`, garantizando que únicamente un instrumento por cliente posea la bandera `es_predeterminado=True` de manera atómica, sin interferir con otros clientes.
+- Implementé la arquitectura de seguridad y mitigación de vulnerabilidades IDOR (Insecure Direct Object Reference) en las vistas CBV (`PaymentMethodListView`, `PaymentMethodCreateView`, `PaymentMethodUpdateView`, `PaymentMethodDeleteView`, `PaymentMethodSetDefaultView`, `PaymentMethodToggleActiveView`), restringiendo estrictamente las consultas `get_queryset()` al cliente resuelto en sesión/usuario autenticado (`get_current_cliente`).
+- Construí los formularios validados `PaymentMethodForm` y `PaymentMethodFilterForm` con clases y directivas del sistema de diseño dark-mode.
+- Diseñé las interfaces web (`paymentmethod_list.html`, `paymentmethod_form.html`, `paymentmethod_confirm_delete.html`) con KPIs interactivos, distintivos de estado y acciones rápidas.
+- Expuse los endpoints de API REST JSON (`PaymentMethodListCreateAPIView`, `PaymentMethodDetailAPIView`) para integración externa.
+- Redacté y ejecuté una suite exhaustiva de 21 pruebas automatizadas en `payments/tests.py`, alcanzando 90 tests aprobados a nivel global y 93% de cobertura.
+- Redacté la documentación técnica en `docs/documentacion/SCRUM-55_CRUD_MEDIOS_DE_PAGO.md` y actualicé la bitácora consolidada `RESOLUCION_TAREAS_IA.md`.
+
+---
