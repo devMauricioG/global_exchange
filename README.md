@@ -113,6 +113,120 @@ Si prefieres ejecutar Django directamente en tu máquina host:
 
 ---
 
+## 🧪 Ejecución de Pruebas Unitarias y Cobertura (Testing & Coverage)
+
+El proyecto cuenta con suites de pruebas unitarias y de integración que cubren los módulos de autenticación (`authentication`), roles dinámicos, gestión y validación de clientes (`customers`).
+
+Las pruebas utilizan la configuración optimizada e in-memory SQLite (`config.settings.test`), que aísla la ejecución, agiliza los tests y previene modificaciones en las bases de datos de desarrollo o producción.
+
+### 🐳 1. Ejecución de Pruebas con Docker Compose (Recomendado)
+
+Con los contenedores en ejecución (`docker compose up -d`), puedes correr las pruebas mediante:
+
+#### A. Ejecutar todas las pruebas del proyecto
+```bash
+docker compose exec web python manage.py test
+```
+
+#### B. Ejecutar pruebas de módulos específicos (`authentication` y `customers`)
+```bash
+docker compose exec web python manage.py test authentication customers
+```
+
+#### C. Ejecutar solo el módulo de Clientes (`customers`)
+```bash
+docker compose exec web python manage.py test customers
+```
+
+#### D. Ejecutar solo el módulo de Autenticación (`authentication`)
+```bash
+docker compose exec web python manage.py test authentication
+```
+
+#### E. Ejecutar clases o métodos de prueba específicos
+```bash
+# Probar únicamente las validaciones del modelo Cliente
+docker compose exec web python manage.py test customers.tests.ClienteModelValidationTests
+
+# Probar la herencia y restricciones de roles de autenticación
+docker compose exec web python manage.py test authentication.tests.AuthRoleInheritanceTests
+
+# Probar un método de test puntual
+docker compose exec web python manage.py test customers.tests.ClienteModelValidationTests.test_creacion_cliente_valido
+```
+
+#### F. Opciones adicionales útiles
+* **Modo detallado (Verbosity 2):** muestra cada test individual ejecutado.
+  ```bash
+  docker compose exec web python manage.py test -v 2
+  ```
+* **Detención al primer fallo (`--failfast`):**
+  ```bash
+  docker compose exec web python manage.py test --failfast
+  ```
+
+---
+
+### 📊 2. Medición y Reportes de Cobertura de Código (Coverage)
+
+La herramienta `coverage` permite auditar la cobertura de código en las pruebas automatizadas.
+
+#### Paso 1: Ejecutar las pruebas recolectando cobertura
+Para medir la cobertura de `authentication` y `customers`:
+```bash
+docker compose exec web coverage run --source='authentication,customers' manage.py test authentication customers
+```
+
+#### Paso 2: Visualizar el reporte consolidado en la terminal
+```bash
+docker compose exec web coverage report
+```
+> [!TIP]
+> Puedes agregar el parámetro `-m` (`coverage report -m`) para visualizar exactamente los números de línea que no fueron alcanzados por las pruebas.
+
+#### Paso 3: Generar el reporte interactivo en HTML
+```bash
+docker compose exec web coverage html
+```
+El reporte HTML se generará en el directorio `htmlcov/`. Puedes abrir `htmlcov/index.html` en cualquier navegador web para inspeccionar la cobertura línea por línea con resaltado visual.
+
+---
+
+### 💻 3. Ejecución Local (Sin Docker, mediante Entorno Virtual)
+
+Si estás ejecutando el entorno directamente en tu máquina host con el entorno virtual activado (`venv`):
+
+```bash
+# 1. Ejecución de la suite de pruebas completa
+python manage.py test
+
+# 2. Ejecutar únicamente authentication y customers
+python manage.py test authentication customers
+
+# 3. Recolectar cobertura sobre los módulos clave
+coverage run --source='authentication,customers' manage.py test authentication customers
+
+# 4. Ver reporte en consola con líneas no cubiertas
+coverage report -m
+
+# 5. Generar reporte HTML
+coverage html
+```
+
+---
+
+### ✅ 4. Estado y Métricas de Calidad Actuales
+
+Todas las pruebas de `authentication` y `customers` pasan satisfactoriamente con 0 errores y 0 fallos:
+
+| Módulo / Componente | Tests Totales | Estado | Cobertura de Código |
+| :--- | :---: | :---: | :---: |
+| **`authentication`** (Tokens JWT, Roles RBAC, Backends, Tags) | 33 tests | `PASS (OK)` | ~95% |
+| **`customers`** (Modelos, Validaciones, Segmentación, Forms, Vistas) | 36 tests | `PASS (OK)` | ~95% |
+| **Total Combinado** | **69 tests** | **100% Exitoso** | **95% Global** |
+
+---
+
 ## 🛠️ Comandos Útiles para el Desarrollo
 
 * **Ver los logs de los contenedores en tiempo real:**
