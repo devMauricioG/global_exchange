@@ -1127,4 +1127,50 @@ API SIFEN / DNIT
              └───────────────┘
 ```
 
-> **Alcance:** este documento conserva la terminología y los elementos visibles en el PDF. No se agregan puertos, dominios, certificados, endpoints, configuraciones de Gunicorn/Nginx, parámetros de PostgreSQL, detalles internos de Keycloak ni reglas de negocio que no estén representados explícitamente en el diagrama.
+> **Alcance:** este documento conserva la terminología y los elementos visibles en el PDF inicial e incorpora formalmente la especificación y matriz de casos de prueba del sistema conforme a los requerimientos del Sprint 2 (SCRUM-42).
+
+---
+
+# 28. MATRIZ FORMAL DE CASOS DE PRUEBA DE SOFTWARE (DIS_CPR_01)
+
+Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funcionalidades críticas incorporadas en el Sprint 2: la entidad intermedia de multi-representación `CustomerUserAssignment`, las reglas de negocio para la gestión y cambio dinámico de Cliente Activo en sesión, y las pruebas del Visualizador de Documentación Técnica integrada (Sphinx).
+
+---
+
+## 28.1. Módulo 1: Pruebas de la Entidad `CustomerUserAssignment` (Multi-Representación)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-CUA-001** | Creación exitosa de asignación Usuario ↔ Cliente | Usuario registrado en Keycloak/Django y Cliente registrado en `customers`. | 1. Instanciar `CustomerUserAssignment` con `user`, `customer`, `is_primary_representative=True`.<br>2. Ejecutar `save()`. | La asignación se persiste correctamente en base de datos con `is_active=True`, fecha `assigned_at` autogenerada y clave primaria única. | Alta |
+| **CPR-CUA-002** | Validación de unicidad de asignación (`unique_together`) | Existe previamente una asignación activa entre `user_1` y `customer_A`. | 1. Intentar registrar una segunda asignación con la misma tupla `(user_1, customer_A)`.<br>2. Ejecutar `save()`. | El sistema dispara una excepción de integridad `IntegrityError` impidiendo la duplicación del vínculo. | Crítica |
+| **CPR-CUA-003** | Regla de único Representante Principal por Cliente | Existe `user_1` asignado como `is_primary_representative=True` para `customer_A`. | 1. Registrar a `user_2` para `customer_A` marcándolo como `is_primary_representative=True`.<br>2. Invocar `save()` o `set_as_primary()`. | La asignación de `user_2` pasa a ser principal y automáticamente la asignación de `user_1` pasa a `is_primary_representative=False`. | Alta |
+| **CPR-CUA-004** | Soporte de Multi-Representación (Usuario con N Clientes) | Usuario `user_1` y tres clientes distintos `customer_A`, `customer_B`, `customer_C`. | 1. Crear asignación para `customer_A` (principal).<br>2. Crear asignación para `customer_B` y `customer_C` (secundarios). | Las 3 asignaciones coexisten de forma independiente permitiendo al usuario operar en nombre de cualquiera de ellos. | Alta |
+| **CPR-CUA-005** | Desactivación lógica de asignación (`is_active=False`) | Asignación activa entre `user_1` y `customer_A`. | 1. Invocar método `deactivate()`.<br>2. Verificar estado persistido. | El registro permanece en base de datos para fines de auditoría pero `is_active=False`, revocando de inmediato las facultades de operación. | Media |
+| **CPR-CUA-006** | Integridad referencial en cascada (`ON DELETE CASCADE`) | Asignación existente entre `user_1` y `customer_A`. | 1. Eliminar el registro del cliente `customer_A`. | Los registros dependientes en `CustomerUserAssignment` se eliminan automáticamente sin dejar claves huérfanas. | Alta |
+
+---
+
+## 28.2. Módulo 2: Pruebas de Reglas de Cambio de Cliente Activo en Sesión
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-ACT-001** | Selección automática de Cliente Principal al iniciar sesión | Usuario autenticado con asignación principal sobre `customer_A`. Clave `active_customer_id` no existe en sesión. | 1. Enviar solicitud HTTP a cualquier vista protegida.<br>2. Interceptar con `ActiveCustomerMiddleware`. | El middleware detecta la ausencia de cliente activo y asigna automáticamente `request.active_customer = customer_A` y persiste su ID en sesión. | Alta |
+| **CPR-ACT-002** | Cambio exitoso de Cliente Activo por usuario autorizado | Usuario autenticado con asignaciones válidas sobre `customer_A` (actual) y `customer_B`. | 1. Enviar petición `POST /customers/switch-active/<customer_B.id>/`. | El endpoint valida que existe asignación activa, actualiza `request.session['active_customer_id'] = customer_B.id` y redirige con HTTP 302 a la URL de origen. | Crítica |
+| **CPR-ACT-003** | Intento de cambio a Cliente no asignado (Protección IDOR) | Usuario autenticado `user_1`. Existe en el sistema `customer_X` sobre el cual `user_1` no tiene asignación. | 1. Enviar petición `POST /customers/switch-active/<customer_X.id>/`. | El controlador rechaza la solicitud de inmediato con código de estado **`HTTP 403 Forbidden`**, registrando advertencia de seguridad. | Crítica |
+| **CPR-ACT-004** | Intento de cambio a Cliente con asignación inactiva | `user_1` posee asignación sobre `customer_B` pero con `is_active=False`. | 1. Enviar petición `POST /customers/switch-active/<customer_B.id>/`. | La solicitud es denegada con **`HTTP 403 Forbidden`** al no encontrarse vigente la representación. | Alta |
+| **CPR-ACT-005** | Persistencia del Cliente Activo durante la navegación | Cliente activo establecido en `customer_B`. | 1. El usuario navega entre diferentes módulos (cotizaciones, clientes, tasas). | Todas las solicitudes conservan `request.active_customer = customer_B` sin requerir reelección. | Alta |
+| **CPR-ACT-006** | Inyección en plantillas mediante Context Processor | Usuario autenticado con 2 clientes asignados y `customer_B` activo. | 1. Renderizar `templates/base.html`. | El context processor inyecta `active_customer`, `user_assigned_customers` con 2 elementos y `has_multiple_customers=True`, desplegando el selector interactivo. | Media |
+
+---
+
+## 28.3. Módulo 3: Pruebas del Visualizador de Documentación (Sphinx HTML)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-DOC-001** | Acceso a la página principal de Documentación Técnica | Servidor web activo con documentación Sphinx compilada en `docs/sphinx/build/html/`. | 1. Enviar solicitud `GET /docs/` o `GET /docs/index.html`. | Respuesta **`HTTP 200 OK`**, cabecera `Content-Type: text/html` y cuerpo con el índice navegable de Sphinx. | Alta |
+| **CPR-DOC-002** | Servido de recursos estáticos asociados (CSS, JS, imágenes) | La página principal de Sphinx referencia `_static/css/theme.css` y `_static/js/theme.js`. | 1. Enviar solicitud `GET /docs/_static/css/theme.css`.<br>2. Enviar solicitud `GET /docs/_static/js/theme.js`. | Respuestas **`HTTP 200 OK`** con cabeceras `Content-Type: text/css` y `application/javascript` respectivamente. | Alta |
+| **CPR-DOC-003** | Prevención de ataques de Directory Traversal | Servidor ejecutando `ServeSphinxDocsView`. | 1. Enviar solicitud maliciosa `GET /docs/../../../../etc/passwd` o `GET /docs/..%2F..%2Fsettings.py`. | El validador de rutas normaliza el path y bloquea el escape del directorio base, retornando **`HTTP 404 Not Found`** o **`HTTP 403 Forbidden`**. | Crítica |
+| **CPR-DOC-004** | Manejo de archivo inexistente en documentación | Documentación compilada. | 1. Enviar solicitud `GET /docs/modulo_inexistente.html`. | El controlador captura `FileNotFoundError` y devuelve una respuesta limpia **`HTTP 404 Not Found`**. | Media |
+| **CPR-DOC-005** | Presencia y navegación del enlace en Menú Principal | Usuario visualiza cualquier página basada en `templates/base.html`. | 1. Inspeccionar la barra de navegación.<br>2. Hacer clic en el enlace "Documentación Técnica". | El enlace a `/docs/` está visible, estilizado acorde a la paleta institucional y redirige exitosamente a la documentación. | Media |
+| **CPR-DOC-006** | Control de acceso por roles (Auditor / Administrador) | Vista de documentación configurada con restricción de acceso. | 1. Usuario anónimo intenta acceder a `/docs/`.<br>2. Usuario con rol autorizado accede a `/docs/`. | El usuario anónimo es redirigido a login OIDC; el usuario autorizado accede transparentemente a la documentación. | Alta |
+
