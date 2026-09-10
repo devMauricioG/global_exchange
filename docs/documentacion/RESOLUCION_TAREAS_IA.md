@@ -17,6 +17,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-41** | Estandarización de Comandos de Tests y Cobertura en README | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-42** | Actualización de Documentos de Diseño UML y Casos de Prueba | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-43** | Documentación de Docstrings en Código Fuente y Sphinx | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
 
 ---
 
@@ -158,7 +159,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 
 * **Objetivo:** Redactar y estandarizar los docstrings estructurados (formato Sphinx/Google style) en las nuevas clases, servicios, context processors y vistas desarrolladas en el Sprint 2, actualizando la bitácora en `docs/chat_ia.md` y compilando el árbol HTML de Sphinx sin advertencias.
 * **Aportes y Solución con IA:**
-  * Creación de `AuthenticationConfig` con docstrings formales en `authentication/apps.py` y estructuración autodoc para el paquete `authentication`.
+  * Creación de `AuthenticationConfig` con docstrings formales en `authentication/apps.py` e incorporación autodoc para el paquete `authentication`.
   * Normalización de directivas reStructuredText y formato de listas en `customers/services.py` y `customers/urls.py` para prevenir errores de parsing en docutils.
   * Configuración de la extensión `sphinx.ext.viewcode` en `docs/sphinx/source/conf.py` para vincular el código fuente con la documentación generada.
   * Actualización de los archivos `.rst` del árbol de Sphinx (`authentication.rst`, `authentication.templatetags.rst`, `customers.rst`, `modules.rst`, `index.rst`).
@@ -178,3 +179,34 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/sphinx/source/customers.rst`
   * `docs/chat_ia.md`
   * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 10. SCRUM-55: Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (payments)
+
+* **Objetivo:** Construir la aplicación Django `payments` con el modelo `PaymentMethod`, vistas CBV web protegidas contra IDOR, endpoints API REST (JSON), formularios validados y plantillas dark-mode responsivas para la gestión segura de cuentas bancarias y billeteras de los clientes.
+* **Aportes y Solución con IA:**
+  * Definición del modelo `PaymentMethod` con clave foránea a `Cliente`, selector de `TipoMedio` (`TRANSFERENCIA`, `BILLETERA`, `TARJETA`, `EFECTIVO`, `OTRO`), datos de entidad bancaria, número de cuenta o teléfono, titular y banderas de predeterminado y activo.
+  * Implementación de la exclusividad atómica en `PaymentMethod.save()` para asegurar un único medio de pago predeterminado por cliente sin afectar a otros clientes.
+  * Arquitectura de seguridad con resolución de cliente activo (`get_current_cliente`) y filtrado estricto en `get_queryset()` para prevenir vulnerabilidades de Insecure Direct Object References (IDOR), respondiendo `HTTP 404` ante intentos de acceso o manipulación cruzada.
+  * Desarrollo de CBVs (`PaymentMethodListView`, `PaymentMethodCreateView`, `PaymentMethodUpdateView`, `PaymentMethodDeleteView`, `PaymentMethodSetDefaultView`, `PaymentMethodToggleActiveView`) y endpoints REST (`PaymentMethodListCreateAPIView`, `PaymentMethodDetailAPIView`).
+  * Diseño de interfaces con KPIs en tarjetas, filtros de búsqueda, selector de predeterminado y estados vacíos (*empty states*).
+  * Elaboración de 21 tests automatizados que elevan la suite completa a 96 tests aprobados y alta cobertura.
+* **Archivos intervenidos:**
+  * `payments/models.py`
+  * `payments/forms.py`
+  * `payments/views.py`
+  * `payments/urls.py`
+  * `payments/admin.py`
+  * `payments/apps.py`
+  * `payments/tests.py`
+  * `payments/migrations/0001_initial.py`
+  * `templates/payments/paymentmethod_list.html`
+  * `templates/payments/paymentmethod_form.html`
+  * `templates/payments/paymentmethod_confirm_delete.html`
+  * `config/settings/base.py`
+  * `config/urls.py`
+  * `templates/base.html`
+  * `docs/documentacion/SCRUM-55_CRUD_MEDIOS_DE_PAGO.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/chat_ia.md`

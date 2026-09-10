@@ -485,6 +485,13 @@
                         </li>
                     {% endif %}
 
+                    <!-- Opción Visible para usuarios autenticados: Medios de Pago -->
+                    <li>
+                        <a href="{% url 'payments:paymentmethod-list' %}" class="nav-link {% if '/payments/' in request.path %}active{% endif %}">
+                            💳 Medios de Pago
+                        </a>
+                    </li>
+
                     <!-- Opción Exclusiva para rol: Admin -->
                     {% if is_admin or user|has_role:"admin" %}
                         <li>
