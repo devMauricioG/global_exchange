@@ -82,6 +82,19 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 
 ## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini
 
+**Contexto:** Sprint 2 — Estandarización de comandos de ejecución de tests y verificación en README.md (SCRUM-41)
+
+**Resumen:**
+- Diagnostiqué la discrepancia entre la ejecución de pruebas por defecto en `manage.py` (que intentaba apuntar a PostgreSQL en dev) y el módulo optimizado in-memory `config.settings.test`, implementando en `manage.py` la detección y enrutamiento inteligente para invocaciones del subcomando `test`.
+- Incorporé la dependencia formal `coverage>=7.6.0` en `requirements.txt` y configuré las directivas de exclusión de artefactos generados en `.gitignore` y `.dockerignore` (`.coverage`, `htmlcov/`).
+- Documenté en `README.md` la guía estandarizada y detallada para pruebas unitarias con Docker Compose (`docker compose exec web python manage.py test`) y mediciones de cobertura de código (`coverage run`, `coverage report -m`, `coverage html`), incluyendo tanto la ejecución dockerizada como la local vía `venv`.
+- Ejecuté y validé la totalidad de pruebas de los módulos `authentication` y `customers` (69 pruebas con 100% de aprobación y 95% de cobertura global).
+- Estructuré la documentación formal de tareas resueltas con IA en `docs/documentacion/` (`SCRUM-41_ESTANDARIZACION_TESTS.md` y `RESOLUCION_TAREAS_IA.md`).
+
+---
+
+## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini
+
 **Contexto:** Sprint 2 — Actualización de los documentos de diseño UML y especificación de pruebas (SCRUM-42)
 
 **Resumen:**
@@ -93,4 +106,3 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Elaboré los documentos de registro `SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md` y `RESOLUCION_TAREAS_IA.md` en `docs/documentacion/` para mantener la trazabilidad ordenada exigida por el equipo.
 
 ---
-

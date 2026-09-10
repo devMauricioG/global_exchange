@@ -307,14 +307,105 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-top: 1.5rem;
-        flex-wrap: wrap;
-        gap: 1rem;
+    /* Representatives Section */
+    .representatives-section {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 0.875rem;
+        padding: 1.5rem;
+        margin-bottom: 1.25rem;
     }
 
-    .detail-actions-right {
+    .representatives-header {
         display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .representatives-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text-main);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .rep-list {
+        display: flex;
+        flex-direction: column;
         gap: 0.75rem;
+    }
+
+    .rep-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 1rem;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 0.625rem;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .rep-user-info {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .rep-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #3b82f6, #6366f1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        color: white;
+        font-size: 0.85rem;
+    }
+
+    .rep-name {
+        font-weight: 600;
+        color: var(--text-main);
+        font-size: 0.95rem;
+    }
+
+    .rep-email {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    .rep-badges {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .badge-rep-primary {
+        background: rgba(245, 158, 11, 0.15);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        padding: 0.2rem 0.55rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    .badge-rep-sec {
+        background: rgba(148, 163, 184, 0.12);
+        color: #94a3b8;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        padding: 0.2rem 0.55rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
     }
 </style>
 {% endblock %}
@@ -426,6 +517,61 @@
                 <div class="info-card-value">{{ cliente.get_segmentacion_display }}</div>
             </div>
         </div>
+    </div>
+
+    <!-- Representantes Autorizados (Multi-Representación) -->
+    <div class="representatives-section">
+        <div class="representatives-header">
+            <div class="representatives-title">
+                <span>👥 Representantes Autorizados</span>
+            </div>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">
+                {{ cliente.assignments.count }} asignado(s)
+            </span>
+        </div>
+
+        {% if cliente.assignments.exists %}
+            <div class="rep-list">
+                {% for assignment in cliente.assignments.all %}
+                    <div class="rep-item">
+                        <div class="rep-user-info">
+                            <div class="rep-avatar">
+                                {{ assignment.user.username|slice:":2"|upper }}
+                            </div>
+                            <div>
+                                <div class="rep-name">
+                                    {{ assignment.user.get_full_name|default:assignment.user.username }}
+                                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">(@{{ assignment.user.username }})</span>
+                                </div>
+                                <div class="rep-email">{{ assignment.user.email|default:"Sin correo electrónico" }}</div>
+                            </div>
+                        </div>
+
+                        <div class="rep-badges">
+                            {% if assignment.is_primary_representative %}
+                                <span class="badge-rep-primary">⭐ Titular / Principal</span>
+                            {% else %}
+                                <span class="badge-rep-sec">👤 Representante</span>
+                            {% endif %}
+
+                            {% if assignment.is_active %}
+                                <span class="badge-status-active">
+                                    <span class="pulse-dot"></span> Activo
+                                </span>
+                            {% else %}
+                                <span class="badge-status-inactive">
+                                    <span class="pulse-dot"></span> Inactivo
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div style="text-align: center; padding: 1.5rem; color: var(--text-muted); font-size: 0.9rem;">
+                No hay usuarios representantes vinculados actualmente a este cliente.
+            </div>
+        {% endif %}
     </div>
 
     <!-- Timestamps Bar -->

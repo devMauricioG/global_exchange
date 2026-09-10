@@ -25,3 +25,10 @@ Thumbs.db
 
 # Documentacion Sphinx
 docs/sphinx/build/
+
+# Cobertura de pruebas (Coverage)
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.pytest_cache/

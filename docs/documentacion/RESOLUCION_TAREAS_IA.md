@@ -114,15 +114,21 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 
 * **Objetivo:** Documentar exhaustivamente los comandos de ejecución de pruebas con Docker Compose y análisis de cobertura (`coverage`), garantizando que la totalidad de pruebas de `authentication` y `customers` pasen sin fallos.
 * **Aportes y Solución con IA:**
-  * Detección y corrección del desacople de settings en `manage.py`: enrutamiento automático a `config.settings.test` (SQLite in-memory) al invocar `test`.
-  * Inclusión de `coverage>=7.6.0` en `requirements.txt`, `.gitignore` y `.dockerignore`.
-  * Redacción de la sección detallada en `README.md` (comandos Docker Compose y local venv, suite completa, módulos y reportes de cobertura).
-  * Validación integral con 69 tests aprobados y 95% de cobertura de código.
+  * Detección y corrección del desacople de settings en `manage.py`: enrutamiento automático a `config.settings.test` (SQLite in-memory) al invocar `test`, eliminando la necesidad de parámetros largos y evitando conflictos con PostgreSQL.
+  * Inclusión formal del paquete `coverage>=7.6.0` en `requirements.txt`.
+  * Configuración de exclusiones en `.gitignore` y `.dockerignore` (`.coverage`, `htmlcov/`).
+  * Redacción de la sección detallada en `README.md`: guía paso a paso para Docker Compose, comandos para pruebas por módulo/clase/método, auditoría de cobertura por consola y reportes web interactivos en HTML, más instrucciones para entornos locales.
+  * Validación integral: 69 tests ejecutados con 100% de éxito y 95% de cobertura global de código.
+  * Redacción del documento técnico específico en `docs/documentacion/SCRUM-41_ESTANDARIZACION_TESTS.md`.
 * **Archivos intervenidos:**
   * `manage.py`
   * `requirements.txt`
+  * `.gitignore`
+  * `.dockerignore`
   * `README.md`
   * `docs/documentacion/SCRUM-41_ESTANDARIZACION_TESTS.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
 
 ---
 

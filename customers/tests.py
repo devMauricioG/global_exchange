@@ -508,7 +508,8 @@ class ClienteKeycloakVinculationTests(TestCase):
         self.assertIsNotNone(cliente)
         self.assertEqual(cliente.pk, cliente_previo.pk)
         self.assertEqual(cliente.keycloak_id, self.sub_uuid)
-        self.assertEqual(cliente.usuario, self.user)
+        self.assertTrue(cliente.assignments.filter(user=self.user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, self.user)
 
     def test_vincular_cliente_por_correo_existente(self):
         """Verifica que una ficha existente creada por un admin se vincule automáticamente por email."""
@@ -517,7 +518,6 @@ class ClienteKeycloakVinculationTests(TestCase):
             documento_ruc='88888-2',
             correo='carlos.keycloak@globalexchange.com',
             keycloak_id=None,
-            usuario=None,
         )
         from customers.services import vincular_cliente_keycloak
 
@@ -530,7 +530,8 @@ class ClienteKeycloakVinculationTests(TestCase):
         self.assertIsNotNone(cliente)
         self.assertEqual(cliente.pk, cliente_admin.pk)
         self.assertEqual(cliente.keycloak_id, self.sub_uuid)
-        self.assertEqual(cliente.usuario, self.user)
+        self.assertTrue(cliente.assignments.filter(user=self.user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, self.user)
 
     def test_crear_y_vincular_cliente_automatico(self):
         """Verifica que se cree una nueva ficha de cliente automáticamente si no existía previamente."""
@@ -561,7 +562,8 @@ class ClienteKeycloakVinculationTests(TestCase):
         self.assertEqual(cliente.nombre, 'Ana Gómez')
         self.assertEqual(cliente.correo, 'nuevo.cliente@globalexchange.com')
         self.assertEqual(cliente.keycloak_id, nuevo_sub)
-        self.assertEqual(cliente.usuario, nuevo_user)
+        self.assertTrue(cliente.assignments.filter(user=nuevo_user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, nuevo_user)
         self.assertTrue(cliente.is_active)
 
     def test_signal_keycloak_user_authenticated_dispatched(self):
@@ -578,7 +580,8 @@ class ClienteKeycloakVinculationTests(TestCase):
 
         cliente = Cliente.objects.filter(keycloak_id=signal_sub).first()
         self.assertIsNotNone(cliente)
-        self.assertEqual(cliente.usuario, self.user)
+        self.assertTrue(cliente.assignments.filter(user=self.user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, self.user)
 
     def test_signal_user_logged_in_triggers_vinculation(self):
         """Verifica que la señal nativa user_logged_in sincronice la ficha existente."""
@@ -604,7 +607,9 @@ class ClienteKeycloakVinculationTests(TestCase):
         )
 
         cliente_existente.refresh_from_db()
-        self.assertEqual(cliente_existente.usuario, login_user)
+        self.assertTrue(cliente_existente.assignments.filter(user=login_user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente_existente.representante_principal.user, login_user)
+
 
 
 class ClienteModelValidationTests(TestCase):
@@ -832,3 +837,165 @@ class ClienteFormValidationTests(TestCase):
 
         form = ClienteFilterForm(data={})
         self.assertTrue(form.is_valid(), msg=f'Errores inesperados: {form.errors}')
+
+
+class CustomerUserAssignmentTests(TestCase):
+    """
+    Suite de pruebas para el modelo CustomerUserAssignment y la relación de multi-representación
+    Usuario ↔ Clientes.
+    """
+
+    def setUp(self):
+        """Inicializa usuarios y clientes de prueba."""
+        self.user_titular = User.objects.create_user(
+            username='titular_corp',
+            email='titular@empresa.com',
+            first_name='Titular',
+            last_name='Corporativo',
+        )
+        self.user_gestor = User.objects.create_user(
+            username='gestor_corp',
+            email='gestor@empresa.com',
+            first_name='Gestor',
+            last_name='Financiero',
+        )
+        self.cliente_corp = Cliente.objects.create(
+            nombre='Holding Global S.A.',
+            documento_ruc='80012345-6',
+            correo='contacto@holdingglobal.com',
+            segmentacion=Cliente.Segmentacion.CORPORATIVO,
+        )
+        self.cliente_personal = Cliente.objects.create(
+            nombre='Titular Personal',
+            documento_ruc='1234567-8',
+            correo='titular.personal@test.com',
+            segmentacion=Cliente.Segmentacion.MINORISTA,
+        )
+
+    def test_user_represents_multiple_customers(self):
+        """Verifica que un único usuario pueda representar a múltiples clientes (1 Usuario -> N Clientes)."""
+        from customers.models import CustomerUserAssignment
+
+        asig1 = CustomerUserAssignment.objects.create(
+            customer=self.cliente_personal,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        asig2 = CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=True,
+        )
+
+        self.assertEqual(self.user_titular.customer_assignments.count(), 2)
+        self.assertIn(asig1, self.user_titular.customer_assignments.all())
+        self.assertIn(asig2, self.user_titular.customer_assignments.all())
+        self.assertEqual(self.user_titular.clientes_representados.count(), 2)
+
+    def test_customer_has_multiple_representatives(self):
+        """Verifica que un cliente corporativo pueda tener múltiples usuarios representantes (1 Cliente -> N Usuarios)."""
+        from customers.models import CustomerUserAssignment
+
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_gestor,
+            is_primary_representative=False,
+            is_active=True,
+        )
+
+        self.assertEqual(self.cliente_corp.assignments.count(), 2)
+        self.assertEqual(self.cliente_corp.usuarios.count(), 2)
+        self.assertEqual(self.cliente_corp.representante_principal.user, self.user_titular)
+
+    def test_unique_constraint_customer_user(self):
+        """Verifica que no se puedan duplicar asignaciones para el mismo par (customer, user)."""
+        from django.db import IntegrityError
+        from customers.models import CustomerUserAssignment
+
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+        )
+
+        with self.assertRaises(IntegrityError):
+            CustomerUserAssignment.objects.create(
+                customer=self.cliente_corp,
+                user=self.user_titular,
+                is_primary_representative=False,
+            )
+
+    def test_assignment_is_active_toggle(self):
+        """Verifica el comportamiento al desactivar una asignación de representación."""
+        from customers.models import CustomerUserAssignment
+
+        asig = CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=False,
+        )
+
+        self.assertIsNone(self.cliente_corp.representante_principal)
+        self.assertEqual(self.cliente_corp.assignments.filter(is_active=True).count(), 0)
+
+        asig.is_active = True
+        asig.save()
+        self.assertEqual(self.cliente_corp.representante_principal.user, self.user_titular)
+
+    def test_assignment_str_representation(self):
+        """Verifica la representación en string del modelo CustomerUserAssignment."""
+        from customers.models import CustomerUserAssignment
+
+        asig_principal = CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        asig_secundaria = CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_gestor,
+            is_primary_representative=False,
+            is_active=False,
+        )
+
+        self.assertIn('Principal', str(asig_principal))
+        self.assertIn('Activo', str(asig_principal))
+        self.assertIn('Secundario', str(asig_secundaria))
+        self.assertIn('Inactivo', str(asig_secundaria))
+
+    def test_serialize_cliente_includes_assignments(self):
+        """Verifica que _serialize_cliente serialice correctamente las asignaciones y el representante principal."""
+        from customers.models import CustomerUserAssignment
+        from customers.views import _serialize_cliente
+
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_titular,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_corp,
+            user=self.user_gestor,
+            is_primary_representative=False,
+            is_active=True,
+        )
+
+        data = _serialize_cliente(self.cliente_corp)
+        self.assertEqual(data['id'], self.cliente_corp.id)
+        self.assertEqual(data['usuario_id'], self.user_titular.id)
+        self.assertEqual(data['representante_principal_id'], self.user_titular.id)
+        self.assertEqual(len(data['assignments']), 2)
+        self.assertEqual(data['assignments'][0]['user_id'], self.user_titular.id)
+        self.assertTrue(data['assignments'][0]['is_primary_representative'])
+
