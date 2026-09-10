@@ -29,7 +29,7 @@ from django.views.generic import (
 )
 
 from .forms import ClienteFilterForm, ClienteForm
-from .models import Cliente
+from .models import Cliente, CustomerUserAssignment
 
 
 def _serialize_cliente(cliente: Cliente) -> Dict[str, Any]:
@@ -533,3 +533,41 @@ class ClienteDetailAPIView(View):
             {'message': f'Cliente con ID {cliente_id} eliminado exitosamente.'},
             status=200
         )
+
+class SwitchActiveCustomerView(LoginRequiredMixin, View):
+    """
+    Controlador web para el cambio dinámico del cliente activo en sesión.
+
+    Verifica que el usuario autenticado posea una asignación activa sobre
+    el cliente solicitado (:class:`~customers.models.CustomerUserAssignment`)
+    antes de actualizar ``active_customer_id`` en ``request.session``,
+    y redirige de vuelta a la vista de origen.
+
+    Ruta: ``/customers/cambiar-cliente/<int:customer_id>/``
+    """
+
+    def post(self, request: HttpRequest, customer_id: int) -> HttpResponse:
+        """
+        Procesa el cambio de cliente activo vía solicitud HTTP POST.
+
+        :param request: Objeto de solicitud HTTP.
+        :type request: django.http.HttpRequest
+        :param customer_id: Identificador del cliente a activar.
+        :type customer_id: int
+        :raises django.http.Http404: Si el usuario no posee una asignación activa sobre el cliente.
+        :return: Redirección a la página de origen (o inicio, si no hay referer).
+        :rtype: django.http.HttpResponse
+        """
+        assignment = get_object_or_404(
+            CustomerUserAssignment,
+            customer_id=customer_id,
+            user=request.user,
+            is_active=True,
+            customer__is_active=True,
+        )
+
+        request.session['active_customer_id'] = assignment.customer_id
+        messages.success(request, f'Cliente activo cambiado a "{assignment.customer.nombre}".')
+
+        next_url = request.META.get('HTTP_REFERER', reverse_lazy('home'))
+        return redirect(next_url)
