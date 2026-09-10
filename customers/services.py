@@ -26,13 +26,14 @@ def vincular_cliente_keycloak(
     mediante una asignación de representación :class:`~customers.models.CustomerUserAssignment`.
 
     Estrategia de vinculación:
-    1. Si se provee `keycloak_id` (claim ``sub``), busca una ficha existente con dicho identificador.
+
+    1. Si se provee ``keycloak_id`` (claim ``sub``), busca una ficha existente con dicho identificador.
        Si existe, asegura la asignación activa como representante principal con el usuario Django.
-    2. Si no se encuentra por `keycloak_id` y se dispone de un `email`, busca por coincidencia exacta
-       (insensible a mayúsculas/minúsculas) en el campo `correo`. Si existe la ficha, le asigna el
-       `keycloak_id` y crea o reactiva la asignación del usuario.
+    2. Si no se encuentra por ``keycloak_id`` y se dispone de un ``email``, busca por coincidencia exacta
+       (insensible a mayúsculas/minúsculas) en el campo ``correo``. Si existe la ficha, le asigna el
+       ``keycloak_id`` y crea o reactiva la asignación del usuario.
     3. Si no existe ninguna ficha previa, crea una nueva entidad :class:`~customers.models.Cliente`
-       utilizando los datos extraídos de las claims de Keycloak (`nombre`, `correo`, `keycloak_id`, etc.)
+       utilizando los datos extraídos de las claims de Keycloak (``nombre``, ``correo``, ``keycloak_id``, etc.)
        y registra la asignación de representación principal para el usuario.
 
     :param user: Instancia del usuario autenticado en Django.

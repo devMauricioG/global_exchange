@@ -1,19 +1,26 @@
-.. Global Exchange documentation master file, created by
-   sphinx-quickstart on Mon Aug 31 00:37:27 2026.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. Global Exchange documentation master file.
 
-Global Exchange documentation
-=============================
+Documentación de Global Exchange
+================================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+Bienvenido a la documentación técnica del sistema **Global Exchange**, plataforma digital de cambio de divisas y gestión comercial.
 
+Esta documentación técnica es generada automáticamente a partir de los docstrings estructurados (formato Sphinx / Google style) presentes en el código fuente.
+
+Módulos Principales
+-------------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Índice de Módulos:
 
    modules
+
+Índices y Tablas
+----------------
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+
 

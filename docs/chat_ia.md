@@ -106,3 +106,16 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Elaboré los documentos de registro `SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md` y `RESOLUCION_TAREAS_IA.md` en `docs/documentacion/` para mantener la trazabilidad ordenada exigida por el equipo.
 
 ---
+
+## Pablo Elizeche — 09/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Documentación de docstrings en código fuente y actualización de Sphinx (SCRUM-43)
+
+**Resumen:**
+- Realicé una auditoría exhaustiva de docstrings en todo el código fuente del backend (`authentication`, `customers`, `config`), estandarizando el formato Sphinx/Google Style para garantizar una documentación técnica de primer nivel.
+- Creación de la configuración de aplicación `AuthenticationConfig` en `authentication/apps.py` e incorporación completa de la documentación del paquete `authentication` al índice maestro de Sphinx (`docs/sphinx/source/authentication.rst` y `authentication.templatetags.rst`).
+- Actualización de la estructura de documentación en `docs/sphinx/source/customers.rst`, `modules.rst` e `index.rst`, vinculando todos los submódulos (`admin`, `apps`, `forms`, `models`, `services`, `signals`, `tests`, `urls`, `views`).
+- Integración de extensiones Sphinx (`sphinx.ext.viewcode`, `sphinx.ext.napoleon`, `sphinx.ext.autodoc`), corrección de directivas rst de docstrings (formato de roles e indentaciones) y resolución de advertencias de compilación para lograr una salida limpia (0 errores, 0 advertencias).
+- Recompilación exitosa del árbol completo de documentación HTML en `docs/sphinx/build/html/` y verificación de consistencia mediante la ejecución de la suite de pruebas automatizadas del proyecto.
+
+---

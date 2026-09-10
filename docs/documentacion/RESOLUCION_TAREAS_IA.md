@@ -16,6 +16,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-31** | Configuración de Sphinx y Bitácora IA (docs/chat_ia.md) | Sprint 1 | Felipe Rivas / Pablo Elizeche | Finalizado |
 | **SCRUM-41** | Estandarización de Comandos de Tests y Cobertura en README | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-42** | Actualización de Documentos de Diseño UML y Casos de Prueba | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-43** | Documentación de Docstrings en Código Fuente y Sphinx | Sprint 2 | Pablo Elizeche | Finalizado |
 
 ---
 
@@ -150,3 +151,30 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/chat_ia.md`
+
+---
+
+### 9. SCRUM-43: Documentación de docstrings en código fuente y actualización de Sphinx
+
+* **Objetivo:** Redactar y estandarizar los docstrings estructurados (formato Sphinx/Google style) en las nuevas clases, servicios, context processors y vistas desarrolladas en el Sprint 2, actualizando la bitácora en `docs/chat_ia.md` y compilando el árbol HTML de Sphinx sin advertencias.
+* **Aportes y Solución con IA:**
+  * Creación de `AuthenticationConfig` con docstrings formales en `authentication/apps.py` y estructuración autodoc para el paquete `authentication`.
+  * Normalización de directivas reStructuredText y formato de listas en `customers/services.py` y `customers/urls.py` para prevenir errores de parsing en docutils.
+  * Configuración de la extensión `sphinx.ext.viewcode` en `docs/sphinx/source/conf.py` para vincular el código fuente con la documentación generada.
+  * Actualización de los archivos `.rst` del árbol de Sphinx (`authentication.rst`, `authentication.templatetags.rst`, `customers.rst`, `modules.rst`, `index.rst`).
+  * Validación de compilación limpia de la documentación HTML y actualización de la bitácora IA.
+* **Archivos intervenidos:**
+  * `authentication/__init__.py`
+  * `authentication/apps.py`
+  * `authentication/urls.py`
+  * `customers/__init__.py`
+  * `customers/services.py`
+  * `customers/urls.py`
+  * `docs/sphinx/source/conf.py`
+  * `docs/sphinx/source/index.rst`
+  * `docs/sphinx/source/modules.rst`
+  * `docs/sphinx/source/authentication.rst`
+  * `docs/sphinx/source/authentication.templatetags.rst`
+  * `docs/sphinx/source/customers.rst`
+  * `docs/chat_ia.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
