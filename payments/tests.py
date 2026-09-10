@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from customers.models import Cliente
+from customers.models import Cliente, CustomerUserAssignment
 from payments.forms import PaymentMethodFilterForm, PaymentMethodForm
 from payments.models import PaymentMethod
 
@@ -34,12 +34,17 @@ class PaymentMethodModelTestCase(TestCase):
             password='password123',
         )
         self.cliente1 = Cliente.objects.create(
-            usuario=self.user1,
             nombre='Empresa Uno S.A.',
             documento_ruc='80011111-1',
             correo='empresa1@test.com',
             telefono='0981111111',
             segmentacion=Cliente.Segmentacion.CORPORATIVO,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente1,
+            user=self.user1,
+            is_primary_representative=True,
+            is_active=True,
         )
 
         self.user2 = User.objects.create_user(
@@ -48,12 +53,17 @@ class PaymentMethodModelTestCase(TestCase):
             password='password123',
         )
         self.cliente2 = Cliente.objects.create(
-            usuario=self.user2,
             nombre='Empresa Dos S.A.',
             documento_ruc='80022222-2',
             correo='empresa2@test.com',
             telefono='0982222222',
             segmentacion=Cliente.Segmentacion.MINORISTA,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente2,
+            user=self.user2,
+            is_primary_representative=True,
+            is_active=True,
         )
 
     def test_payment_method_creation_and_str(self):
@@ -209,10 +219,15 @@ class PaymentMethodViewsTestCase(TestCase):
             password='Password123!',
         )
         self.cliente1 = Cliente.objects.create(
-            usuario=self.user1,
             nombre='Cliente Uno',
             documento_ruc='10001-1',
             correo='user1@ge.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente1,
+            user=self.user1,
+            is_primary_representative=True,
+            is_active=True,
         )
 
         self.user2 = User.objects.create_user(
@@ -221,10 +236,15 @@ class PaymentMethodViewsTestCase(TestCase):
             password='Password123!',
         )
         self.cliente2 = Cliente.objects.create(
-            usuario=self.user2,
             nombre='Cliente Dos',
             documento_ruc='20002-2',
             correo='user2@ge.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente2,
+            user=self.user2,
+            is_primary_representative=True,
+            is_active=True,
         )
 
         self.pm1 = PaymentMethod.objects.create(
@@ -282,7 +302,8 @@ class PaymentMethodViewsTestCase(TestCase):
     def test_first_payment_method_becomes_default(self):
         """Si un cliente no tenía medios de pago, el primero que crea se marca como predeterminado."""
         user3 = User.objects.create_user(username='user3', email='user3@test.com', password='pwd')
-        cliente3 = Cliente.objects.create(usuario=user3, nombre='Cliente 3', documento_ruc='333-3', correo='user3@test.com')
+        cliente3 = Cliente.objects.create(nombre='Cliente 3', documento_ruc='333-3', correo='user3@test.com')
+        CustomerUserAssignment.objects.create(customer=cliente3, user=user3, is_primary_representative=True, is_active=True)
         self.client.force_login(user3)
         data = {
             'tipo_medio': PaymentMethod.TipoMedio.TRANSFERENCIA,
@@ -366,10 +387,15 @@ class PaymentMethodAPITestCase(TestCase):
             password='password123',
         )
         self.cliente = Cliente.objects.create(
-            usuario=self.user,
             nombre='API Cliente',
             documento_ruc='777777-7',
             correo='api@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente,
+            user=self.user,
+            is_primary_representative=True,
+            is_active=True,
         )
         self.pm = PaymentMethod.objects.create(
             cliente=self.cliente,

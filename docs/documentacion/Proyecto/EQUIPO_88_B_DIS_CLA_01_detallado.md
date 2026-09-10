@@ -100,65 +100,143 @@ El modelo establece relaciones entre `Customer` y:
 
 # 4. Clase `CustomerUserAssignment`
 
-Esta clase representa la **asignación entre un cliente y un usuario**.
+Esta clase representa la **asignación y multi-representación entre un cliente y un usuario**.
 
-Por su estructura y por las relaciones del diagrama, funciona como una entidad de asociación entre `Customer` y `User`.
+Por su estructura y por las relaciones del dominio, funciona como la entidad intermedia de asociación fundamental entre `Customer` y `User`, permitiendo que un mismo usuario represente legal u operativamente a múltiples clientes (personas físicas o jurídicas), y que un cliente corporativo posea múltiples representantes autorizados.
 
 ## Atributos
 
-| Atributo | Tipo | Descripción |
+| Atributo | Tipo | Restricción | Descripción |
+|---|---|---|---|
+| `id` | `BigInt` | PK, Auto | Identificador único de la asignación |
+| `user` | `ForeignKey(User)` | NOT NULL, ON DELETE CASCADE | Usuario autenticado registrado en el sistema / Keycloak |
+| `customer` | `ForeignKey(Customer)` | NOT NULL, ON DELETE CASCADE | Cliente (persona física o jurídica) representado |
+| `is_primary_representative` | `Boolean` | Default: `False` | Indica si el usuario es el representante principal del cliente |
+| `is_active` | `Boolean` | Default: `True` | Estado de vigencia de la asignación (permite revocación lógica) |
+| `role_in_company` | `String(50)` | Nullable | Rol o cargo de representación (ej. "Representante Legal", "Apoderado", "Operador") |
+| `assigned_at` | `DateTime` | Auto_now_add | Fecha y hora de creación de la asignación |
+
+### Restricciones de Integridad
+
+- **Unicidad de Asignación (`unique_together`):** Un par `(user, customer)` no puede registrarse más de una vez.
+- **Unicidad de Representante Principal:** Para un mismo `customer`, solo puede existir una única asignación activa con `is_primary_representative = True`.
+- **Integridad Referencial:** Eliminación en cascada (`CASCADE`): si se elimina el cliente o el usuario, sus asignaciones intermedias son depuradas automáticamente.
+
+## Métodos y Operaciones de la Clase
+
+| Método | Retorno | Descripción |
 |---|---|---|
-| `id` | `BigInt` | Identificador de la asignación |
-| `is_primary_representative` | `Boolean` | Indica si el usuario es el representante principal |
-| `assigned_at` | `DateTime` | Fecha y hora de asignación |
+| `clean()` | `void` | Valida que solo exista un representante principal activo por cliente. |
+| `save(*args, **kwargs)` | `void` | Ejecuta validaciones de integridad y desmarca representantes principales previos si este se define como principal. |
+| `set_as_primary()` | `void` | Asigna `is_primary_representative = True` a esta instancia y actualiza a `False` las demás del cliente. |
+| `deactivate()` | `void` | Inactiva la asignación (`is_active = False`) revocando permisos operativos inmediatos. |
+| `activate()` | `void` | Reactiva la asignación (`is_active = True`). |
+| `can_transact()` | `Boolean` | Retorna `True` si la asignación está activa y el cliente asociado está habilitado. |
 
 ### Representación
 
 ```text
 CustomerUserAssignment
- ├── id
- ├── is_primary_representative
- └── assigned_at
+ ├── id: BigInt
+ ├── user: ForeignKey(User)
+ ├── customer: ForeignKey(Customer)
+ ├── is_primary_representative: Boolean
+ ├── is_active: Boolean
+ ├── role_in_company: String
+ └── assigned_at: DateTime
+ + clean(): void
+ + save(): void
+ + set_as_primary(): void
+ + deactivate(): void
+ + activate(): void
+ + can_transact(): Boolean
 ```
 
-## Relación con `User`
-
-El diagrama muestra:
+## Relación con `User` y `Customer`
 
 ```text
-User 1 ───────── 0..* CustomerUserAssignment
+       1                                0..*
+┌─────────────┐               ┌────────────────────────┐
+│    User     │───────────────│ CustomerUserAssignment │
+└─────────────┘               └────────────────────────┘
+                                           │ 0..*
+                                           │
+                                           │ 1
+                              ┌────────────────────────┐
+                              │        Customer        │
+                              └────────────────────────┘
 ```
 
 Esto significa:
+- Un `User` puede tener cero o muchas asignaciones a diferentes clientes (`0..*`).
+- Un `Customer` puede tener cero o muchos usuarios asignados como representantes (`0..*`).
+- Cada registro de `CustomerUserAssignment` vincula un único `User` con un único `Customer`.
 
-- Un `User` puede tener cero o muchas asignaciones.
-- Cada `CustomerUserAssignment` se relaciona con un único `User`.
+---
 
-## Relación con `Customer`
+## 4.1. Arquitectura y Reglas para la Gestión de Cliente Activo
 
-El diagrama muestra:
+Para posibilitar la navegación y operativa contextualizada según el cliente que el usuario esté representando en cada momento, se definen las siguientes clases y componentes de soporte:
 
-```text
-Customer 1 ────── 0..* CustomerUserAssignment
-```
+### 1. `ActiveCustomerMiddleware`
+Middleware que intercepta cada solicitud HTTP para resolver, validar e inyectar el cliente activo en el objeto `request`.
 
-Esto significa:
+* **Atributos:**
+  * `get_response: Callable`
+* **Métodos:**
+  * `__call__(request) -> HttpResponse`: ciclo de vida estándar de middleware Django.
+  * `process_request(request) -> None`:
+    1. Verifica si `request.user.is_authenticated`.
+    2. Consulta la clave `active_customer_id` almacenada en `request.session`.
+    3. Si existe, valida contra la base de datos que exista un `CustomerUserAssignment` con `user=request.user`, `customer_id=active_customer_id` y `is_active=True`.
+    4. Si es válida, asigna `request.active_customer = customer`.
+    5. Si no es válida o no existe valor en sesión, aplica la regla de resolución por defecto:
+       - Selecciona el cliente donde el usuario sea `is_primary_representative=True`.
+       - Si no existe principal, selecciona el primer cliente activo asignado.
+       - Si el usuario no tiene asignaciones, asigna `request.active_customer = None`.
+    6. Persiste el ID resuelto en `request.session['active_customer_id']`.
 
-- Un `Customer` puede tener cero o muchas asignaciones.
-- Cada `CustomerUserAssignment` se relaciona con un único `Customer`.
+### 2. `active_customer_context_processor`
+Context processor transversal que expone el contexto de cliente activo a todas las plantillas Django:
 
-### Modelo conceptual
+* **Valores inyectados al contexto:**
+  * `active_customer`: instancia del `Customer` actualmente activo o `None`.
+  * `user_assigned_customers`: lista de clientes activos asignados al usuario autenticado (para poblar el selector dropdown en `base.html`).
+  * `has_multiple_customers`: booleano que indica si el dropdown selector debe desplegarse.
 
-```text
-             1                 0..*
-User ───────────── CustomerUserAssignment
-                       ▲
-                       │
-             0..*      │      1
-Customer ──────────────┘
-```
+### 3. `CustomerSwitchActiveView`
+Controlador (CBV o View) responsable del cambio dinámico de cliente activo:
 
-Esta estructura permite que un cliente pueda estar asociado con varios usuarios y que un usuario pueda estar asociado con varios clientes, utilizando `CustomerUserAssignment` como entidad intermedia.
+* **Método:** `POST /customers/switch-active/<int:customer_id>/`
+* **Reglas de Seguridad y Validación:**
+  * Requiere usuario autenticado.
+  * Comprueba rigurosamente: `CustomerUserAssignment.objects.filter(user=request.user, customer_id=customer_id, is_active=True).exists()`.
+  * **Si el usuario NO posee asignación activa sobre el cliente solicitado:** Rechaza la petición con código **`HTTP 403 Forbidden`** (Prevención de suplantación IDOR).
+  * **Si la asignación es válida:** Actualiza `request.session['active_customer_id'] = customer_id`.
+  * Redirige al usuario a la página de origen (`HTTP_REFERER`) o al dashboard principal con un mensaje de éxito.
+
+---
+
+## 4.2. Componentes del Visualizador de Documentación Técnica (Sphinx)
+
+Para integrar la documentación técnica HTML autogenerada por Sphinx dentro del portal de Global Exchange (SCRUM-32 / SCRUM-35 / SCRUM-36), se definen las siguientes clases de control y enrutamiento:
+
+### 1. `ServeSphinxDocsView` (Vista de Documentación)
+Vista especializada en servir de forma segura los archivos estáticos HTML generados en `docs/sphinx/build/html/`.
+
+* **Atributos:**
+  * `docs_root_path: Path`: Ruta absoluta/relativa al directorio de compilación HTML de Sphinx.
+* **Métodos:**
+  * `dispatch(request, *args, **kwargs) -> HttpResponse`: Verifica permisos de acceso (restringido a usuarios autenticados o con rol de Auditor/Administrador).
+  * `get(request, path='index.html') -> HttpResponse`:
+    1. Normaliza la ruta solicitada para prevenir ataques de Path Traversal (`../`).
+    2. Si `path` está vacío o es un directorio, resuelve hacia `index.html`.
+    3. Detecta el tipo MIME correspondiente (`text/html`, `text/css`, `application/javascript`, `image/png`, `image/svg+xml`).
+    4. Retorna un `FileResponse` o `HttpResponse` con los headers adecuados de caché y seguridad.
+    5. Si el archivo no existe, retorna una respuesta **`HTTP 404 Not Found`** controlada.
+
+### 2. Integración en Navegación (`templates/base.html`)
+El enlace a `/docs/` se renderiza de forma responsiva en la barra superior de navegación, permitiendo al equipo y a los auditores acceder a la documentación viva del sistema directamente desde la interfaz web.
 
 ---
 

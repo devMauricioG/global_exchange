@@ -2,8 +2,12 @@ import os
 import sys
 
 def main():
-    # Asegúrate de que termine en .settings.dev
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+    # Si se invoca el comando test sin especificar --settings, usar por defecto config.settings.test
+    if 'test' in sys.argv and not any(arg.startswith('--settings') for arg in sys.argv):
+        os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings.test'
+    else:
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

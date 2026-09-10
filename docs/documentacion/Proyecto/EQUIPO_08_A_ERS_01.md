@@ -181,8 +181,12 @@ No aplican por el momento.
   - **Descripción:** Los usuarios ingresan sus datos de registro. El sistema delega la creación del usuario en el Realm de Keycloak, asignando por defecto la acción requerida de verificación de correo (_Verify Email_) y el rol base Cliente.
 - **RF03: Asignación de Representación de Clientes desde la Administración**
   - **Descripción:** Interfaz exclusiva para que el Administrador vincule un registro de Cliente (persona física o jurídica) con el identificador único del usuario en Keycloak (Keycloak User ID / sub).
-- **RF04 y RF05: Selección y Cambio de Cliente Activo**
-  - **Descripción:** Tras autenticarse vía Keycloak, si el usuario posee múltiples clientes asignados, se despliega un selector obligatorio para determinar sobre cuál cuenta operará en la sesión.
+- **RF04 y RF05: Selección y Cambio Dinámico de Cliente Activo en Sesión**
+  - **Descripción:** Tras autenticarse vía Keycloak, si el usuario posee múltiples clientes asignados en `CustomerUserAssignment`, el sistema despliega un menú interactivo en la barra de navegación para alternar el cliente activo. Las reglas operativas son:
+    - `ActiveCustomerMiddleware` intercepta cada solicitud, lee `active_customer_id` de la sesión y valida que el usuario posea una asignación activa vigente.
+    - Si no existe selección previa, asigna automáticamente como cliente activo al representante principal (`is_primary_representative=True`).
+    - Al cambiar de cliente en el selector, el endpoint valida la pertenencia y actualiza la sesión; en caso de intento de acceso a un cliente no asignado, el sistema deniega el cambio retornando código **`HTTP 403 Forbidden`**.
+    - Todas las transacciones, cotizaciones y consultas operativas se ejecutan contextualizadas al cliente activo seleccionado.
 - **RF06: Visualización Gráfica de la Evolución de Tasas**
   - **Descripción:** Gráficos interactivos de líneas o barras para analizar tendencias de divisas por día, semana, mes y año.
 - **RF07: Simulación de Conversión (Cotizador)**
@@ -214,8 +218,11 @@ No aplican por el momento.
   - **Descripción:** Habilitación/deshabilitación independiente de compra/venta de divisas por modalidades.
 - **RF-20: Ampliación del Catálogo de Monedas Admitidas**
   - **Descripción:** Soporte para USD, EUR, PYG, BRL, ARS y GBP.
-- **RF-21: Módulo Administrativo para Asociación de Usuarios a Clientes**
-  - **Descripción:** Interfaz para asociar uno o más usuarios de Keycloak a una cuenta de Cliente.
+- **RF-21: Multi-Representación y Asignación de Usuarios a Clientes (CustomerUserAssignment)**
+  - **Descripción:** Modelo de datos asociativo intermedio que formaliza la relación muchos-a-muchos ($N:M$) entre usuarios autenticados y entidades `Customer`:
+    - Permite que un usuario represente a múltiples clientes y que un cliente corporativo tenga múltiples representantes autorizados.
+    - Campos obligatorios: `user`, `customer`, `is_primary_representative` (máximo uno activo por cliente), `assigned_at`, `is_active` y rol corporativo.
+    - Restricción de unicidad estricta para evitar asignaciones duplicadas `unique_together = ('user', 'customer')`.
 - **RF-22: Apertura y Asignación de Cajas Presenciales**
   - **Descripción:** Registro de fondo inicial en efectivo por divisa por parte del Cajero autenticado.
 - **RF-23: Cierre y Arqueo de Caja Físico**
@@ -226,6 +233,12 @@ No aplican por el momento.
   - **Descripción:** La aplicación redirigirá las solicitudes de login a Keycloak utilizando OpenID Connect (_Authorization Code Flow con PKCE_). Tras la autenticación exitosa, el backend/gateway validará el token JWT de forma apátrida contra el endpoint JWKS.
 - **RF-26: Cierre de Sesión Único (Single Logout - SLO)**
   - **Descripción:** Al presionar "Cerrar Sesión", el sistema invocará el endpoint de logout de Keycloak (/openid-connect/logout) enviando el refresh_token, invalidando la sesión centralizada del usuario.
+- **RF-27: Visualizador Integrado de Documentación Técnica (Sphinx HTML)**
+  - **Descripción:** El sistema debe servir y exponer de manera integrada y segura la documentación técnica del código autogenerada por Sphinx desde la ruta `/docs/`:
+    - Entrega de páginas HTML y recursos estáticos (`.css`, `.js`, imágenes) con resolución de tipos MIME adecuados.
+    - Mitigación de vulnerabilidades de _Path Traversal_ sobre el árbol de compilación `docs/sphinx/build/html/`.
+    - Integración del acceso directo mediante enlace visible en la barra de navegación (`templates/base.html`).
+
 
 #### 4.3. Requerimientos No Funcionales
 
@@ -258,4 +271,6 @@ No aplican por el momento.
 | 16/08/2026 | \-                 | 2.0                | Implementación de la NCR v1.0. Cobertura híbrida (operaciones en efectivo y presenciales), Módulo de Cajas (RF-22 a RF-24), Clientes (RF-17), Notas de Crédito (RF-18), ampliación de monedas (RF-20), asociación de usuarios (RF-03, RF-21) y estructuración a 8 módulos. | Equipo de Ingeniería de Software / Cátedra                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
 | 17/08/2026 | \-                 | 3.0                | Incorporación de la Nota de Cambio de Requerimientos (NCR) para Autenticación y Autorización Delegada en Keycloak IAM (OIDC, OAuth 2.0, JWT, PKCE, RBAC, Single Logout). Eliminación del almacenamiento local de contraseñas e inclusión de RF-25, RF-26 y RNF-SEC.        | Equipo de Ingeniería de Software / Cátedra                       |
+| ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
+| 08/09/2026 | \-                 | 3.1                | Actualización Sprint 2 (SCRUM-42): formalización de la entidad intermedia CustomerUserAssignment (RF-21), reglas de selección y cambio de Cliente Activo en sesión (RF-04/05) e inclusión del Visualizador de Documentación Técnica Sphinx en portal web (RF-27).        | Pablo Elizeche / Equipo IS2                                      |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |

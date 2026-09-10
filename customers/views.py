@@ -41,6 +41,18 @@ def _serialize_cliente(cliente: Cliente) -> Dict[str, Any]:
     :return: Diccionario con la estructura JSON representativa del cliente.
     :rtype: dict
     """
+    rep_principal = cliente.representante_principal
+    assignments = [
+        {
+            'id': a.id,
+            'user_id': a.user_id,
+            'username': getattr(a.user, 'username', str(a.user)),
+            'is_primary_representative': a.is_primary_representative,
+            'is_active': a.is_active,
+            'assigned_at': a.assigned_at.isoformat() if a.assigned_at else None,
+        }
+        for a in cliente.assignments.all()
+    ]
     return {
         'id': cliente.id,
         'nombre': cliente.nombre,
@@ -48,13 +60,16 @@ def _serialize_cliente(cliente: Cliente) -> Dict[str, Any]:
         'correo': cliente.correo,
         'telefono': cliente.telefono,
         'keycloak_id': cliente.keycloak_id,
-        'usuario_id': cliente.usuario_id,
+        'usuario_id': rep_principal.user_id if rep_principal else None,
+        'representante_principal_id': rep_principal.user_id if rep_principal else None,
+        'assignments': assignments,
         'segmentacion': cliente.segmentacion,
         'segmentacion_display': cliente.get_segmentacion_display(),
         'is_active': cliente.is_active,
         'created_at': cliente.created_at.isoformat() if cliente.created_at else None,
         'updated_at': cliente.updated_at.isoformat() if cliente.updated_at else None,
     }
+
 
 
 # ==============================================================================
@@ -157,6 +172,15 @@ class ClienteDetailView(LoginRequiredMixin, DetailView):
     model = Cliente
     template_name = 'customers/cliente_detail.html'
     context_object_name = 'cliente'
+
+    def get_queryset(self) -> QuerySet[Cliente]:
+        """
+        Retorna el conjunto de datos de clientes optimizado con prefetch de representantes.
+
+        :return: QuerySet de clientes con prefetch de asignaciones y usuarios asociados.
+        :rtype: django.db.models.QuerySet[Cliente]
+        """
+        return super().get_queryset().prefetch_related('assignments__user')
 
 
 class ClienteCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):

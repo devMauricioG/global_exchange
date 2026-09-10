@@ -1,29 +1,33 @@
-# Bitácora Consolidada de Resolución de Tareas con Asistencia de Inteligencia Artificial (IA)
+# Registro de Tareas Resueltas con Asistencia de IA
 
-**Proyecto:** Global Exchange  
-**Equipo:** Equipo 88  
-**Sprints:** SCRUM Sprint 1 y Sprint 2  
-**Herramientas de IA utilizadas:** Google Antigravity / Gemini / Claude  
+Este documento recopila de manera ordenada las tareas desarrolladas con asistencia de herramientas de Inteligencia Artificial (Antigravity IDE / Gemini / Claude) para los Hitos 1 y 2 del proyecto **Global Exchange**, cumpliendo con los lineamientos de transparencia técnica y buenas prácticas de ingeniería de software.
 
 ---
 
-## Índice de Tareas Resueltas con IA
+## 📑 Índice de Tareas Desarrolladas
 
-1. [SCRUM-26: Vinculación automática de identidades Keycloak OIDC con la ficha de Cliente](#1-scrum-26-vinculación-automática-de-identidades-keycloak-oidc-con-la-ficha-de-cliente)
-2. [SCRUM-27: Implementación de vistas/endpoints para el CRUD de Clientes con filtros por segmento](#2-scrum-27-implementación-de-vistasedpoints-para-el-crud-de-clientes-con-filtros-por-segmento)
-3. [SCRUM-28: Desarrollo de plantilla base con Menú Principal dinámico según roles de JWT](#3-scrum-28-desarrollo-de-plantilla-base-con-menú-principal-dinámico-según-roles-de-jwt)
-4. [SCRUM-29: Construcción de interfaces gráficas para el listado, creación y edición de Clientes](#4-scrum-29-construcción-de-interfaces-gráficas-para-el-listado-creación-y-edición-de-clientes)
-5. [SCRUM-30: Redacción e integración de Pruebas Unitarias (PyUnit) para CRUD y autenticación](#5-scrum-30-redacción-e-integración-de-pruebas-unitarias-pyunit-para-crud-y-autenticación)
-6. [SCRUM-31: Configuración de documentación automática de código y bitácora IA](#6-scrum-31-configuración-de-documentación-automática-de-código-y-bitácora-ia)
-7. [SCRUM-41: Estandarización de comandos de ejecución de tests y verificación en README.md](#7-scrum-41-estandarización-de-comandos-de-ejecución-de-tests-y-verificación-en-readmemd)
-8. [SCRUM-42: Actualización de documentos de diseño UML y especificación de pruebas (ERS / DIS_CLA / DIS_CPR)](#8-scrum-42-actualización-de-documentos-de-diseño-uml-y-especificación-de-pruebas-ers--dis_cla--dis_cpr)
-9. [SCRUM-55: Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (payments)](#9-scrum-55-modelo-vistas-y-formularios-para-el-crud-de-medios-de-pago-de-clientes-payments)
+| Ticket Jira | Título de la Tarea | Sprint | Responsable / Rol | Estado |
+| :--- | :--- | :---: | :--- | :---: |
+| **SCRUM-26** | Vinculación automática de ID Keycloak a Ficha Cliente | Sprint 1 | Pablo Elizeche | Finalizado |
+| **SCRUM-27** | Vistas y Endpoints para CRUD de Clientes con Filtros | Sprint 1 | Pablo Elizeche | Finalizado |
+| **SCRUM-28** | Plantilla Base y Menú Dinámico según Roles JWT | Sprint 1 | Pablo Elizeche | Finalizado |
+| **SCRUM-29** | Interfaces Gráficas para Gestión de Clientes | Sprint 1 | Pablo Elizeche | Finalizado |
+| **SCRUM-30** | Pruebas Unitarias para CRUD de Clientes y Autenticación | Sprint 1 | Pablo Elizeche | Finalizado |
+| **SCRUM-31** | Configuración de Sphinx y Bitácora IA (docs/chat_ia.md) | Sprint 1 | Felipe Rivas / Pablo Elizeche | Finalizado |
+| **SCRUM-41** | Estandarización de Comandos de Tests y Cobertura en README | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-42** | Actualización de Documentos de Diseño UML y Casos de Prueba | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-43** | Documentación de Docstrings en Código Fuente y Sphinx | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
 
 ---
 
-### 1. SCRUM-26: Vinculación automática de identidades Keycloak OIDC con la ficha de Cliente
+## 🛠️ Detalle Ordenado por Tarea
 
-* **Objetivo:** Interceptar el login exitoso en Keycloak para vincular automáticamente la ficha del cliente en Django mediante el `sub` (identificador único) y sincronizar los datos de perfil.
+---
+
+### 1. SCRUM-26: Lógica de vinculación automática de ID de Keycloak a la ficha de Cliente en Django
+
+* **Objetivo:** Interceptar el inicio de sesión exitoso vía Keycloak OIDC para sincronizar o crear automáticamente la ficha de cliente en Django mediante el identificador único inmutable (`sub`).
 * **Aportes y Solución con IA:**
   * Diseño del manejador de señales `user_logged_in` en `customers/signals.py` y `customers/services.py` para desacoplar la lógica de autenticación del modelo de dominio.
   * Estrategia de vinculación bidireccional: búsqueda primaria por `keycloak_id` (`sub`) y secundaria por correo electrónico institucional con fallback controlado.
@@ -112,15 +116,21 @@
 
 * **Objetivo:** Documentar exhaustivamente los comandos de ejecución de pruebas con Docker Compose y análisis de cobertura (`coverage`), garantizando que la totalidad de pruebas de `authentication` y `customers` pasen sin fallos.
 * **Aportes y Solución con IA:**
-  * Detección y corrección del desacople de settings en `manage.py`: enrutamiento automático a `config.settings.test` (SQLite in-memory) al invocar `test`.
-  * Inclusión de `coverage>=7.6.0` en `requirements.txt`, `.gitignore` y `.dockerignore`.
-  * Redacción de la sección detallada en `README.md` (comandos Docker Compose y local venv, suite completa, módulos y reportes de cobertura).
-  * Validación integral con 69 tests aprobados y 95% de cobertura de código.
+  * Detección y corrección del desacople de settings en `manage.py`: enrutamiento automático a `config.settings.test` (SQLite in-memory) al invocar `test`, eliminando la necesidad de parámetros largos y evitando conflictos con PostgreSQL.
+  * Inclusión formal del paquete `coverage>=7.6.0` en `requirements.txt`.
+  * Configuración de exclusiones en `.gitignore` y `.dockerignore` (`.coverage`, `htmlcov/`).
+  * Redacción de la sección detallada en `README.md`: guía paso a paso para Docker Compose, comandos para pruebas por módulo/clase/método, auditoría de cobertura por consola y reportes web interactivos en HTML, más instrucciones para entornos locales.
+  * Validación integral: 69 tests ejecutados con 100% de éxito y 95% de cobertura global de código.
+  * Redacción del documento técnico específico en `docs/documentacion/SCRUM-41_ESTANDARIZACION_TESTS.md`.
 * **Archivos intervenidos:**
   * `manage.py`
   * `requirements.txt`
+  * `.gitignore`
+  * `.dockerignore`
   * `README.md`
   * `docs/documentacion/SCRUM-41_ESTANDARIZACION_TESTS.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
 
 ---
 
@@ -145,7 +155,34 @@
 
 ---
 
-### 9. SCRUM-55: Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (payments)
+### 9. SCRUM-43: Documentación de docstrings en código fuente y actualización de Sphinx
+
+* **Objetivo:** Redactar y estandarizar los docstrings estructurados (formato Sphinx/Google style) en las nuevas clases, servicios, context processors y vistas desarrolladas en el Sprint 2, actualizando la bitácora en `docs/chat_ia.md` y compilando el árbol HTML de Sphinx sin advertencias.
+* **Aportes y Solución con IA:**
+  * Creación de `AuthenticationConfig` con docstrings formales en `authentication/apps.py` e incorporación autodoc para el paquete `authentication`.
+  * Normalización de directivas reStructuredText y formato de listas en `customers/services.py` y `customers/urls.py` para prevenir errores de parsing en docutils.
+  * Configuración de la extensión `sphinx.ext.viewcode` en `docs/sphinx/source/conf.py` para vincular el código fuente con la documentación generada.
+  * Actualización de los archivos `.rst` del árbol de Sphinx (`authentication.rst`, `authentication.templatetags.rst`, `customers.rst`, `modules.rst`, `index.rst`).
+  * Validación de compilación limpia de la documentación HTML y actualización de la bitácora IA.
+* **Archivos intervenidos:**
+  * `authentication/__init__.py`
+  * `authentication/apps.py`
+  * `authentication/urls.py`
+  * `customers/__init__.py`
+  * `customers/services.py`
+  * `customers/urls.py`
+  * `docs/sphinx/source/conf.py`
+  * `docs/sphinx/source/index.rst`
+  * `docs/sphinx/source/modules.rst`
+  * `docs/sphinx/source/authentication.rst`
+  * `docs/sphinx/source/authentication.templatetags.rst`
+  * `docs/sphinx/source/customers.rst`
+  * `docs/chat_ia.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 10. SCRUM-55: Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (payments)
 
 * **Objetivo:** Construir la aplicación Django `payments` con el modelo `PaymentMethod`, vistas CBV web protegidas contra IDOR, endpoints API REST (JSON), formularios validados y plantillas dark-mode responsivas para la gestión segura de cuentas bancarias y billeteras de los clientes.
 * **Aportes y Solución con IA:**
@@ -154,7 +191,7 @@
   * Arquitectura de seguridad con resolución de cliente activo (`get_current_cliente`) y filtrado estricto en `get_queryset()` para prevenir vulnerabilidades de Insecure Direct Object References (IDOR), respondiendo `HTTP 404` ante intentos de acceso o manipulación cruzada.
   * Desarrollo de CBVs (`PaymentMethodListView`, `PaymentMethodCreateView`, `PaymentMethodUpdateView`, `PaymentMethodDeleteView`, `PaymentMethodSetDefaultView`, `PaymentMethodToggleActiveView`) y endpoints REST (`PaymentMethodListCreateAPIView`, `PaymentMethodDetailAPIView`).
   * Diseño de interfaces con KPIs en tarjetas, filtros de búsqueda, selector de predeterminado y estados vacíos (*empty states*).
-  * Elaboración de 21 tests automatizados que elevan la suite completa a 90 tests aprobados y 93% de cobertura.
+  * Elaboración de 21 tests automatizados que elevan la suite completa a 96 tests aprobados y alta cobertura.
 * **Archivos intervenidos:**
   * `payments/models.py`
   * `payments/forms.py`

@@ -271,7 +271,8 @@ class KeycloakBackendVinculationTests(TestCase):
 
         cliente = Cliente.objects.filter(keycloak_id='oidc-backend-sub-001').first()
         self.assertIsNotNone(cliente)
-        self.assertEqual(cliente.usuario, user)
+        self.assertTrue(cliente.assignments.filter(user=user, is_primary_representative=True, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, user)
         self.assertEqual(cliente.correo, 'oidc.user@globalexchange.com')
         self.assertEqual(cliente.nombre, 'Juan OIDC')
 
@@ -301,7 +302,9 @@ class KeycloakBackendVinculationTests(TestCase):
 
         cliente = Cliente.objects.filter(keycloak_id='oidc-backend-sub-002').first()
         self.assertIsNotNone(cliente)
-        self.assertEqual(cliente.usuario, user)
+        self.assertTrue(cliente.assignments.filter(user=user, is_active=True).exists())
+        self.assertEqual(cliente.representante_principal.user, user)
+
 
 
 class AuthLoginRedirectTests(TestCase):

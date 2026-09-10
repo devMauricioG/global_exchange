@@ -80,6 +80,33 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 
 ---
 
+## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini
+
+**Contexto:** Sprint 2 — Estandarización de comandos de ejecución de tests y verificación en README.md (SCRUM-41)
+
+**Resumen:**
+- Diagnostiqué la discrepancia entre la ejecución de pruebas por defecto en `manage.py` (que intentaba apuntar a PostgreSQL en dev) y el módulo optimizado in-memory `config.settings.test`, implementando en `manage.py` la detección y enrutamiento inteligente para invocaciones del subcomando `test`.
+- Incorporé la dependencia formal `coverage>=7.6.0` en `requirements.txt` y configuré las directivas de exclusión de artefactos generados en `.gitignore` y `.dockerignore` (`.coverage`, `htmlcov/`).
+- Documenté en `README.md` la guía estandarizada y detallada para pruebas unitarias con Docker Compose (`docker compose exec web python manage.py test`) y mediciones de cobertura de código (`coverage run`, `coverage report -m`, `coverage html`), incluyendo tanto la ejecución dockerizada como la local vía `venv`.
+- Ejecuté y validé la totalidad de pruebas de los módulos `authentication` y `customers` (69 pruebas con 100% de aprobación y 95% de cobertura global).
+- Estructuré la documentación formal de tareas resueltas con IA en `docs/documentacion/` (`SCRUM-41_ESTANDARIZACION_TESTS.md` y `RESOLUCION_TAREAS_IA.md`).
+
+---
+
+## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini
+
+**Contexto:** Sprint 2 — Actualización de los documentos de diseño UML y especificación de pruebas (SCRUM-42)
+
+**Resumen:**
+- Analicé las especificaciones del Sprint 2 y procedí a actualizar integralmente los documentos formales de diseño:
+  - `EQUIPO_88_B_DIS_CLA_01`: Detallé la entidad `CustomerUserAssignment` (atributos, restricciones `unique_together`, asignación de representante principal y métodos de ciclo de vida), las clases para la gestión de cliente activo (`ActiveCustomerMiddleware`, context processor, `CustomerSwitchActiveView`) y la vista del visualizador Sphinx (`ServeSphinxDocsView`).
+  - `EQUIPO_88_B_DIS_PAQ_01`: Refactoricé la arquitectura de paquetes en `apps.customers`, agregué el flujo de cliente activo, integré el visualizador de documentación en `global_exchange_core`, generé el diagrama Mermaid de capas y sincronicé la matriz de responsabilidades.
+  - `EQUIPO_88_B_DIS_CPR_01`: Diseñé e incorporé la Matriz Formal de Casos de Prueba con 18 casos de prueba estructurados (CPR-CUA-001..006, CPR-ACT-001..006, CPR-DOC-001..006).
+  - `EQUIPO_08_A_ERS_01`: Actualicé los requerimientos funcionales RF04/RF05, RF-21, incorporé RF-27 (Visualizador Sphinx) y registré la versión ERS v3.1 en el historial de cambios.
+- Elaboré los documentos de registro `SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md` y `RESOLUCION_TAREAS_IA.md` en `docs/documentacion/` para mantener la trazabilidad ordenada exigida por el equipo.
+
+---
+
 ## Pablo Elizeche — 08/09/2026 — Antigravity / Gemini & Claude
 
 **Contexto:** Sprint 2 — Modelo, vistas y formularios para el CRUD de Medios de Pago de Clientes (SCRUM-55)
@@ -93,5 +120,18 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Expuse los endpoints de API REST JSON (`PaymentMethodListCreateAPIView`, `PaymentMethodDetailAPIView`) para integración externa.
 - Redacté y ejecuté una suite exhaustiva de 21 pruebas automatizadas en `payments/tests.py`, alcanzando 90 tests aprobados a nivel global y 93% de cobertura.
 - Redacté la documentación técnica en `docs/documentacion/SCRUM-55_CRUD_MEDIOS_DE_PAGO.md` y actualicé la bitácora consolidada `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Pablo Elizeche — 09/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Documentación de docstrings en código fuente y actualización de Sphinx (SCRUM-43)
+
+**Resumen:**
+- Realicé una auditoría exhaustiva de docstrings en todo el código fuente del backend (`authentication`, `customers`, `config`), estandarizando el formato Sphinx/Google Style para garantizar una documentación técnica de primer nivel.
+- Creación de la configuración de aplicación `AuthenticationConfig` en `authentication/apps.py` e incorporación completa de la documentación del paquete `authentication` al índice maestro de Sphinx (`docs/sphinx/source/authentication.rst` y `authentication.templatetags.rst`).
+- Actualización de la estructura de documentación en `docs/sphinx/source/customers.rst`, `modules.rst` e `index.rst`, vinculando todos los submódulos (`admin`, `apps`, `forms`, `models`, `services`, `signals`, `tests`, `urls`, `views`).
+- Integración de extensiones Sphinx (`sphinx.ext.viewcode`, `sphinx.ext.napoleon`, `sphinx.ext.autodoc`), corrección de directivas rst de docstrings (formato de roles e indentaciones) y resolución de advertencias de compilación para lograr una salida limpia (0 errores, 0 advertencias).
+- Recompilación exitosa del árbol completo de documentación HTML en `docs/sphinx/build/html/` y verificación de consistencia mediante la ejecución de la suite de pruebas automatizadas del proyecto.
 
 ---

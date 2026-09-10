@@ -66,22 +66,19 @@ def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
         if c:
             return c
 
-    # 3. Relación directa OneToOne
-    if hasattr(request.user, 'cliente') and request.user.cliente:
-        return request.user.cliente
+    # 3. Asignación en CustomerUserAssignment
+    if hasattr(request.user, 'customer_assignments'):
+        asig = request.user.customer_assignments.filter(is_active=True).select_related('customer').order_by('-is_primary_representative', '-assigned_at').first()
+        if asig:
+            return asig.customer
 
-    # 4. Consulta por campo usuario
-    cliente = Cliente.objects.filter(usuario=request.user).first()
-    if cliente:
-        return cliente
-
-    # 5. Consulta por correo institucional o personal
+    # 4. Consulta por correo institucional o personal
     if request.user.email:
         cliente_email = Cliente.objects.filter(correo=request.user.email).first()
         if cliente_email:
             return cliente_email
 
-    # 6. Operadores o administradores con selector de cliente
+    # 5. Operadores o administradores con selector de cliente
     if request.user.is_staff or request.user.is_superuser:
         cliente_id_param = request.GET.get('cliente_id') or request.POST.get('cliente_id')
         if cliente_id_param:

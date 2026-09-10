@@ -3,13 +3,14 @@ Módulo de servicios y lógica de negocio para la aplicación de clientes.
 
 Contiene las funciones especializadas para la vinculación automática de identidades
 de Keycloak (claim ``sub``) con las fichas de cliente (:class:`~customers.models.Cliente`)
+y la asignación de representación mediante :class:`~customers.models.CustomerUserAssignment`
 en Django.
 """
 
 import logging
 from typing import Any, Dict, Optional
 from django.contrib.auth.models import AbstractBaseUser
-from .models import Cliente
+from .models import Cliente, CustomerUserAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +22,19 @@ def vincular_cliente_keycloak(
     claims: Optional[Dict[str, Any]] = None,
 ) -> Optional[Cliente]:
     """
-    Vincula automáticamente la identidad de Keycloak con la ficha de cliente en Django.
+    Vincula automáticamente la identidad de Keycloak con la ficha de cliente en Django
+    mediante una asignación de representación :class:`~customers.models.CustomerUserAssignment`.
 
     Estrategia de vinculación:
-    1. Si se provee `keycloak_id` (claim ``sub``), busca una ficha existente con dicho identificador.
-       Si existe, asocia o actualiza la referencia al usuario Django (:class:`django.contrib.auth.models.User`).
-    2. Si no se encuentra por `keycloak_id` y se dispone de un `email`, busca por coincidencia exacta
-       (insensible a mayúsculas/minúsculas) en el campo `correo`. Si existe la ficha, le asigna el
-       `keycloak_id` y vincula el `usuario`.
+
+    1. Si se provee ``keycloak_id`` (claim ``sub``), busca una ficha existente con dicho identificador.
+       Si existe, asegura la asignación activa como representante principal con el usuario Django.
+    2. Si no se encuentra por ``keycloak_id`` y se dispone de un ``email``, busca por coincidencia exacta
+       (insensible a mayúsculas/minúsculas) en el campo ``correo``. Si existe la ficha, le asigna el
+       ``keycloak_id`` y crea o reactiva la asignación del usuario.
     3. Si no existe ninguna ficha previa, crea una nueva entidad :class:`~customers.models.Cliente`
-       utilizando los datos extraídos de las claims de Keycloak (`nombre`, `correo`, `keycloak_id`, etc.).
+       utilizando los datos extraídos de las claims de Keycloak (``nombre``, ``correo``, ``keycloak_id``, etc.)
+       y registra la asignación de representación principal para el usuario.
 
     :param user: Instancia del usuario autenticado en Django.
     :type user: django.contrib.auth.models.AbstractBaseUser
@@ -56,6 +60,28 @@ def vincular_cliente_keycloak(
         )
         return None
 
+    def _asegurar_asignacion(cli: Cliente, es_principal: bool = True) -> CustomerUserAssignment:
+        asignacion, created = CustomerUserAssignment.objects.get_or_create(
+            customer=cli,
+            user=user,
+            defaults={
+                'is_primary_representative': es_principal,
+                'is_active': True,
+            },
+        )
+        cambios = False
+        if not asignacion.is_active:
+            asignacion.is_active = True
+            cambios = True
+        if es_principal and not asignacion.is_primary_representative:
+            # Si no hay otro representante principal, marcar este
+            if not CustomerUserAssignment.objects.filter(customer=cli, is_primary_representative=True, is_active=True).exclude(pk=asignacion.pk).exists():
+                asignacion.is_primary_representative = True
+                cambios = True
+        if cambios:
+            asignacion.save()
+        return asignacion
+
     cliente = None
 
     # 1. Buscar por keycloak_id (sub)
@@ -67,11 +93,7 @@ def vincular_cliente_keycloak(
                 cliente.id,
                 sub,
             )
-            # Asegurar asociación con el usuario Django si difiere
             actualizado = False
-            if cliente.usuario != user:
-                cliente.usuario = user
-                actualizado = True
             if correo and cliente.correo.lower() != correo:
                 # Si el correo cambió en Keycloak, actualizar si no colisiona
                 if not Cliente.objects.filter(correo__iexact=correo).exclude(pk=cliente.pk).exists():
@@ -79,6 +101,7 @@ def vincular_cliente_keycloak(
                     actualizado = True
             if actualizado:
                 cliente.save()
+            _asegurar_asignacion(cliente, es_principal=True)
             return cliente
 
     # 2. Buscar por correo electrónico (cliente preexistente creado por admin/operador)
@@ -93,8 +116,8 @@ def vincular_cliente_keycloak(
             )
             if sub:
                 cliente.keycloak_id = sub
-            cliente.usuario = user
-            cliente.save()
+                cliente.save()
+            _asegurar_asignacion(cliente, es_principal=True)
             return cliente
 
     # 3. Si no existe ficha previa, crear automáticamente un nuevo Cliente
@@ -132,14 +155,15 @@ def vincular_cliente_keycloak(
         documento_ruc=documento_ruc,
         correo=correo or f"{getattr(user, 'username', 'user')}@globalexchange.local",
         keycloak_id=sub,
-        usuario=user,
         segmentacion=Cliente.Segmentacion.MINORISTA,
         is_active=True,
     )
+    _asegurar_asignacion(cliente, es_principal=True)
     logger.info(
-        "Nueva ficha de Cliente #%s creada y vinculada automáticamente con Keycloak (sub=%s) para el usuario %s.",
+        "Nueva ficha de Cliente #%s creada y asignada automáticamente con Keycloak (sub=%s) para el usuario %s.",
         cliente.id,
         sub,
         getattr(user, "username", str(user)),
     )
     return cliente
+
