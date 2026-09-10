@@ -15,6 +15,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-30** | Pruebas Unitarias para CRUD de Clientes y Autenticación | Sprint 1 | Pablo Elizeche | Finalizado |
 | **SCRUM-31** | Configuración de Sphinx y Bitácora IA (docs/chat_ia.md) | Sprint 1 | Felipe Rivas / Pablo Elizeche | Finalizado |
 | **SCRUM-41** | Estandarización de Comandos de Tests y Cobertura en README | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-42** | Actualización de Documentos de Diseño UML y Casos de Prueba | Sprint 2 | Pablo Elizeche | Finalizado |
 
 ---
 
@@ -127,4 +128,25 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `README.md`
   * `docs/documentacion/SCRUM-41_ESTANDARIZACION_TESTS.md`
   * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 8. SCRUM-42: Actualización de documentos de diseño UML y especificación de pruebas (ERS / DIS_CLA / DIS_CPR)
+
+* **Objetivo:** Actualizar los documentos formales de diseño de clases (`EQUIPO_88_B_DIS_CLA_01`), diagrama de paquetes (`DIS_PAQ_01`), matriz de casos de prueba (`EQUIPO_88_B_DIS_CPR_01`) y requerimientos (`EQUIPO_08_A_ERS_01`) incorporando la entidad `CustomerUserAssignment`, las reglas de cambio de cliente activo y las pruebas del visualizador de documentación.
+* **Aportes y Solución con IA:**
+  * Modelado formal de `CustomerUserAssignment` en el diseño de clases: atributos completos, restricciones de unicidad `unique_together`, asignación de representante principal único y métodos de ciclo de vida (`activate()`, `deactivate()`, `clean()`).
+  * Especificación detallada de la arquitectura de Cliente Activo: diseño de `ActiveCustomerMiddleware`, context processor `active_customer_context` y vista segura `CustomerSwitchActiveView` con validación de pertenencia y respuesta `HTTP 403 Forbidden` ante intentos de suplantación.
+  * Diseño del componente `ServeSphinxDocsView` y mapeo de rutas para el visualizador integrado de documentación Sphinx con prevención de Path Traversal.
+  * Actualización del diagrama de paquetes en sintaxis Mermaid y detalle de responsabilidades por capa en `DIS_PAQ_01`.
+  * Redacción y anexado de la **Matriz Formal de Casos de Prueba (DIS_CPR_01)** compuesta por 18 casos de prueba estructurados (6 para `CustomerUserAssignment`, 6 para reglas de Cliente Activo y 6 para el Visualizador Sphinx).
+  * Refinamiento de requerimientos funcionales en `ERS_01` (RF04/RF05, RF-21, nuevo RF-27 y registro de versión ERS v3.1 en el historial de cambios).
+* **Archivos intervenidos:**
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CLA_01_detallado.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_PAQ_01.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CPR_01_detallado.md`
+  * `docs/documentacion/Proyecto/EQUIPO_08_A_ERS_01.md`
+  * `docs/documentacion/SCRUM-42_DISENO_UML_Y_CASOS_DE_PRUEBA.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/chat_ia.md`

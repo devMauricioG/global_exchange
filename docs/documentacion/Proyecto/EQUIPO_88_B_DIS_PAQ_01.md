@@ -57,16 +57,24 @@ Por su posición en el diagrama, este módulo coordina buena parte del proceso d
 
 ## 5. Aplicación `apps.customers`
 
-Este módulo administra clientes y su relación con las operaciones del sistema.
+Este módulo administra clientes, la multi-representación de usuarios y la contextualización del cliente activo para las operaciones del sistema.
 
 ### Componentes
 
-- `models.py (Customer, Assignment)`: contiene los modelos de cliente y de asignación. `Assignment` podría representar la asignación de clientes a usuarios, responsables, cuentas u otros recursos del sistema.
-- `views.py (Customer Management)`: agrupa las vistas para crear, consultar, actualizar o administrar clientes.
+- `models.py (Customer, CustomerUserAssignment)`:
+  - `Customer`: entidad que representa a la persona física o jurídica (Minorista, Mayorista, Corporativo, VIP).
+  - `CustomerUserAssignment`: entidad asociativa intermedia que materializa la relación N:M entre `User` y `Customer`. Registra `user`, `customer`, `is_primary_representative`, `assigned_at`, `is_active` y el rol corporativo, posibilitando que un usuario opere en nombre de varios clientes y que una empresa tenga múltiples representantes autorizados.
+- `middlewares.py (ActiveCustomerMiddleware)`: intercepta cada petición HTTP, evalúa el `active_customer_id` en la sesión del usuario, valida que exista una asignación activa en `CustomerUserAssignment` e inyecta la instancia `request.active_customer`. Aplica selección automática por defecto (representante principal) si no hay selección explícita.
+- `context_processors.py (active_customer_context)`: inyecta en el contexto global de las plantillas el cliente activo actual (`active_customer`) y la lista de clientes disponibles (`user_assigned_customers`) para alimentar el selector dinámico del navbar.
+- `views.py (Customer Management & Switch Active)`:
+  - Vistas CBVs para el ciclo de vida del cliente (listado con filtros por segmento, creación, detalle, edición y baja).
+  - `CustomerSwitchActiveView`: endpoint seguro que valida permisos de asignación activa y actualiza el cliente activo en sesión, retornando `HTTP 403 Forbidden` si un usuario intenta operar un cliente no asignado.
 
-### Relación principal
+### Relaciones del paquete
 
-La aplicación se conecta con `apps.authentication`, lo que sugiere que la administración de clientes requiere usuarios autenticados y control de acceso.
+- **Con `apps.authentication`**: vincula identidades de usuarios autenticados con sus clientes representados a través de `CustomerUserAssignment`.
+- **Con `global_exchange_core`**: registra el middleware y el context processor en el pipeline de ejecución de Django.
+- **Con `apps.transactions`**: suministra el cliente activo bajo el cual se registran y facturan las cotizaciones y operaciones cambiarias.
 
 ## 6. Aplicación `apps.cash_register`
 
@@ -96,54 +104,109 @@ La conexión con `apps.transactions` indica que las tasas de cambio son utilizad
 
 ## 8. Aplicación `apps.authentication`
 
-Este módulo centraliza la autenticación y la autorización de las solicitudes.
+Este módulo centraliza la autenticación, autorización y resolución de privilegios basada en roles JWT.
 
 ### Componentes
 
-- `middlewares.py (JWT Bearer Validation)`: implementa un middleware para validar tokens JWT enviados mediante el esquema Bearer. Su función es interceptar solicitudes y verificar la identidad del solicitante antes de permitir el acceso a los recursos protegidos.
-- `backends.py (Keycloak OIDC)`: integra el sistema con Keycloak utilizando OpenID Connect. Este backend permite delegar la autenticación y posiblemente la obtención de roles o claims a Keycloak.
+- `middlewares.py (JWT Bearer Validation)`: intercepta solicitudes API y valida tokens JWT enviados mediante esquema Bearer.
+- `backends.py (Keycloak OIDC)`: integra el sistema con Keycloak mediante OpenID Connect, gestionando la sincronización de identidades y claims del usuario.
+- `context_processors.py (auth_roles)`: inyecta en plantillas los roles extraídos del token JWT (`is_admin`, `is_operator`, `is_auditor`, etc.).
+- `templatetags/auth_tags.py`: etiquetas personalizadas (`has_role`, `has_any_role`) para renderizado condicional de componentes en `templates/base.html`.
 
 ### Relación con el núcleo global
 
-`apps.authentication` se comunica con `global_exchange_core`, específicamente con la configuración OIDC/Keycloak y el enrutamiento principal de Django.
+`apps.authentication` se comunica con `global_exchange_core`, proveyendo los backends de autenticación y los middlewares de seguridad.
 
 ## 9. Paquete `global_exchange_core`
 
-Este paquete contiene la configuración transversal del proyecto Django.
+Este paquete contiene la configuración transversal del proyecto Django y servicios globales de plataforma.
 
 ### Componentes
 
-- `settings.py (OIDC/Keycloak Config)`: contiene la configuración general del proyecto y los parámetros de integración con OpenID Connect/Keycloak.
-- `urls.py (Root Routing)`: define el enrutamiento raíz y conecta las rutas globales con las aplicaciones del proyecto.
-- `wsgi.py / asgi.py`: proporcionan los puntos de entrada para desplegar la aplicación mediante servidores compatibles con WSGI y ASGI, respectivamente.
+- `settings.py (Configuración Multientorno)`:
+  - `base.py`: configuración común, registro de aplicaciones, middlewares y context processors.
+  - `dev.py` / `prod.py`: entornos de persistencia con PostgreSQL y Keycloak.
+  - `test.py`: entorno optimizado in-memory SQLite para ejecución rápida de tests unitarios y cobertura.
+- `urls.py (Root Routing)`: define el enrutamiento raíz conectando las rutas de autenticación, clientes, transacciones y documentación.
+- `views.py (ServeSphinxDocsView)`: vista especializada para servir de manera integrada y protegida la documentación técnica generada por Sphinx (`docs/sphinx/build/html/`), con verificación de tipos MIME y mitigación de Path Traversal.
+- `wsgi.py / asgi.py`: puntos de entrada para servidores de producción (Gunicorn / Uvicorn).
 
-Este paquete funciona como la capa de composición del sistema: configura Django, registra aplicaciones, establece autenticación y expone las rutas y puntos de entrada de ejecución.
+```mermaid
+graph TD
+    subgraph ClientLayer [Capa de Presentación / Cliente]
+        Browser[Navegador Web / HTTPS]
+    end
+
+    subgraph Core [global_exchange_core]
+        RootURLs[urls.py]
+        DocsView[views.py - ServeSphinxDocsView]
+        Settings[settings/]
+    end
+
+    subgraph AuthApp [apps.authentication]
+        OIDCBackend[backends.py - Keycloak OIDC]
+        AuthContext[context_processors.py - auth_roles]
+        AuthTags[templatetags - auth_tags]
+    end
+
+    subgraph CustomerApp [apps.customers]
+        CustomerModel[models.py - Customer]
+        AssignmentModel[models.py - CustomerUserAssignment]
+        ActiveMiddleware[middlewares.py - ActiveCustomerMiddleware]
+        ActiveContext[context_processors.py - active_customer]
+        CustomerViews[views.py - CRUD & SwitchActive]
+    end
+
+    subgraph DomainApps [Módulos de Dominio Operativo]
+        Transactions[apps.transactions]
+        Rates[apps.rates]
+        CashRegister[apps.cash_register]
+        ElectronicDocs[apps.electronic_docs]
+    end
+
+    subgraph SphinxDocs [Documentación Sphinx]
+        HTMLTree[docs/sphinx/build/html/]
+    end
+
+    Browser --> RootURLs
+    RootURLs --> DocsView
+    DocsView --> HTMLTree
+    RootURLs --> AuthApp
+    RootURLs --> CustomerApp
+    RootURLs --> DomainApps
+
+    ActiveMiddleware --> AssignmentModel
+    ActiveMiddleware --> CustomerModel
+    CustomerViews --> AssignmentModel
+    CustomerViews --> CustomerModel
+    DomainApps --> CustomerModel
+```
 
 ## 10. Flujo funcional inferido
 
-El flujo general representado por el diagrama puede describirse así:
+El flujo general del sistema incorpora la multi-representación y la consulta técnica:
 
-1. Un usuario autenticado accede al sistema mediante JWT Bearer.
-2. La autenticación puede delegarse o validarse mediante Keycloak usando OIDC.
-3. El usuario utiliza las vistas de clientes, transacciones, caja o tasas.
-4. Una operación de compra, venta o cotización se procesa en `apps.transactions`.
-5. La transacción puede asociarse con un cliente de `apps.customers`.
-6. La operación puede utilizar una tasa de cambio proporcionada por `apps.rates`.
-7. El resultado puede registrarse en una caja administrada por `apps.cash_register`.
-8. Cuando corresponde, la transacción puede generar o consultar un documento electrónico a través de `apps.electronic_docs` y la API de SIFEN/DNIT.
-9. Las solicitudes son dirigidas por `global_exchange_core.urls.py` y la aplicación se ejecuta mediante WSGI o ASGI.
+1. **Autenticación e Identidad:** El usuario inicia sesión vía Keycloak OIDC. El backend valida el token JWT y extrae los roles y el UUID (`sub`).
+2. **Resolución de Cliente Activo:**
+   - `ActiveCustomerMiddleware` verifica las asignaciones en `CustomerUserAssignment`.
+   - Si el usuario representa a varios clientes, se inyecta la lista de representados en el selector del navbar (`base.html`).
+   - El usuario puede alternar de cliente en cualquier momento mediante `CustomerSwitchActiveView`, actualizando la sesión de forma atómica.
+3. **Operativa Comercial Contextualizada:** Las compras, ventas y cotizaciones en `apps.transactions` se imputan automáticamente al cliente activo en la sesión.
+4. **Acceso a Documentación Técnica:** A través del menú superior, los usuarios autorizados o desarrolladores pueden acceder a `/docs/`, donde `ServeSphinxDocsView` sirve los documentos HTML autogenerados.
 
 ## 11. Responsabilidades por capa
 
-| Área | Responsabilidad |
-|---|---|
-| Modelos de dominio | Persistir clientes, transacciones, cajas, tasas y documentos electrónicos. |
-| Vistas | Exponer las operaciones de negocio y las interfaces de gestión. |
-| Integraciones | Comunicarse con SIFEN/DNIT y Keycloak. |
-| Seguridad | Validar JWT Bearer y aplicar autenticación OIDC. |
-| Configuración | Centralizar parámetros de Django, OIDC y Keycloak. |
-| Enrutamiento | Resolver las rutas principales del proyecto. |
-| Despliegue | Proporcionar entradas WSGI y ASGI. |
+| Área | Componentes Clave | Responsabilidad |
+|---|---|---|
+| **Multi-Representación** | `CustomerUserAssignment`, `ActiveCustomerMiddleware` | Gestionar relaciones N:M usuario-cliente y mantener el cliente activo en sesión. |
+| **Modelos de Dominio** | `Customer`, `Transaction`, `CashRegister`, `ExchangeRate`, `ElectronicDocument` | Persistir entidades de negocio y reglas de consistencia de datos. |
+| **Vistas e Interfaces** | `CustomerViews`, `CustomerSwitchActiveView`, `base.html` | Exponer interfaces responsivas, selectores dinámicos y endpoints REST. |
+| **Documentación Integrada** | `ServeSphinxDocsView`, `docs/sphinx/` | Servir la documentación técnica del código de forma segura y accesible. |
+| **Seguridad y Roles** | `Keycloak OIDC`, `auth_roles`, `JWT Bearer` | Centralizar identidades y gobernar permisos por rol en backend y frontend. |
+| **Configuración y Rutas** | `global_exchange_core` | Coordinar settings por ambiente (dev/prod/test) y resolver el árbol de URLs. |
+| **Integraciones Externas** | `sifen_client.py`, `Keycloak OIDC` | Comunicarse con servicios tributarios (SIFEN/DNIT) y servidor IAM. |
+| **Despliegue y Ejecución** | `wsgi.py`, `asgi.py`, `Docker` | Proveer puntos de entrada para servidores WSGI/ASGI y orquestación. |
+
 
 ## 12. Observaciones de arquitectura
 
