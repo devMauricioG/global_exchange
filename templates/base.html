@@ -499,6 +499,12 @@
                         </a>
                     </li>
 
+                    <li>
+                        <a href="{% url 'rates:dashboard' %}" class="nav-link {% if '/rates/dashboard/' in request.path %}active{% endif %}">
+                            📈 Cotizaciones
+                        </a>
+                    </li>
+
                     <!-- Opción Visible para roles Admin y Operator: Comisiones por Segmento -->
                     {% if is_operator or user|has_any_role:"admin,operator" %}
                         <li>

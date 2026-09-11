@@ -8,6 +8,10 @@ from . import views
 app_name = 'rates'
 
 urlpatterns = [
+    # Tablero de cotizaciones históricas (SCRUM-52)
+    path('dashboard/', views.ExchangeRateDashboardView.as_view(), name='dashboard'),
+    path('api/history/', views.ExchangeRateHistoryApiView.as_view(), name='api_history'),
+
     # Rutas para Currency (Monedas - SCRUM-51)
     path('currencies/', views.CurrencyListView.as_view(), name='currency-list'),
     path('currencies/create/', views.CurrencyCreateView.as_view(), name='currency-create'),

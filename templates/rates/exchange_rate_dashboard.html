@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard de Cotizaciones - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .dashboard-header { display:flex; justify-content:space-between; gap:1rem; align-items:end; margin-bottom:2rem; flex-wrap:wrap; }
+    .dashboard-header h1 { font-size:1.85rem; letter-spacing:-.03em; }
+    .dashboard-header p { color:var(--text-muted); margin-top:.35rem; }
+    .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:1rem; margin-bottom:1.5rem; }
+    .kpi { background:linear-gradient(145deg, var(--bg-card), #111b2d); border:1px solid var(--border-color); border-radius:1rem; padding:1.25rem; }
+    .kpi-label { display:block; color:var(--text-muted); font-size:.78rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+    .kpi-value { display:block; font-size:2rem; font-weight:800; margin-top:.5rem; color:#7dd3fc; }
+    .chart-card, .quotes-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:1rem; padding:1.5rem; }
+    .chart-card { margin-bottom:1.5rem; }
+    .chart-heading { display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap; }
+    .chart-controls { display:flex; gap:.75rem; flex-wrap:wrap; }
+    .chart-controls select { min-width:165px; }
+    .chart-wrap { height:360px; position:relative; }
+    .chart-message { display:none; color:var(--text-muted); text-align:center; padding:7rem 1rem; }
+    .quotes-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(235px, 1fr)); gap:1rem; }
+    .quote { background:#0f172a; border:1px solid var(--border-color); border-radius:.75rem; padding:1.1rem; }
+    .quote-pair { color:#bae6fd; font-weight:800; font-size:1.05rem; }
+    .quote-rates { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; margin-top:1rem; }
+    .quote-rate small { display:block; color:var(--text-muted); margin-bottom:.2rem; }
+    .quote-rate.buy strong { color:#34d399; }.quote-rate.sell strong { color:#fda4af; }
+    .quote-time { margin-top:1rem; color:var(--text-subtle); font-size:.78rem; }
+    .empty-state { color:var(--text-muted); text-align:center; padding:2.5rem; }
+    .visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; border:0; }
+    @media (max-width:600px) { .chart-wrap { height:280px; } .chart-controls { width:100%; } .chart-controls select { flex:1; min-width:0; } }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <div><h1>📈 Dashboard de Cotizaciones</h1><p>Seguimiento de tasas vigentes y evolución histórica de compra y venta.</p></div>
+    <a class="btn btn-secondary" href="{% url 'rates:rate-list' %}">Gestionar tasas</a>
+</div>
+
+<section class="kpi-grid" aria-label="Resumen de cotizaciones">
+    <article class="kpi"><span class="kpi-label">Pares vigentes</span><strong class="kpi-value">{{ active_quotes_count }}</strong></article>
+    <article class="kpi"><span class="kpi-label">Monedas activas</span><strong class="kpi-value">{{ currencies_count }}</strong></article>
+    <article class="kpi"><span class="kpi-label">Actualizaciones hoy</span><strong class="kpi-value">{{ updated_today_count }}</strong></article>
+</section>
+
+<section class="chart-card" aria-labelledby="history-title">
+    <div class="chart-heading">
+        <div><h2 id="history-title" class="card-title">Evolución histórica</h2><p style="color:var(--text-muted);font-size:.9rem">Tasas registradas para el par y período seleccionados.</p></div>
+        <div class="chart-controls">
+            <label><span class="visually-hidden">Par de monedas</span><select id="pairSelect" class="form-select" {% if not historical_pairs %}disabled{% endif %}>{% for pair in historical_pairs %}<option value="{{ pair.base_currency_id }}:{{ pair.target_currency_id }}">{{ pair.base_currency__code }}/{{ pair.target_currency__code }}</option>{% endfor %}</select></label>
+            <label><span class="visually-hidden">Rango histórico</span><select id="periodSelect" class="form-select" {% if not historical_pairs %}disabled{% endif %}>{% for value, label in range_options %}<option value="{{ value }}" {% if value == '30d' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        </div>
+    </div>
+    {% if historical_pairs %}<div class="chart-wrap"><canvas id="historyChart" aria-label="Gráfico histórico de tasas de compra y venta"></canvas><p id="chartMessage" class="chart-message">No hay cotizaciones registradas para este período.</p></div>{% else %}<p class="empty-state">Aún no hay cotizaciones para visualizar.</p>{% endif %}
+</section>
+
+<section class="quotes-card"><div class="card-header"><h2 class="card-title">Cotizaciones vigentes</h2></div>
+    {% if latest_quotes %}<div class="quotes-grid">{% for quote in latest_quotes %}<article class="quote"><div class="quote-pair">{{ quote.base_currency.code }} / {{ quote.target_currency.code }}</div><div class="quote-rates"><div class="quote-rate buy"><small>Compra</small><strong>{{ quote.buy_rate }}</strong></div><div class="quote-rate sell"><small>Venta</small><strong>{{ quote.sell_rate }}</strong></div></div><p class="quote-time">Actualizada: {{ quote.updated_at|date:"d/m/Y H:i" }}</p></article>{% endfor %}</div>{% else %}<p class="empty-state">No existen cotizaciones vigentes en este momento.</p>{% endif %}
+</section>
+
+{% if historical_pairs %}
+<script>
+    const pairSelect = document.getElementById('pairSelect');
+    const periodSelect = document.getElementById('periodSelect');
+    const chartCanvas = document.getElementById('historyChart');
+    const chartMessage = document.getElementById('chartMessage');
+    let historyChart;
+
+    async function loadHistory() {
+        const query = new URLSearchParams({pair: pairSelect.value, period: periodSelect.value});
+        const response = await fetch(`{% url 'rates:api_history' %}?${query}`);
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'No fue posible cargar el historial.');
+
+        const hasData = data.labels.length > 0;
+        chartCanvas.style.display = hasData ? 'block' : 'none';
+        chartMessage.style.display = hasData ? 'none' : 'block';
+        if (!hasData) { if (historyChart) historyChart.destroy(); return; }
+        if (historyChart) historyChart.destroy();
+        historyChart = new Chart(chartCanvas, {
+            type: 'line',
+            data: { labels: data.labels, datasets: [
+                { label: `Compra (${data.pair})`, data: data.buy_rates, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.12)', tension: .25, fill: true },
+                { label: `Venta (${data.pair})`, data: data.sell_rates, borderColor: '#fda4af', backgroundColor: 'rgba(253,164,175,.08)', tension: .25, fill: true },
+            ]},
+            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { labels: { color: '#cbd5e1' } } }, scales: { x: { ticks: { color: '#94a3b8', maxRotation: 0 }, grid: { color: 'rgba(148,163,184,.12)' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,.12)' } } } }
+        });
+    }
+    function safelyLoadHistory() { loadHistory().catch(error => { chartCanvas.style.display = 'none'; chartMessage.textContent = error.message; chartMessage.style.display = 'block'; }); }
+    pairSelect.addEventListener('change', safelyLoadHistory);
+    periodSelect.addEventListener('change', safelyLoadHistory);
+    safelyLoadHistory();
+</script>
+{% endif %}
+{% endblock %}
