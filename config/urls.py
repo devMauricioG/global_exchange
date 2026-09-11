@@ -26,6 +26,7 @@ urlpatterns = [
     path('auth/', include('authentication.urls')),
     path('customers/', include('customers.urls')),
     path('payments/', include('payments.urls')),
+    path('rates/', include('rates.urls')),
     re_path(r'^docs/(?P<path>.*)$', serve_sphinx_docs, name='sphinx_docs'),
 ]
 
