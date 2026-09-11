@@ -435,6 +435,21 @@ class RateCalculationServiceTest(TestCase):
         rate = RateCalculationService.get_latest_exchange_rate('EUR', 'PYG')
         self.assertIsNone(rate)
 
+    def test_get_latest_exchange_rate_excludes_expired_and_future_quotes(self):
+        """El cotizador no debe devolver cotizaciones fuera de su vigencia."""
+        now = timezone.now()
+        ExchangeRate.objects.filter(pk=self.rate.pk).update(valid_to=now - timedelta(seconds=1))
+        ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7600.000000'),
+            sell_rate=Decimal('7700.000000'),
+            valid_from=now + timedelta(minutes=5),
+            is_active=True,
+        )
+
+        self.assertIsNone(RateCalculationService.get_latest_exchange_rate('USD', 'PYG'))
+
     def test_calculate_quotation_buy_minorista(self):
         """
         Cliente Minorista compra 100 USD (op_type='BUY', is_source_base=True).
@@ -826,6 +841,22 @@ class RatesViewsAndApiTest(TestCase):
             reverse('rates:api_calculate'),
             {
                 'base_currency': 'GBP',
+                'target_currency': 'PYG',
+                'amount': '100.00',
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_calculate_rejects_expired_quote(self):
+        """La integración del cotizador devuelve 404 cuando ya expiró la tasa."""
+        ExchangeRate.objects.filter(pk=self.rate.pk).update(
+            valid_to=timezone.now() - timedelta(seconds=1)
+        )
+
+        response = self.client.get(
+            reverse('rates:api_calculate'),
+            {
+                'base_currency': 'USD',
                 'target_currency': 'PYG',
                 'amount': '100.00',
             },

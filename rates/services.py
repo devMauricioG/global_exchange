@@ -156,6 +156,7 @@ class RateCalculationService:
         base_code = base_currency.code if isinstance(base_currency, Currency) else str(base_currency).upper().strip()
         target_code = target_currency.code if isinstance(target_currency, Currency) else str(target_currency).upper().strip()
 
+        now = timezone.now()
         return (
             ExchangeRate.objects.filter(
                 base_currency__code=base_code,
@@ -163,7 +164,9 @@ class RateCalculationService:
                 target_currency__code=target_code,
                 target_currency__is_active=True,
                 is_active=True,
+                valid_from__lte=now,
             )
+            .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=now))
             .select_related('base_currency', 'target_currency')
             .order_by('-valid_from', '-created_at')
             .first()
@@ -582,4 +585,3 @@ class QuoteFreezeService:
             return False, frozen, "La cotización congelada ha expirado (límite de 5 minutos excedido)."
 
         return True, frozen, "Cotización congelada válida y vigente."
-
