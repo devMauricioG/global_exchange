@@ -38,4 +38,9 @@ urlpatterns = [
     path('api/calculate/', views.CalculateNetRateApiView.as_view(), name='api_calculate'),
     path('api/commissions/', views.SegmentCommissionListApiView.as_view(), name='api_commissions'),
     path('api/commissions/<str:segment>/', views.SegmentCommissionDetailApiView.as_view(), name='api_commission_detail'),
+
+    # Endpoints API REST Congelamiento de Cotizaciones (SCRUM-54)
+    path('api/freeze/', views.FreezeQuoteApiView.as_view(), name='api_freeze'),
+    path('api/frozen-quote/', views.GetFrozenQuoteApiView.as_view(), name='api_frozen_quote'),
+    path('api/unfreeze/', views.UnfreezeQuoteApiView.as_view(), name='api_unfreeze'),
 ]

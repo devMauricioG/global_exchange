@@ -1,32 +1,108 @@
 {% extends "base.html" %}
 
-{% block title %}Cotizador y Motor de Tasas Netas — Global Exchange{% endblock %}
+{% block title %}Simulador de Cotizaciones y Congelamiento — Global Exchange{% endblock %}
 
 {% block content %}
-<div class="card" style="margin-bottom: 2rem;">
+<div class="card" style="margin-bottom: 2rem; background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid var(--border-color);">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <div>
-            <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
-                🧮 Motor de Cálculo de Tasas Netas y Cotizaciones
-            </h1>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.25rem;">
+                <span style="font-size: 1.75rem;">💱</span>
+                <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0;">
+                    Simulador Interactivo de Cotizaciones
+                </h1>
+            </div>
             <p style="color: var(--text-muted); font-size: 0.95rem;">
-                Simule cotizaciones en tiempo real aplicando automáticamente bonificaciones de spread y comisiones según el segmento del cliente.
+                Calcule conversiones en tiempo real con bonificación por segmento y congele su cotización con validez garantizada por 5 minutos.
             </p>
         </div>
-        <div>
-            <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary">
-                ⚙️ Gestionar Comisiones por Segmento
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <a href="{% url 'rates:dashboard' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.85rem;">
+                📊 Evolución Histórica
+            </a>
+            <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.85rem;">
+                ⚙️ Reglas de Comisión
             </a>
         </div>
     </div>
 </div>
 
+<!-- Banner de Cotización Congelada (Activo / Expirado) -->
+<div id="freezeBanner" class="card" style="margin-bottom: 1.5rem; display: {% if frozen_quote and not frozen_quote.is_expired %}block{% else %}none{% endif %}; border: 1px solid #10b981; background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%); box-shadow: 0 0 25px rgba(16, 185, 129, 0.2); transition: all 0.3s ease;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.25rem;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <div style="position: relative; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(16, 185, 129, 0.2); border: 2px solid #10b981; border-radius: 50%;">
+                <span id="freezeIcon" style="font-size: 1.5rem; animation: pulse 2s infinite;">🔒</span>
+            </div>
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 1.1rem; font-weight: 800; color: #34d399;">Cotización Congelada</span>
+                    <span id="tokenBadge" class="badge" style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; font-family: monospace; font-size: 0.85rem; padding: 0.25rem 0.6rem; border-radius: 0.375rem; letter-spacing: 0.05em;">
+                        {{ frozen_quote.token|default:"QTZ-DEMO" }}
+                    </span>
+                    <button type="button" id="copyTokenBtn" onclick="copyFreezeToken()" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; height: auto;" title="Copiar Token">
+                        📋 Copiar
+                    </button>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+                    Tasa garantizada protegida de fluctuaciones cambiarias por 5 minutos.
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <!-- Cuenta Regresiva -->
+            <div style="text-align: right;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.05em;">
+                    Tiempo Restante
+                </div>
+                <div id="countdownDisplay" style="font-size: 1.9rem; font-weight: 900; font-family: monospace; color: #34d399; line-height: 1.1;">
+                    05:00
+                </div>
+            </div>
+
+            <!-- Botón Descongelar / Renovar -->
+            <button type="button" id="unfreezeBtn" onclick="unfreezeQuote()" class="btn btn-secondary" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 0.85rem; padding: 0.55rem 1rem;">
+                🔓 Descongelar / Renovar
+            </button>
+        </div>
+    </div>
+
+    <!-- Barra de Progreso del Temporizador -->
+    <div style="margin-top: 1rem; width: 100%; background: rgba(15, 23, 42, 0.6); height: 6px; border-radius: 3px; overflow: hidden; position: relative;">
+        <div id="freezeProgressBar" style="height: 100%; width: 100%; background: linear-gradient(90deg, #10b981 0%, #38bdf8 100%); transition: width 1s linear;"></div>
+    </div>
+</div>
+
+<!-- Banner de Cotización Expirada -->
+<div id="expiredBanner" class="card" style="margin-bottom: 1.5rem; display: {% if frozen_quote and frozen_quote.is_expired %}block{% else %}none{% endif %}; border: 1px solid var(--warning); background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">⏱️</span>
+            <div>
+                <strong style="color: #fbbf24; font-size: 1rem;">El tiempo de congelamiento de 5 minutos ha expirado.</strong>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0;">
+                    La tasa reservada ya no es válida. Puede recalcular inmediatamente con las tasas de mercado actuales.
+                </p>
+            </div>
+        </div>
+        <button type="button" onclick="refreshMarketRate()" class="btn btn-primary" style="font-size: 0.85rem; padding: 0.5rem 1rem;">
+            🔄 Refrescar Cotización a Mercado
+        </button>
+    </div>
+</div>
+
 <div style="display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.5rem; align-items: start;">
-    <!-- Formulario del Cotizador -->
+    <!-- Formulario del Cotizador Interactivo -->
     <div class="card" style="padding: 1.75rem;">
-        <h2 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
-            <span>📝</span> Parámetros de la Cotización
-        </h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+            <h2 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <span>📝</span> Parámetros de la Cotización
+            </h2>
+            <span id="lockIndicator" style="display: none; font-size: 0.75rem; color: #34d399; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); padding: 0.2rem 0.6rem; border-radius: 9999px; font-weight: 700;">
+                🔒 Parámetros Bloqueados
+            </span>
+        </div>
 
         <form id="calculatorForm" method="post" action="{% url 'rates:rate_calculator' %}" novalidate>
             {% csrf_token %}
@@ -107,20 +183,23 @@
             </div>
             {% endif %}
 
-            <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-                <button type="submit" class="btn btn-primary" style="flex: 1; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700;">
+            <div style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                <button type="submit" id="submitCalcBtn" class="btn btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700; width: 100%;">
                     ⚡ Calcular Liquidación Neta
+                </button>
+                <button type="button" id="freezeActionBtn" onclick="freezeCurrentQuote()" class="btn btn-secondary" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 700; width: 100%; border-color: rgba(16, 185, 129, 0.5); color: #34d399; background: rgba(16, 185, 129, 0.08); display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                    <span>🔒</span> Congelar Cotización por 5 Minutos
                 </button>
             </div>
         </form>
     </div>
 
     <!-- Panel de Resultados de Liquidación -->
-    <div>
+    <div id="resultsWrapper">
         {% if calculation %}
-        <div class="card" style="padding: 1.75rem; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 8px 32px rgba(11, 17, 32, 0.6); position: relative; overflow: hidden;">
-            <div style="position: absolute; top: 0; right: 0; background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%); padding: 0.35rem 1rem; border-bottom-left-radius: 0.75rem; font-size: 0.75rem; font-weight: 800; color: #0b1120; text-transform: uppercase; letter-spacing: 0.05em;">
-                Liquidación Oficial
+        <div id="calculationResultCard" class="card" style="padding: 1.75rem; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 8px 32px rgba(11, 17, 32, 0.6); position: relative; overflow: hidden;">
+            <div id="resultStatusTag" style="position: absolute; top: 0; right: 0; background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%); padding: 0.35rem 1rem; border-bottom-left-radius: 0.75rem; font-size: 0.75rem; font-weight: 800; color: #0b1120; text-transform: uppercase; letter-spacing: 0.05em;">
+                {% if frozen_quote and not frozen_quote.is_expired %}Cotización Congelada (5 min){% else %}Liquidación Oficial{% endif %}
             </div>
 
             <div style="margin-bottom: 1.25rem;">
@@ -215,13 +294,13 @@
             </div>
         </div>
         {% else %}
-        <div class="card" style="padding: 3rem 2rem; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-color);">
+        <div id="emptyResultsCard" class="card" style="padding: 3rem 2rem; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-color);">
             <div style="font-size: 3rem; margin-bottom: 1rem;">💱</div>
             <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
                 Esperando Parámetros
             </h3>
             <p style="font-size: 0.9rem; line-height: 1.5; max-width: 360px; margin: 0 auto;">
-                Seleccione la cotización, monto y tipo de operación para obtener el desglose detallado de tasas netas y comisiones.
+                Seleccione la cotización, monto y tipo de operación para obtener el desglose detallado de tasas netas y comisiones en tiempo real.
             </p>
         </div>
         {% endif %}
@@ -233,7 +312,7 @@
             </h3>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                 {% for rate in active_rates %}
-                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); padding: 0.5rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--border-color); font-size: 0.85rem;">
+                <div onclick="selectExchangeRate('{{ rate.id }}')" style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); padding: 0.5rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--border-color); font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border-color)'">
                     <span style="font-weight: 700; color: var(--primary);">{{ rate.base_currency.code }}/{{ rate.target_currency.code }}</span>
                     <span>Compra: <strong style="color: #34d399;">{{ rate.buy_rate }}</strong></span>
                     <span>Venta: <strong style="color: #f87171;">{{ rate.sell_rate }}</strong></span>
@@ -246,4 +325,227 @@
         </div>
     </div>
 </div>
+
+<script>
+    // Variables de estado del temporizador y cotización congelada
+    let countdownInterval = null;
+    let totalDurationSeconds = 300;
+    let currentRemainingSeconds = {{ frozen_quote.remaining_seconds|default:0 }};
+    let activeFreezeToken = "{{ frozen_quote.token|default:'' }}";
+    let isQuoteFrozen = {% if frozen_quote and not frozen_quote.is_expired %}true{% else %}false{% endif %};
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // Inicializar temporizador si la página cargó con una cotización congelada activa
+        if (isQuoteFrozen && currentRemainingSeconds > 0) {
+            initCountdown(currentRemainingSeconds, activeFreezeToken);
+            setFormLocked(true);
+        }
+    });
+
+    function selectExchangeRate(rateId) {
+        if (isQuoteFrozen) return;
+        const select = document.getElementById('calc_exchange_rate');
+        if (select) {
+            select.value = rateId;
+        }
+    }
+
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    function initCountdown(remainingSeconds, token) {
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        currentRemainingSeconds = remainingSeconds;
+        activeFreezeToken = token;
+        isQuoteFrozen = true;
+
+        const banner = document.getElementById('freezeBanner');
+        const expiredBanner = document.getElementById('expiredBanner');
+        const display = document.getElementById('countdownDisplay');
+        const progressBar = document.getElementById('freezeProgressBar');
+        const tokenBadge = document.getElementById('tokenBadge');
+
+        if (banner) banner.style.display = 'block';
+        if (expiredBanner) expiredBanner.style.display = 'none';
+        if (tokenBadge) tokenBadge.textContent = token;
+
+        updateTimerDisplay();
+
+        countdownInterval = setInterval(() => {
+            currentRemainingSeconds--;
+            if (currentRemainingSeconds <= 0) {
+                clearInterval(countdownInterval);
+                onFreezeExpired();
+            } else {
+                updateTimerDisplay();
+            }
+        }, 1000);
+    }
+
+    function updateTimerDisplay() {
+        const display = document.getElementById('countdownDisplay');
+        const progressBar = document.getElementById('freezeProgressBar');
+        if (display) {
+            display.textContent = formatTime(Math.max(0, currentRemainingSeconds));
+            if (currentRemainingSeconds <= 60) {
+                display.style.color = '#ef4444';
+            } else if (currentRemainingSeconds <= 120) {
+                display.style.color = '#f59e0b';
+            } else {
+                display.style.color = '#34d399';
+            }
+        }
+        if (progressBar) {
+            const pct = Math.max(0, (currentRemainingSeconds / totalDurationSeconds) * 100);
+            progressBar.style.width = pct + '%';
+            if (currentRemainingSeconds <= 60) {
+                progressBar.style.background = '#ef4444';
+            } else if (currentRemainingSeconds <= 120) {
+                progressBar.style.background = '#f59e0b';
+            } else {
+                progressBar.style.background = 'linear-gradient(90deg, #10b981 0%, #38bdf8 100%)';
+            }
+        }
+    }
+
+    function onFreezeExpired() {
+        isQuoteFrozen = false;
+        const banner = document.getElementById('freezeBanner');
+        const expiredBanner = document.getElementById('expiredBanner');
+        if (banner) banner.style.display = 'none';
+        if (expiredBanner) expiredBanner.style.display = 'block';
+        setFormLocked(false);
+    }
+
+    function setFormLocked(locked) {
+        const lockIndicator = document.getElementById('lockIndicator');
+        const freezeActionBtn = document.getElementById('freezeActionBtn');
+        const submitCalcBtn = document.getElementById('submitCalcBtn');
+        const inputs = document.querySelectorAll('#calculatorForm input, #calculatorForm select');
+
+        if (lockIndicator) {
+            lockIndicator.style.display = locked ? 'inline-block' : 'none';
+        }
+        if (freezeActionBtn) {
+            freezeActionBtn.disabled = locked;
+            freezeActionBtn.style.opacity = locked ? '0.5' : '1';
+        }
+        if (submitCalcBtn) {
+            submitCalcBtn.disabled = locked;
+            submitCalcBtn.style.opacity = locked ? '0.5' : '1';
+        }
+
+        inputs.forEach(input => {
+            if (input.name !== 'csrfmiddlewaretoken') {
+                input.disabled = locked;
+            }
+        });
+    }
+
+    async function freezeCurrentQuote() {
+        const form = document.getElementById('calculatorForm');
+        const formData = new FormData(form);
+        const params = {
+            exchange_rate_id: formData.get('exchange_rate'),
+            operation_type: formData.get('operation_type'),
+            amount: formData.get('amount'),
+            segment: formData.get('segment'),
+            cliente_id: formData.get('cliente'),
+            is_source_base: formData.get('is_source_base') ? 'true' : 'false',
+        };
+
+        if (!params.exchange_rate_id || !params.amount) {
+            alert('Por favor complete los campos obligatorios de cotización y monto.');
+            return;
+        }
+
+        try {
+            const response = await fetch("{% url 'rates:api_freeze' %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': formData.get('csrfmiddlewaretoken') || '',
+                },
+                body: JSON.stringify(params)
+            });
+
+            const data = await response.json();
+            if (data.success && data.frozen_quote) {
+                const fq = data.frozen_quote;
+                initCountdown(fq.remaining_seconds || 300, fq.token);
+                setFormLocked(true);
+                window.location.reload();
+            } else {
+                alert('Error al congelar cotización: ' + (data.error || 'Error desconocido.'));
+            }
+        } catch (err) {
+            console.error('Error al congelar:', err);
+            alert('Ocurrió un error al contactar el servidor para congelar la cotización.');
+        }
+    }
+
+    async function unfreezeQuote() {
+        if (!confirm('¿Desea descongelar la cotización activa? Podrá recalcular libremente a las tasas de mercado actuales.')) {
+            return;
+        }
+
+        try {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+            const response = await fetch("{% url 'rates:api_unfreeze' %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({ token: activeFreezeToken })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                if (countdownInterval) clearInterval(countdownInterval);
+                isQuoteFrozen = false;
+                activeFreezeToken = '';
+                const banner = document.getElementById('freezeBanner');
+                if (banner) banner.style.display = 'none';
+                setFormLocked(false);
+                window.location.reload();
+            }
+        } catch (err) {
+            console.error('Error al descongelar:', err);
+        }
+    }
+
+    function refreshMarketRate() {
+        const form = document.getElementById('calculatorForm');
+        setFormLocked(false);
+        const expiredBanner = document.getElementById('expiredBanner');
+        if (expiredBanner) expiredBanner.style.display = 'none';
+        form.submit();
+    }
+
+    function copyFreezeToken() {
+        if (!activeFreezeToken) return;
+        navigator.clipboard.writeText(activeFreezeToken).then(() => {
+            const btn = document.getElementById('copyTokenBtn');
+            if (btn) {
+                const oldText = btn.innerHTML;
+                btn.innerHTML = '✅ ¡Copiado!';
+                setTimeout(() => { btn.innerHTML = oldText; }, 2000);
+            }
+        }).catch(err => {
+            console.error('Error al copiar al portapapeles:', err);
+        });
+    }
+</script>
+
+<style>
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.1); opacity: 0.85; }
+    }
+</style>
 {% endblock %}

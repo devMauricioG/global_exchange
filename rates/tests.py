@@ -29,7 +29,7 @@ from customers.models import Cliente, CustomerUserAssignment
 from rates.admin import CurrencyAdmin, ExchangeRateAdmin, SegmentCommissionAdmin
 from rates.forms import RateCalculatorForm, SegmentCommissionFilterForm, SegmentCommissionForm
 from rates.models import Currency, ExchangeRate, SegmentCommission
-from rates.services import RateCalculationService, get_active_customer
+from rates.services import QuoteFreezeService, RateCalculationService, get_active_customer
 
 User = get_user_model()
 
@@ -1184,3 +1184,290 @@ class ExchangeRateDashboardTests(TestCase):
         self.client.logout()
         self.assertEqual(self.client.get(reverse('rates:dashboard')).status_code, 302)
         self.assertEqual(self.client.get(reverse('rates:api_history')).status_code, 302)
+
+
+# ==============================================================================
+# PRUEBAS DEL SERVICIO DE CONGELAMIENTO DE COTIZACIONES (SCRUM-54)
+# ==============================================================================
+
+class QuoteFreezeServiceTest(TestCase):
+    """
+    Pruebas unitarias para QuoteFreezeService y la gestión de tokens con temporizador de 5 minutos.
+    """
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(
+            username='freeze_tester',
+            email='freeze@example.com',
+            password='Password123!',
+        )
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+        )
+        self.calc_data = {
+            'official_rate': Decimal('7400.000000'),
+            'effective_rate': Decimal('7420.000000'),
+            'base_amount': Decimal('100.00'),
+            'net_target_amount': Decimal('742000.00'),
+            'operation_type': 'BUY',
+        }
+
+    def _get_request_with_session(self):
+        request = self.factory.get('/rates/calculator/')
+        request.user = self.user
+        # Simular sesión de Django
+        session_middleware = type('MockSession', (), {})()
+        session_data = {}
+
+        class MockSession(dict):
+            modified = False
+
+        request.session = MockSession()
+        return request
+
+    def test_freeze_quote_generates_token_and_payload(self):
+        request = self._get_request_with_session()
+        result = QuoteFreezeService.freeze_quote(request, self.calc_data)
+
+        self.assertTrue(result['success'])
+        self.assertTrue(result['token'].startswith('QTZ-'))
+        self.assertEqual(result['duration_seconds'], 300)
+        self.assertEqual(result['remaining_seconds'], 300)
+        self.assertFalse(result['is_expired'])
+        self.assertEqual(result['calculation']['base_amount'], 100.0)
+        self.assertIn('frozen_quote', request.session)
+        self.assertTrue(request.session.modified)
+
+    def test_get_frozen_quote_calculates_remaining_time(self):
+        request = self._get_request_with_session()
+        freeze_res = QuoteFreezeService.freeze_quote(request, self.calc_data)
+        token = freeze_res['token']
+
+        quote = QuoteFreezeService.get_frozen_quote(request, token=token)
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote['token'], token)
+        self.assertFalse(quote['is_expired'])
+        self.assertGreaterEqual(quote['remaining_seconds'], 295)
+        self.assertLessEqual(quote['remaining_seconds'], 300)
+
+    def test_get_frozen_quote_detects_expiration(self):
+        request = self._get_request_with_session()
+        QuoteFreezeService.freeze_quote(request, self.calc_data)
+
+        # Forzar expiración simulando timestamp vencido en sesión
+        expired_time = timezone.now() - timedelta(minutes=6)
+        request.session['frozen_quote']['expires_at'] = expired_time.isoformat()
+
+        quote = QuoteFreezeService.get_frozen_quote(request)
+        self.assertIsNotNone(quote)
+        self.assertTrue(quote['is_expired'])
+        self.assertEqual(quote['remaining_seconds'], 0)
+
+    def test_unfreeze_quote_clears_session(self):
+        request = self._get_request_with_session()
+        res = QuoteFreezeService.freeze_quote(request, self.calc_data)
+        token = res['token']
+
+        # Descongelar con token correcto
+        cleared = QuoteFreezeService.unfreeze_quote(request, token=token)
+        self.assertTrue(cleared)
+        self.assertNotIn('frozen_quote', request.session)
+
+        # Intentar descongelar nuevamente retorna False
+        cleared_again = QuoteFreezeService.unfreeze_quote(request, token=token)
+        self.assertFalse(cleared_again)
+
+    def test_validate_quote_token_states(self):
+        request = self._get_request_with_session()
+        res = QuoteFreezeService.freeze_quote(request, self.calc_data)
+        token = res['token']
+
+        # Token válido
+        is_valid, data, msg = QuoteFreezeService.validate_quote_token(request, token)
+        self.assertTrue(is_valid)
+        self.assertIsNotNone(data)
+
+        # Token inválido / no existente
+        is_valid_fake, _, _ = QuoteFreezeService.validate_quote_token(request, 'QTZ-INVALID')
+        self.assertFalse(is_valid_fake)
+
+        # Token expirado
+        request.session['frozen_quote']['expires_at'] = (timezone.now() - timedelta(seconds=10)).isoformat()
+        is_valid_exp, _, msg_exp = QuoteFreezeService.validate_quote_token(request, token)
+        self.assertFalse(is_valid_exp)
+        self.assertIn('expirado', msg_exp)
+
+
+# ==============================================================================
+# PRUEBAS DE ENDPOINTS API DE CONGELAMIENTO (SCRUM-54)
+# ==============================================================================
+
+class QuoteFreezeApiTests(TestCase):
+    """
+    Pruebas de integración para los endpoints API REST de congelamiento de cotizaciones.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='api_client_user',
+            password='Password123!',
+        )
+        self.client.force_login(self.user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+
+    def test_api_freeze_quote_success(self):
+        payload = {
+            'exchange_rate_id': self.rate.id,
+            'amount': '250.00',
+            'operation_type': 'BUY',
+            'is_source_base': True,
+        }
+        res = self.client.post(
+            reverse('rates:api_freeze'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertTrue(data['success'])
+        self.assertIn('frozen_quote', data)
+        self.assertTrue(data['frozen_quote']['token'].startswith('QTZ-'))
+        self.assertEqual(data['frozen_quote']['duration_seconds'], 300)
+
+    def test_api_get_frozen_quote_returns_active_quote(self):
+        # Primero congelamos
+        payload = {
+            'exchange_rate_id': self.rate.id,
+            'amount': '100.00',
+            'operation_type': 'SELL',
+        }
+        self.client.post(
+            reverse('rates:api_freeze'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        # Consultamos el estado activo
+        res_get = self.client.get(reverse('rates:api_frozen_quote'))
+        self.assertEqual(res_get.status_code, 200)
+        data_get = res_get.json()
+        self.assertTrue(data_get['success'])
+        self.assertFalse(data_get['is_expired'])
+        self.assertGreater(data_get['remaining_seconds'], 0)
+
+    def test_api_unfreeze_quote(self):
+        # Congelar
+        payload = {'exchange_rate_id': self.rate.id, 'amount': '150.00'}
+        freeze_res = self.client.post(
+            reverse('rates:api_freeze'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        token = freeze_res.json()['frozen_quote']['token']
+
+        # Descongelar
+        unfreeze_res = self.client.post(
+            reverse('rates:api_unfreeze'),
+            data=json.dumps({'token': token}),
+            content_type='application/json',
+        )
+        self.assertEqual(unfreeze_res.status_code, 200)
+        self.assertTrue(unfreeze_res.json()['cleared'])
+
+        # Verificar que ya no hay cotización congelada
+        check_res = self.client.get(reverse('rates:api_frozen_quote'))
+        self.assertEqual(check_res.status_code, 404)
+
+    def test_api_freeze_quote_missing_rate(self):
+        payload = {'exchange_rate_id': 99999, 'amount': '100.00'}
+        res = self.client.post(
+            reverse('rates:api_freeze'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(res.status_code, 404)
+
+
+# ==============================================================================
+# PRUEBAS DE VISTA DEL COTIZADOR Y TEMPORIZADOR (SCRUM-54)
+# ==============================================================================
+
+class RateCalculatorInteractiveViewTests(TestCase):
+    """
+    Pruebas de la interfaz de usuario del cotizador y su integración con el temporizador de congelamiento.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='calc_user', password='Password123!')
+        self.client.force_login(self.user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+
+    def test_rate_calculator_get_view(self):
+        response = self.client.get(reverse('rates:rate_calculator'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'rates/rate_calculator.html')
+        self.assertIn('form', response.context)
+        self.assertIn('currencies', response.context)
+        self.assertContains(response, 'Simulador Interactivo de Cotizaciones')
+        self.assertContains(response, 'Congelar Cotización por 5 Minutos')
+
+    def test_rate_calculator_post_calculation_success(self):
+        response = self.client.post(
+            reverse('rates:rate_calculator'),
+            {
+                'exchange_rate': self.rate.id,
+                'amount': '500.00',
+                'operation_type': 'BUY',
+                'is_source_base': 'on',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.context['calculation'])
+        self.assertContains(response, 'USD/PYG')
+        self.assertContains(response, 'Desglose de Tarifas y Beneficios')
+
+    def test_rate_calculator_displays_frozen_quote_banner(self):
+        # Congelar primero una cotización en sesión
+        payload = {
+            'exchange_rate_id': self.rate.id,
+            'amount': '300.00',
+            'operation_type': 'BUY',
+        }
+        freeze_res = self.client.post(
+            reverse('rates:api_freeze'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        token = freeze_res.json()['frozen_quote']['token']
+
+        # Cargar página del cotizador
+        response = self.client.get(reverse('rates:rate_calculator'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.context['frozen_quote'])
+        self.assertEqual(response.context['frozen_quote']['token'], token)
+        self.assertContains(response, token)
+        self.assertContains(response, 'Cotización Congelada')
+        self.assertContains(response, 'countdownDisplay')
+
