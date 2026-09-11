@@ -151,3 +151,18 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 
 ---
 
+## Pablo Elizeche — 10/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Módulo de parametrización de comisiones por segmento y motor de cálculo de tasas netas (SCRUM-53)
+
+**Resumen:**
+- Implementé el motor de cálculo financiero `RateCalculationService` en `rates/services.py`, encargado de computar tasas netas para compra y venta de divisas, aplicar bonificaciones porcentuales sobre el spread comercial, calcular comisiones administrativas (porcentuales y fijas) y liquidar montos netos a pagar o recibir.
+- Diseñé la función de resolución de cliente activo `get_active_customer(request)` para integrar fluidamente el middleware de sesión de clientes con los servicios transaccionales.
+- Desarrollé los formularios de parametrización y simulación (`SegmentCommissionForm`, `SegmentCommissionFilterForm`, `RateCalculatorForm`) en `rates/forms.py` con validaciones de límites de porcentaje y cargos no negativos.
+- Construí el conjunto completo de controladores web CBVs en `rates/views.py` para el CRUD administrativo de comisiones (`SegmentCommissionListView`, `CreateView`, `UpdateView`, `DeleteView`, `DetailView`) y el cotizador interactivo (`RateCalculatorView`).
+- Creé endpoints de API REST JSON (`CalculateNetRateApiView`, `SegmentCommissionListApiView`, `SegmentCommissionDetailApiView`) para cotizaciones programáticas en tiempo real vía AJAX/API.
+- Diseñé las plantillas HTML con estética corporativa y alertas contextuales en `templates/rates/` y actualicé la barra de navegación en `templates/base.html`.
+- Amplié la suite de pruebas automatizadas en `rates/tests.py` con 71 pruebas unitarias y de integración, alcanzando un **97% de cobertura de código** en `rates` y un total de **167 tests exitosos en todo el proyecto**.
+- Redacté el walkthrough técnico completo en `docs/documentacion/Proyecto/SCRUM-53.md`.
+
+

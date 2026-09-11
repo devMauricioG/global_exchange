@@ -492,6 +492,22 @@
                         </a>
                     </li>
 
+                    <!-- Opción Visible para usuarios autenticados: Cotizador de Tasas Netas -->
+                    <li>
+                        <a href="{% url 'rates:rate_calculator' %}" class="nav-link {% if '/rates/calculator/' in request.path %}active{% endif %}">
+                            🧮 Cotizador
+                        </a>
+                    </li>
+
+                    <!-- Opción Visible para roles Admin y Operator: Comisiones por Segmento -->
+                    {% if is_operator or user|has_any_role:"admin,operator" %}
+                        <li>
+                            <a href="{% url 'rates:commission_list' %}" class="nav-link {% if '/rates/commissions/' in request.path %}active{% endif %}">
+                                💱 Comisiones
+                            </a>
+                        </li>
+                    {% endif %}
+
                     <!-- Opción Exclusiva para rol: Admin -->
                     {% if is_admin or user|has_role:"admin" %}
                         <li>

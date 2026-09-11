@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de Comisión — {{ commission.get_segment_display }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <span class="badge {% if commission.segment == 'MIN' %}badge-min{% elif commission.segment == 'MAY' %}badge-may{% elif commission.segment == 'COR' %}badge-cor{% elif commission.segment == 'VIP' %}badge-vip{% else %}badge-min{% endif %}" style="font-size: 1.1rem; padding: 0.5rem 1rem;">
+                {{ commission.get_segment_display }}
+            </span>
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    Regla de Comisión y Política Cambiaria
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.875rem; margin: 0;">
+                    Segmento Código: <code style="color: var(--primary);">{{ commission.segment }}</code> | Estado:
+                    {% if commission.is_active %}
+                        <span style="color: #34d399; font-weight: 700;">● Vigente y Activo</span>
+                    {% else %}
+                        <span style="color: #f87171; font-weight: 700;">○ Inactivo</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary">← Volver</a>
+            <a href="{% url 'rates:rate_calculator' %}?segment={{ commission.segment }}" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+                🧮 Simular en Cotizador
+            </a>
+            <a href="{% url 'rates:commission_update' commission.id %}" class="btn btn-primary">✏️ Editar Parámetros</a>
+        </div>
+    </div>
+</div>
+
+<!-- Tarjetas de Parámetros Principales -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid #818cf8;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Comisión Porcentual</div>
+        <div style="font-size: 2.25rem; font-weight: 800; color: #a5b4fc; margin-top: 0.5rem;">
+            {{ commission.commission_percentage }}%
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Sobre el volumen bruto operado</div>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid var(--primary);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Cargo Fijo por Operación</div>
+        <div style="font-size: 2.25rem; font-weight: 800; color: var(--primary); margin-top: 0.5rem;">
+            ${{ commission.fixed_fee|floatformat:2 }}
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Costo administrativo transaccional</div>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid #fbbf24;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Descuento sobre Spread</div>
+        <div style="font-size: 2.25rem; font-weight: 800; color: #fbbf24; margin-top: 0.5rem;">
+            {{ commission.spread_discount_percentage }}%
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Bonificación en cotización oficial</div>
+    </div>
+</div>
+
+<!-- Tabla de Simulación Financiera -->
+<div class="card" style="margin-bottom: 2rem;">
+    <h2 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">
+        📊 Matriz de Impacto Tarifario por Rango de Volumen
+    </h2>
+    <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
+        Comportamiento de los costos totales aplicables para diferentes montos de muestra bajo las reglas de este segmento.
+    </p>
+
+    <div style="overflow-x: auto;">
+        <table class="table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>Monto de Transacción</th>
+                    <th style="text-align: right;">Comisión Porcentual</th>
+                    <th style="text-align: right;">Cargo Fijo</th>
+                    <th style="text-align: right;">Total Comisiones</th>
+                    <th style="text-align: right;">Tasa Efectiva de Comisión</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sim in simulations %}
+                <tr>
+                    <td style="font-weight: 700; color: var(--text-main); font-size: 1.05rem;">
+                        ${{ sim.amount|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; color: var(--text-muted);">
+                        {{ commission.commission_percentage }}%
+                    </td>
+                    <td style="text-align: right; color: var(--text-muted);">
+                        ${{ commission.fixed_fee|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; font-weight: 700; color: #38bdf8;">
+                        ${{ sim.commission_total|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; font-weight: 800; color: #a5b4fc;">
+                        {{ sim.effective_percentage }}%
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
