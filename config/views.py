@@ -6,7 +6,7 @@ from django.http import Http404
 
 @login_required
 def serve_sphinx_docs(request, path):
-    document_root = os.path.join(settings.BASE_DIR, 'docs', 'sphinx', 'build', 'html')
+    document_root = os.path.join(settings.BASE_DIR, 'docs', 'sphinx', 'build')
     path = path.lstrip('/')
     if path == '':
         path = 'index.html'

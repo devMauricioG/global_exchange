@@ -522,6 +522,13 @@
                             </a>
                         </li>
                     {% endif %}
+                    
+                     <!-- Opción Visible para usuarios autenticados: Documentación Técnica -->
+                    <li>
+                        <a href="{% url 'sphinx_docs' path='' %}" class="nav-link" target="_blank" rel="noopener">
+                            📚 Documentación
+                        </a>
+                    </li>
                 {% endif %}
             </ul>
         </nav>
