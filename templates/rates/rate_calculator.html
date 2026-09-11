@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Cotizador y Motor de Tasas Netas — Global Exchange{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                🧮 Motor de Cálculo de Tasas Netas y Cotizaciones
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Simule cotizaciones en tiempo real aplicando automáticamente bonificaciones de spread y comisiones según el segmento del cliente.
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary">
+                ⚙️ Gestionar Comisiones por Segmento
+            </a>
+        </div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.5rem; align-items: start;">
+    <!-- Formulario del Cotizador -->
+    <div class="card" style="padding: 1.75rem;">
+        <h2 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span>📝</span> Parámetros de la Cotización
+        </h2>
+
+        <form id="calculatorForm" method="post" action="{% url 'rates:rate_calculator' %}" novalidate>
+            {% csrf_token %}
+
+            <!-- Par de Divisas -->
+            <div class="form-group">
+                <label for="calc_exchange_rate" class="form-label">
+                    {{ form.exchange_rate.label }} <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.exchange_rate }}
+                {% if form.exchange_rate.errors %}
+                    <ul class="errorlist">{{ form.exchange_rate.errors }}</ul>
+                {% endif %}
+            </div>
+
+            <!-- Tipo de Operación y Monto -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label for="calc_operation_type" class="form-label">
+                        {{ form.operation_type.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.operation_type }}
+                    {% if form.operation_type.errors %}
+                        <ul class="errorlist">{{ form.operation_type.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="calc_amount" class="form-label">
+                        {{ form.amount.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.amount }}
+                    {% if form.amount.errors %}
+                        <ul class="errorlist">{{ form.amount.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Segmento y Cliente de Referencia -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label for="calc_segment" class="form-label">
+                        {{ form.segment.label }}
+                    </label>
+                    {{ form.segment }}
+                    {% if form.segment.errors %}
+                        <ul class="errorlist">{{ form.segment.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="calc_cliente" class="form-label">
+                        {{ form.cliente.label }}
+                    </label>
+                    {{ form.cliente }}
+                    {% if form.cliente.errors %}
+                        <ul class="errorlist">{{ form.cliente.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Checkbox Monto Base -->
+            <div class="form-group" style="margin-top: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.65rem; cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                    {{ form.is_source_base }}
+                    <span>{{ form.is_source_base.label }}</span>
+                </label>
+            </div>
+
+            {% if active_customer %}
+            <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-top: 1rem; display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">
+                    Cliente Activo en Sesión: <strong style="color: var(--text-main);">{{ active_customer.nombre }}</strong>
+                </span>
+                <span class="badge {% if active_customer.segmentacion == 'MIN' %}badge-min{% elif active_customer.segmentacion == 'MAY' %}badge-may{% elif active_customer.segmentacion == 'COR' %}badge-cor{% elif active_customer.segmentacion == 'VIP' %}badge-vip{% else %}badge-min{% endif %}">
+                    {{ active_customer.get_segmentacion_display }}
+                </span>
+            </div>
+            {% endif %}
+
+            <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+                <button type="submit" class="btn btn-primary" style="flex: 1; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 700;">
+                    ⚡ Calcular Liquidación Neta
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Panel de Resultados de Liquidación -->
+    <div>
+        {% if calculation %}
+        <div class="card" style="padding: 1.75rem; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 8px 32px rgba(11, 17, 32, 0.6); position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 0; right: 0; background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%); padding: 0.35rem 1rem; border-bottom-left-radius: 0.75rem; font-size: 0.75rem; font-weight: 800; color: #0b1120; text-transform: uppercase; letter-spacing: 0.05em;">
+                Liquidación Oficial
+            </div>
+
+            <div style="margin-bottom: 1.25rem;">
+                <span class="badge {% if calculation.operation_type == 'BUY' %}badge-min{% else %}badge-vip{% endif %}" style="font-size: 0.85rem; padding: 0.35rem 0.75rem; margin-bottom: 0.5rem;">
+                    {{ calculation.operation_label }}
+                </span>
+                <div style="display: flex; align-items: baseline; gap: 0.5rem;">
+                    <span style="font-size: 1.85rem; font-weight: 800; color: var(--text-main);">
+                        {{ calculation.base_currency.code }}/{{ calculation.target_currency.code }}
+                    </span>
+                    <span style="color: var(--text-muted); font-size: 0.9rem;">
+                        (Segmento: <strong>{{ calculation.segment.name }}</strong>)
+                    </span>
+                </div>
+            </div>
+
+            <!-- Card de Monto Neto -->
+            <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem; text-align: center;">
+                <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;">
+                    {% if calculation.operation_type == 'BUY' %}
+                        Total Neto a Pagar
+                    {% else %}
+                        Total Neto a Recibir
+                    {% endif %}
+                </div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: #38bdf8; margin: 0.35rem 0;">
+                    {{ calculation.target_currency.symbol }} {{ calculation.net_target_amount|floatformat:calculation.target_currency.decimal_places }}
+                </div>
+                <div style="font-size: 0.875rem; color: var(--text-muted);">
+                    Por un volumen de <strong style="color: var(--text-main);">{{ calculation.base_currency.symbol }} {{ calculation.base_amount|floatformat:calculation.base_currency.decimal_places }} {{ calculation.base_currency.code }}</strong>
+                </div>
+            </div>
+
+            <!-- Desglose Financiero -->
+            <div style="border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em;">
+                    Desglose de Tarifas y Beneficios
+                </h3>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Tasa Oficial de Mercado:</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_rate }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Spread Base:</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_spread }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: #fbbf24;">🌟 Descuento Spread Segmento ({{ calculation.segment.spread_discount_percentage }}%):</span>
+                    <span style="font-weight: 700; color: #fbbf24;">Spread Ef. {{ calculation.effective_spread }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Tasa Preferencial Ajustada:</span>
+                    <span style="font-weight: 700; color: #34d399;">{{ calculation.effective_rate }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Importe Bruto Convertido:</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.target_currency.symbol }} {{ calculation.gross_target_amount }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Comisión Segmento ({{ calculation.segment.commission_percentage }}%):</span>
+                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.target_currency.symbol }} {{ calculation.commission_percentage_amount }}</span>
+                </div>
+
+                {% if calculation.fixed_fee > 0 %}
+                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
+                    <span style="color: var(--text-muted);">Cargo Fijo Administrativo:</span>
+                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.target_currency.symbol }} {{ calculation.fixed_fee }}</span>
+                </div>
+                {% endif %}
+
+                <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; font-size: 0.95rem; border-bottom: 2px solid var(--border-color); margin-top: 0.25rem;">
+                    <span style="font-weight: 700; color: var(--text-main);">Total Comisiones:</span>
+                    <span style="font-weight: 700; color: #f87171;">{{ calculation.target_currency.symbol }} {{ calculation.total_commission }}</span>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; padding: 0.75rem 0 0 0; font-size: 1rem;">
+                    <span style="font-weight: 800; color: var(--primary);">Tasa Neta Final por Unidad:</span>
+                    <span style="font-weight: 800; color: var(--primary); font-size: 1.15rem;">{{ calculation.final_effective_rate }}</span>
+                </div>
+
+                {% if calculation.spread_savings > 0 %}
+                <div style="margin-top: 1rem; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0.5rem; padding: 0.65rem 0.85rem; font-size: 0.85rem; color: #34d399;">
+                    ✨ <strong>Ahorro Estimado:</strong> El cliente ahorra aprox. <strong>{{ calculation.target_currency.symbol }} {{ calculation.spread_savings }}</strong> gracias a la bonificación de spread de su segmento.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="card" style="padding: 3rem 2rem; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-color);">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">💱</div>
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
+                Esperando Parámetros
+            </h3>
+            <p style="font-size: 0.9rem; line-height: 1.5; max-width: 360px; margin: 0 auto;">
+                Seleccione la cotización, monto y tipo de operación para obtener el desglose detallado de tasas netas y comisiones.
+            </p>
+        </div>
+        {% endif %}
+
+        <!-- Panel de Cotizaciones Activas de Referencia -->
+        <div class="card" style="margin-top: 1.5rem; padding: 1.25rem;">
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.75rem; text-transform: uppercase;">
+                📈 Cotizaciones Oficiales Vigentes
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                {% for rate in active_rates %}
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); padding: 0.5rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--border-color); font-size: 0.85rem;">
+                    <span style="font-weight: 700; color: var(--primary);">{{ rate.base_currency.code }}/{{ rate.target_currency.code }}</span>
+                    <span>Compra: <strong style="color: #34d399;">{{ rate.buy_rate }}</strong></span>
+                    <span>Venta: <strong style="color: #f87171;">{{ rate.sell_rate }}</strong></span>
+                    <span style="color: var(--text-subtle); font-size: 0.75rem;">Spread: {{ rate.spread }}</span>
+                </div>
+                {% empty %}
+                <p style="color: var(--text-muted); font-size: 0.85rem;">No hay cotizaciones activas registradas.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

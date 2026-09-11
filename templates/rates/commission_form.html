@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title|default:"Regla de Comisión" }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 720px; margin: 0 auto;">
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                    ⚙️ {{ page_title }}
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">
+                    Ajuste las políticas comerciales y beneficios cambiarios para este segmento.
+                </p>
+            </div>
+            <a href="{% url 'rates:commission_list' %}" class="btn btn-sm btn-secondary">
+                ← Volver al Listado
+            </a>
+        </div>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" style="margin-bottom: 1.5rem;">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            <!-- Segmento -->
+            <div class="form-group">
+                <label for="id_segment" class="form-label">
+                    {{ form.segment.label }} <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.segment }}
+                {% if form.segment.help_text %}
+                    <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.segment.help_text }}</small>
+                {% endif %}
+                {% if form.segment.errors %}
+                    <ul class="errorlist">{{ form.segment.errors }}</ul>
+                {% endif %}
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <!-- Comisión Porcentual -->
+                <div class="form-group">
+                    <label for="id_commission_percentage" class="form-label">
+                        {{ form.commission_percentage.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    <div style="position: relative;">
+                        {{ form.commission_percentage }}
+                        <span style="position: absolute; right: 0.85rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-weight: 700;">%</span>
+                    </div>
+                    {% if form.commission_percentage.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.commission_percentage.help_text }}</small>
+                    {% endif %}
+                    {% if form.commission_percentage.errors %}
+                        <ul class="errorlist">{{ form.commission_percentage.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <!-- Cargo Fijo -->
+                <div class="form-group">
+                    <label for="id_fixed_fee" class="form-label">
+                        {{ form.fixed_fee.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    <div style="position: relative;">
+                        {{ form.fixed_fee }}
+                        <span style="position: absolute; right: 0.85rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-weight: 700;">$</span>
+                    </div>
+                    {% if form.fixed_fee.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.fixed_fee.help_text }}</small>
+                    {% endif %}
+                    {% if form.fixed_fee.errors %}
+                        <ul class="errorlist">{{ form.fixed_fee.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Descuento Spread -->
+            <div class="form-group" style="background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border-color); border-radius: 0.65rem; padding: 1.25rem; margin-top: 0.5rem;">
+                <label for="id_spread_discount_percentage" class="form-label" style="color: #fbbf24;">
+                    🌟 {{ form.spread_discount_percentage.label }}
+                </label>
+                <div style="position: relative; max-width: 300px;">
+                    {{ form.spread_discount_percentage }}
+                    <span style="position: absolute; right: 0.85rem; top: 50%; transform: translateY(-50%); color: #fbbf24; font-weight: 700;">%</span>
+                </div>
+                <small style="color: var(--text-muted); display: block; margin-top: 0.5rem; line-height: 1.4;">
+                    💡 <strong>Beneficio Comercial:</strong> Reduce el spread entre compra y venta. Por ejemplo, un 50% de descuento reduce el spread a la mitad, mejorando tanto el precio de compra como el de venta para el cliente de este segmento.
+                </small>
+                {% if form.spread_discount_percentage.errors %}
+                    <ul class="errorlist">{{ form.spread_discount_percentage.errors }}</ul>
+                {% endif %}
+            </div>
+
+            <!-- Estado Activo -->
+            <div class="form-group" style="margin-top: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+                    {{ form.is_active }}
+                    <span style="font-weight: 600; color: var(--text-main);">{{ form.is_active.label }}</span>
+                </label>
+                <small style="color: var(--text-subtle); display: block; margin-left: 2rem;">
+                    {{ form.is_active.help_text }}
+                </small>
+                {% if form.is_active.errors %}
+                    <ul class="errorlist">{{ form.is_active.errors }}</ul>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary">Cancelar</a>
+                <button type="submit" class="btn btn-primary">{{ submit_btn_text|default:"Guardar" }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

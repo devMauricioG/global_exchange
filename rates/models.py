@@ -98,8 +98,16 @@ class Currency(models.Model):
                 })
         if self.name:
             self.name = self.name.strip()
-        if self.symbol:
-            self.symbol = self.symbol.strip()
+        if self.decimals is not None:
+            if self.decimals < 0 or self.decimals > 10:
+                raise ValidationError({
+                    'decimals': 'La cantidad de decimales debe ser un número entero entre 0 y 10.'
+                })
+
+    @property
+    def decimal_places(self) -> int:
+        """Alias de compatibilidad para la cantidad de dígitos decimales."""
+        return self.decimals
 
     def save(self, *args, **kwargs) -> None:
         """Normaliza los campos y ejecuta la validación de limpieza antes de persistir."""
@@ -291,6 +299,27 @@ class ExchangeRate(models.Model):
         if self.valid_to and self.valid_to < now:
             return False
         return True
+
+    def is_currently_valid(self) -> bool:
+        """Alias funcional para evaluar la vigencia temporal actual."""
+        return self.is_current
+
+    def get_rate_for_operation(self, operation_type: str) -> Decimal:
+        """
+        Retorna la tasa oficial correspondiente a una operación de compra o venta.
+
+        :param operation_type: 'BUY' (retorna sell_rate) o 'SELL' (retorna buy_rate).
+        :type operation_type: str
+        :return: Tasa de cambio oficial aplicable.
+        :rtype: decimal.Decimal
+        :raises ValueError: Si el tipo de operación no es válido.
+        """
+        op = str(operation_type).upper().strip()
+        if op == 'BUY':
+            return self.sell_rate
+        elif op == 'SELL':
+            return self.buy_rate
+        raise ValueError(f"Tipo de operación inválido: '{operation_type}'. Debe ser 'BUY' o 'SELL'.")
 
     def __str__(self) -> str:
         """

@@ -237,3 +237,35 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/chat_ia.md`
 
+---
+
+### 12. SCRUM-53: Parametrización de Comisiones por Segmento y Motor de Cálculo de Tasas Netas
+
+* **Objetivo:** Desarrollar la lógica de negocio, motor financiero transaccional, vistas administrativas CBVs, simulador de cotizaciones y endpoints API REST JSON para configurar las reglas de comisión por segmento de cliente (Minorista, Mayorista, Corporativo, VIP) e integrar el calculador de tasas netas aplicables según el cliente activo.
+* **Aportes y Solución con IA:**
+  * Implementación de `RateCalculationService` en `rates/services.py` para resolución dinámica de cliente activo, obtención de reglas tarifarias por segmento y liquidación matemática de cotizaciones (bonificación sobre el spread, comisiones porcentuales y fijas, importes brutos y netos finales).
+  * Desarrollo de formularios `SegmentCommissionForm`, `SegmentCommissionFilterForm` y `RateCalculatorForm` con validaciones de límites en `rates/forms.py`.
+  * Creación de controladores CBVs para CRUD de comisiones (`SegmentCommissionListView`, `CreateView`, `UpdateView`, `DeleteView`, `DetailView`) y cotizador interactivo (`RateCalculatorView`) en `rates/views.py`.
+  * Implementación de endpoints API REST JSON: `CalculateNetRateApiView` (`/rates/api/calculate/`), `SegmentCommissionListApiView` y `SegmentCommissionDetailApiView`.
+  * Diseño de plantillas HTML responsivas con estética corporativa y alertas contextuales en `templates/rates/` y actualización del menú en `templates/base.html`.
+  * Creación de 71 pruebas unitarias en `rates/tests.py` alcanzando un **97% de cobertura de código** en `rates` y elevando la suite general del proyecto a **167 tests exitosos (100% OK)**.
+* **Archivos intervenidos:**
+  * `rates/services.py`
+  * `rates/forms.py`
+  * `rates/views.py`
+  * `rates/urls.py`
+  * `rates/models.py`
+  * `rates/tests.py`
+  * `config/urls.py`
+  * `templates/rates/commission_list.html`
+  * `templates/rates/commission_form.html`
+  * `templates/rates/commission_detail.html`
+  * `templates/rates/commission_confirm_delete.html`
+  * `templates/rates/rate_calculator.html`
+  * `templates/base.html`
+  * `docs/documentacion/Proyecto/SCRUM-53.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/chat_ia.md`
+
+
