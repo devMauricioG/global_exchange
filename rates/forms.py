@@ -1,11 +1,14 @@
 """
-Módulo de formularios para la parametrización de comisiones y simulación de cotizaciones (rates).
+Módulo de formularios para la parametrización de monedas, tasas de cambio, comisiones y cotizaciones (rates).
 
 Define:
-1. :class:`SegmentCommissionForm`: Formulario basado en modelo para la creación y edición de reglas
-   tarifarias y bonificaciones por segmento (:class:`~rates.models.SegmentCommission`).
-2. :class:`SegmentCommissionFilterForm`: Formulario de filtrado interactivo para el catálogo de comisiones.
-3. :class:`RateCalculatorForm`: Formulario para el motor de cálculo y simulador de tasas netas.
+1. :class:`CurrencyForm`: Formulario para la gestión de Monedas (:class:`~rates.models.Currency`).
+2. :class:`ExchangeRateForm`: Formulario para registro y actualización de Cotizaciones (:class:`~rates.models.ExchangeRate`).
+3. :class:`CurrencyFilterForm`: Filtrado interactivo de divisas.
+4. :class:`ExchangeRateFilterForm`: Filtrado interactivo de tasas de cambio.
+5. :class:`SegmentCommissionForm`: Formulario para la creación y edición de reglas de comisión por segmento (:class:`~rates.models.SegmentCommission`).
+6. :class:`SegmentCommissionFilterForm`: Filtrado interactivo de reglas de comisión.
+7. :class:`RateCalculatorForm`: Formulario para el simulador y motor de cotizaciones netas.
 """
 
 from decimal import Decimal
@@ -17,6 +20,102 @@ from django.core.exceptions import ValidationError
 from customers.models import Cliente
 from .models import Currency, ExchangeRate, SegmentCommission
 
+
+# ==============================================================================
+# FORMULARIOS PARA MONEDAS Y TASAS DE CAMBIO (SCRUM-51)
+# ==============================================================================
+
+class CurrencyForm(forms.ModelForm):
+    """
+    Formulario para la creación y actualización de monedas internacionales.
+    """
+
+    class Meta:
+        model = Currency
+        fields = ['code', 'name', 'symbol', 'decimals', 'is_active']
+        widgets = {
+            'code': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. USD, EUR, PYG'}),
+            'name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. Dólar Estadounidense'}),
+            'symbol': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. $, €'}),
+            'decimals': forms.NumberInput(attrs={'class': 'form-input', 'min': 0, 'max': 4}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+        labels = {
+            'code': 'Código ISO 4217',
+            'name': 'Nombre de la Moneda',
+            'symbol': 'Símbolo',
+            'decimals': 'Decimales',
+            'is_active': 'Activa',
+        }
+
+
+class ExchangeRateForm(forms.ModelForm):
+    """
+    Formulario para el registro y actualización de cotizaciones oficiales.
+    """
+
+    class Meta:
+        model = ExchangeRate
+        fields = ['base_currency', 'target_currency', 'buy_rate', 'sell_rate', 'valid_to', 'is_active']
+        widgets = {
+            'base_currency': forms.Select(attrs={'class': 'form-select'}),
+            'target_currency': forms.Select(attrs={'class': 'form-select'}),
+            'buy_rate': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.000001', 'min': 0}),
+            'sell_rate': forms.NumberInput(attrs={'class': 'form-input', 'step': '0.000001', 'min': 0}),
+            'valid_to': forms.DateTimeInput(attrs={'class': 'form-input', 'type': 'datetime-local'}),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+        labels = {
+            'base_currency': 'Moneda Base (Origen)',
+            'target_currency': 'Moneda Destino (Cotizada)',
+            'buy_rate': 'Tasa de Compra',
+            'sell_rate': 'Tasa de Venta',
+            'valid_to': 'Vigente Hasta (Opcional)',
+            'is_active': 'Activa',
+        }
+
+
+class CurrencyFilterForm(forms.Form):
+    """
+    Formulario de filtrado para el catálogo de monedas.
+    """
+
+    q = forms.CharField(
+        required=False,
+        label='Búsqueda',
+        widget=forms.TextInput(attrs={'class': 'filter-input', 'placeholder': 'Buscar por código, nombre...'}),
+    )
+    is_active = forms.ChoiceField(
+        required=False,
+        label='Estado',
+        choices=[('', 'Todos'), ('true', 'Activas'), ('false', 'Inactivas')],
+        widget=forms.Select(attrs={'class': 'filter-select'}),
+    )
+
+
+class ExchangeRateFilterForm(forms.Form):
+    """
+    Formulario de filtrado para el listado de tasas de cambio.
+    """
+
+    currency = forms.ModelChoiceField(
+        queryset=Currency.objects.all(),
+        required=False,
+        label='Moneda',
+        empty_label='Todas las monedas',
+        widget=forms.Select(attrs={'class': 'filter-select'}),
+    )
+    is_active = forms.ChoiceField(
+        required=False,
+        label='Estado',
+        choices=[('', 'Todos'), ('true', 'Activas'), ('false', 'Inactivas')],
+        widget=forms.Select(attrs={'class': 'filter-select'}),
+    )
+
+
+# ==============================================================================
+# FORMULARIOS PARA COMISIONES Y COTIZADOR NETO (SCRUM-53)
+# ==============================================================================
 
 class SegmentCommissionForm(forms.ModelForm):
     """

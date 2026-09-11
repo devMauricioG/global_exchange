@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-page-wrapper { max-width: 780px; margin: 0 auto; }
+    .form-page-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; }
+    .form-page-header a { color: var(--text-muted); text-decoration: none; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.35rem; transition: color 0.15s; }
+    .form-page-header a:hover { color: var(--primary); }
+    .form-page-header .separator { color: var(--border-light); font-size: 1.1rem; }
+    .form-page-header .breadcrumb-current { color: var(--text-main); font-size: 0.875rem; font-weight: 600; }
+
+    .form-card-main { background: linear-gradient(145deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); backdrop-filter: blur(10px); border: 1px solid var(--border-color); border-radius: 1rem; overflow: hidden; box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.4); }
+    .form-card-header { padding: 2rem 2.25rem 1.75rem; border-bottom: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; gap: 1.25rem; }
+    .form-icon-wrapper { width: 52px; height: 52px; border-radius: 12px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(99, 102, 241, 0.2)); border: 1px solid rgba(56, 189, 248, 0.3); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+    .form-card-header h1 { font-size: 1.5rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.25rem; }
+    .form-card-header p { color: var(--text-muted); font-size: 0.9rem; }
+    .form-card-body { padding: 2.25rem; }
+    
+    .form-section { margin-bottom: 2.25rem; }
+    .form-section-title { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); }
+    .form-section-title::before { content: ''; display: inline-block; width: 3px; height: 14px; background: var(--primary); border-radius: 2px; }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    
+    .toggle-group { display: flex; align-items: center; gap: 1rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem 1.25rem; cursor: pointer; transition: border-color 0.2s; }
+    .toggle-switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #374151; border-radius: 24px; transition: 0.25s; cursor: pointer; }
+    .toggle-slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.25s; }
+    .toggle-switch input:checked + .toggle-slider { background-color: #10b981; }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+    
+    .error-banner { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.75rem; display: flex; gap: 0.75rem; align-items: flex-start; }
+    .field-error-list { color: #f87171; font-size: 0.8rem; list-style: none; padding: 0; margin: 0.4rem 0 0 0; }
+    .form-input-error { border-color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important; }
+    
+    .form-card-footer { display: flex; justify-content: flex-end; gap: 0.875rem; padding: 1.5rem 2.25rem; border-top: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.4); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="form-page-wrapper">
+    <div class="form-page-header">
+        <a href="{% url 'rates:currency-list' %}">💱 Monedas</a>
+        <span class="separator">/</span>
+        <span class="breadcrumb-current">{{ action|default:'Nueva' }} Moneda</span>
+    </div>
+
+    <div class="form-card-main">
+        <div class="form-card-header">
+            <div class="form-icon-wrapper">
+                {% if action == 'Actualizar' %}✏️{% else %}➕{% endif %}
+            </div>
+            <div>
+                <h1>{{ title }}</h1>
+                <p>Configuración de divisas para operaciones cambiarias.</p>
+            </div>
+        </div>
+
+        <div class="form-card-body">
+            <form method="post" id="currencyForm">
+                {% csrf_token %}
+
+                {% if form.errors %}
+                    <div class="error-banner">
+                        <span class="error-banner-icon">⚠️</span>
+                        <div class="error-banner-body">
+                            <strong>Errores de validación:</strong>
+                            <ul>
+                                {% for field in form %}
+                                    {% for error in field.errors %}
+                                        <li>{{ field.label }}: {{ error }}</li>
+                                    {% endfor %}
+                                {% endfor %}
+                                {% for error in form.non_field_errors %}
+                                    <li>{{ error }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <div class="form-section">
+                    <div class="form-section-title">Datos Básicos</div>
+                    <div class="form-grid-2">
+                        <div class="form-group">
+                            <label class="form-label">{{ form.code.label }} *</label>
+                            {{ form.code }}
+                            {% if form.code.errors %}<ul class="field-error-list">{% for error in form.code.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">{{ form.name.label }} *</label>
+                            {{ form.name }}
+                            {% if form.name.errors %}<ul class="field-error-list">{% for error in form.name.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">{{ form.symbol.label }} *</label>
+                            {{ form.symbol }}
+                            {% if form.symbol.errors %}<ul class="field-error-list">{% for error in form.symbol.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">{{ form.decimals.label }} *</label>
+                            {{ form.decimals }}
+                            {% if form.decimals.errors %}<ul class="field-error-list">{% for error in form.decimals.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Estado Operativo</div>
+                    <div class="form-group">
+                        <label class="toggle-group" for="{{ form.is_active.id_for_label }}">
+                            <div class="toggle-switch">
+                                {{ form.is_active }}
+                                <span class="toggle-slider"></span>
+                            </div>
+                            <div class="toggle-label-group">
+                                <strong>Activa</strong>
+                                <span style="font-size: 0.8rem; color: var(--text-muted);">Indica si la moneda se encuentra operativa.</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+            </form>
+        </div>
+
+        <div class="form-card-footer">
+            <a href="{% url 'rates:currency-list' %}" class="btn btn-secondary">Cancelar</a>
+            <button type="submit" form="currencyForm" class="btn btn-primary" id="submitBtn">
+                {% if action == 'Actualizar' %}✅ Guardar Cambios{% else %}➕ Crear Moneda{% endif %}
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+    document.getElementById('{{ form.is_active.id_for_label }}').classList.remove('form-checkbox');
+    document.getElementById('currencyForm').addEventListener('submit', function() {
+        document.getElementById('submitBtn').textContent = '⏳ Guardando...';
+    });
+</script>
+{% endblock %}

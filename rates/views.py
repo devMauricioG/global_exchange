@@ -1,11 +1,11 @@
 """
-Módulo de vistas y controladores para la parametrización de comisiones y motor de cálculo de tasas netas (rates).
+Módulo de vistas y controladores para la gestión de Monedas, Tasas de Cambio, Comisiones y Cotizaciones (rates).
 
 Implementa:
-1. **Vistas Basadas en Clases (CBVs)** para la gestión y administración de comisiones por segmento
-   (:class:`~rates.models.SegmentCommission`): listado, alta, edición, eliminación y detalle analítico.
-2. **Simulador de Cotizaciones Interactivo**: interfaz para el cálculo de tasas netas en tiempo real.
-3. **Endpoints API REST (JSON)** para consultas programáticas y consumo asíncrono desde el frontend.
+1. **Vistas Basadas en Clases (CBVs)** para el CRUD de Monedas (:class:`~rates.models.Currency`) y Tasas de Cambio (:class:`~rates.models.ExchangeRate`).
+2. **Vistas Basadas en Clases (CBVs)** para la parametrización de comisiones por segmento (:class:`~rates.models.SegmentCommission`).
+3. **Simulador de Cotizaciones Interactivo**: interfaz para el cálculo de tasas netas en tiempo real.
+4. **Endpoints API REST (JSON)** para consultas programáticas y consumo asíncrono desde el frontend.
 """
 
 from decimal import Decimal
@@ -34,6 +34,10 @@ from django.views.generic import (
 
 from customers.models import Cliente
 from .forms import (
+    CurrencyFilterForm,
+    CurrencyForm,
+    ExchangeRateFilterForm,
+    ExchangeRateForm,
     RateCalculatorForm,
     SegmentCommissionFilterForm,
     SegmentCommissionForm,
@@ -44,14 +48,219 @@ from .services import RateCalculationService, get_active_customer
 logger = logging.getLogger(__name__)
 
 
+# ==============================================================================
+# CURRENCY VIEWS (SCRUM-51)
+# ==============================================================================
+
+class CurrencyListView(LoginRequiredMixin, ListView):
+    """
+    Vista de listado para el catálogo de monedas internacionales.
+    """
+
+    model = Currency
+    template_name = 'rates/currency_list.html'
+    context_object_name = 'currencies'
+    paginate_by = 10
+
+    def get_queryset(self) -> QuerySet[Currency]:
+        queryset = Currency.objects.all().order_by('code')
+        self.filter_form = CurrencyFilterForm(self.request.GET)
+
+        if self.filter_form.is_valid():
+            q = self.filter_form.cleaned_data.get('q')
+            is_active = self.filter_form.cleaned_data.get('is_active')
+
+            if q:
+                queryset = queryset.filter(
+                    Q(code__icontains=q) | Q(name__icontains=q) | Q(symbol__icontains=q)
+                )
+
+            if is_active == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active == 'false':
+                queryset = queryset.filter(is_active=False)
+
+        return queryset
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['filter_form'] = getattr(self, 'filter_form', CurrencyFilterForm(self.request.GET))
+        context['total_count'] = Currency.objects.count()
+        context['active_count'] = Currency.objects.filter(is_active=True).count()
+        context['inactive_count'] = Currency.objects.filter(is_active=False).count()
+
+        query_params = self.request.GET.copy()
+        if 'page' in query_params:
+            del query_params['page']
+        context['querystring'] = query_params.urlencode()
+        return context
+
+
+class CurrencyCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+    """
+    Vista para crear una nueva moneda en el catálogo.
+    """
+
+    model = Currency
+    form_class = CurrencyForm
+    template_name = 'rates/currency_form.html'
+    success_url = reverse_lazy('rates:currency-list')
+    success_message = 'Moneda "%(code)s" creada exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Nueva Moneda'
+        context['action'] = 'Crear'
+        return context
+
+
+class CurrencyUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+    """
+    Vista para actualizar una moneda existente.
+    """
+
+    model = Currency
+    form_class = CurrencyForm
+    template_name = 'rates/currency_form.html'
+    success_url = reverse_lazy('rates:currency-list')
+    success_message = 'Moneda "%(code)s" actualizada exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['title'] = f'Editar Moneda: {self.object.code}'
+        context['action'] = 'Actualizar'
+        return context
+
+
+class CurrencyToggleStatusView(LoginRequiredMixin, View):
+    """
+    Controlador para activar o desactivar una moneda.
+    """
+
+    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        currency = get_object_or_404(Currency, pk=pk)
+        currency.is_active = not currency.is_active
+        currency.save()
+        status = 'activada' if currency.is_active else 'desactivada'
+        messages.success(request, f'Moneda "{currency.code}" {status} exitosamente.')
+        next_url = request.META.get('HTTP_REFERER', reverse_lazy('rates:currency-list'))
+        return redirect(next_url)
+
+
+# ==============================================================================
+# EXCHANGE RATE VIEWS (SCRUM-51)
+# ==============================================================================
+
+class ExchangeRateListView(LoginRequiredMixin, ListView):
+    """
+    Vista de listado para las cotizaciones y tasas de cambio vigentes.
+    """
+
+    model = ExchangeRate
+    template_name = 'rates/exchangerate_list.html'
+    context_object_name = 'rates'
+    paginate_by = 15
+
+    def get_queryset(self) -> QuerySet[ExchangeRate]:
+        queryset = ExchangeRate.objects.select_related('base_currency', 'target_currency', 'updated_by').order_by('-valid_from', '-created_at')
+        self.filter_form = ExchangeRateFilterForm(self.request.GET)
+
+        if self.filter_form.is_valid():
+            currency = self.filter_form.cleaned_data.get('currency')
+            is_active = self.filter_form.cleaned_data.get('is_active')
+
+            if currency:
+                queryset = queryset.filter(
+                    Q(base_currency=currency) | Q(target_currency=currency)
+                )
+
+            if is_active == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active == 'false':
+                queryset = queryset.filter(is_active=False)
+
+        return queryset
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['filter_form'] = getattr(self, 'filter_form', ExchangeRateFilterForm(self.request.GET))
+        context['total_count'] = ExchangeRate.objects.count()
+        context['active_count'] = ExchangeRate.objects.filter(is_active=True).count()
+
+        query_params = self.request.GET.copy()
+        if 'page' in query_params:
+            del query_params['page']
+        context['querystring'] = query_params.urlencode()
+        return context
+
+
+class ExchangeRateCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+    """
+    Vista para registrar una nueva tasa de cambio.
+    """
+
+    model = ExchangeRate
+    form_class = ExchangeRateForm
+    template_name = 'rates/exchangerate_form.html'
+    success_url = reverse_lazy('rates:rate-list')
+    success_message = 'Tasa de cambio registrada exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Registrar Tasa de Cambio'
+        context['action'] = 'Registrar'
+        return context
+
+    def form_valid(self, form):
+        form.instance.updated_by = self.request.user
+        return super().form_valid(form)
+
+
+class ExchangeRateUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+    """
+    Vista para modificar una cotización existente.
+    """
+
+    model = ExchangeRate
+    form_class = ExchangeRateForm
+    template_name = 'rates/exchangerate_form.html'
+    success_url = reverse_lazy('rates:rate-list')
+    success_message = 'Tasa de cambio actualizada exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['title'] = 'Editar Tasa de Cambio'
+        context['action'] = 'Actualizar'
+        return context
+
+    def form_valid(self, form):
+        form.instance.updated_by = self.request.user
+        return super().form_valid(form)
+
+
+class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
+    """
+    Controlador para cambiar el estado de una cotización.
+    """
+
+    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        rate = get_object_or_404(ExchangeRate, pk=pk)
+        rate.is_active = not rate.is_active
+        rate.updated_by = request.user
+        rate.save()
+        status = 'activada' if rate.is_active else 'desactivada'
+        messages.success(request, f'Tasa de cambio {rate.base_currency.code}/{rate.target_currency.code} {status} exitosamente.')
+        next_url = request.META.get('HTTP_REFERER', reverse_lazy('rates:rate-list'))
+        return redirect(next_url)
+
+
+# ==============================================================================
+# VISTAS CBVs: GESTIÓN DE COMISIONES POR SEGMENTO (SCRUM-53)
+# ==============================================================================
+
 def _serialize_commission_rule(rule: SegmentCommission) -> Dict[str, Any]:
     """
     Serializa una regla de :class:`~rates.models.SegmentCommission` a un diccionario JSON estándar.
-
-    :param rule: Instancia de la regla de comisión.
-    :type rule: rates.models.SegmentCommission
-    :return: Diccionario con los parámetros de la regla.
-    :rtype: dict
     """
     return {
         'id': rule.id,
@@ -65,10 +274,6 @@ def _serialize_commission_rule(rule: SegmentCommission) -> Dict[str, Any]:
         'updated_at': rule.updated_at.isoformat() if rule.updated_at else None,
     }
 
-
-# ==============================================================================
-# VISTAS CBVs: GESTIÓN DE COMISIONES POR SEGMENTO
-# ==============================================================================
 
 class SegmentCommissionListView(LoginRequiredMixin, ListView):
     """
@@ -98,7 +303,6 @@ class SegmentCommissionListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         all_rules = SegmentCommission.objects.all()
 
-        # Métricas de resumen para tarjetas informativas
         context['total_rules'] = all_rules.count()
         context['active_rules'] = all_rules.filter(is_active=True).count()
         context['avg_commission'] = all_rules.filter(is_active=True).aggregate(
@@ -180,7 +384,6 @@ class SegmentCommissionDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         rule = self.object
 
-        # Simulador de tarifas para montos de muestra
         sample_amounts = [
             Decimal('100.00'),
             Decimal('500.00'),
@@ -208,15 +411,12 @@ class SegmentCommissionDetailView(LoginRequiredMixin, DetailView):
 
 
 # ==============================================================================
-# VISTA CBV: COTIZADOR Y MOTOR DE CÁLCULO DE TASAS NETAS
+# VISTA CBV: COTIZADOR Y MOTOR DE CÁLCULO DE TASAS NETAS (SCRUM-53)
 # ==============================================================================
 
 class RateCalculatorView(LoginRequiredMixin, View):
     """
     Vista interactiva para el cálculo y simulación de cotizaciones con tasas netas.
-
-    Procesa la solicitud tanto vía GET como vía POST y presenta el desglose
-    completo de tarifas, spreads bonificados, comisiones y montos netos a liquidar.
     """
 
     template_name = 'rates/rate_calculator.html'
@@ -229,12 +429,7 @@ class RateCalculatorView(LoginRequiredMixin, View):
             'is_source_base': True,
         }
 
-        # Si hay parámetros en query string (ej: ?exchange_rate=1&amount=500), intentar calcular
         rate_id = request.GET.get('exchange_rate')
-        amount_val = request.GET.get('amount')
-        op_type = request.GET.get('operation_type', 'BUY')
-        segment_val = request.GET.get('segment')
-
         calculation_result = None
         form = RateCalculatorForm(request.GET or None, initial=initial_data)
 
@@ -256,7 +451,6 @@ class RateCalculatorView(LoginRequiredMixin, View):
             except ValidationError as err:
                 messages.error(request, f'Error en el cálculo: {err.message_dict if hasattr(err, "message_dict") else err}')
 
-        # Obtener cotizaciones activas para la barra lateral
         active_rates = ExchangeRate.objects.filter(is_active=True).select_related('base_currency', 'target_currency')
 
         context = {
@@ -318,8 +512,6 @@ class RateCalculatorView(LoginRequiredMixin, View):
 class CalculateNetRateApiView(View):
     """
     Endpoint API REST para el cálculo y simulación de cotizaciones netas con formato JSON.
-
-    Admite solicitudes GET y POST con soporte de payloads JSON y parámetros query string.
     """
 
     def _extract_params(self, request: HttpRequest) -> Dict[str, Any]:
@@ -345,7 +537,6 @@ class CalculateNetRateApiView(View):
     def _process_calculation(self, request: HttpRequest) -> JsonResponse:
         params = self._extract_params(request)
 
-        # 1. Resolver cotización
         rate_id = params.get('exchange_rate_id') or params.get('exchange_rate')
         base_code = params.get('base_currency')
         target_code = params.get('target_currency')
@@ -371,7 +562,6 @@ class CalculateNetRateApiView(View):
                 status=404,
             )
 
-        # 2. Resolver cliente o segmento
         active_customer = get_active_customer(request)
         cliente_id = params.get('cliente_id')
         segment = params.get('segment')
@@ -385,7 +575,6 @@ class CalculateNetRateApiView(View):
         if not segment_target and active_customer:
             segment_target = active_customer.segmentacion
 
-        # 3. Monto y tipo de operación
         amount_raw = params.get('amount', '100.00')
         op_type = str(params.get('operation_type', 'BUY')).upper()
         is_source_base = str(params.get('is_source_base', 'true')).lower() in ('true', '1', 'yes')
@@ -398,7 +587,6 @@ class CalculateNetRateApiView(View):
                 operation_type=op_type,
                 is_source_base=is_source_base,
             )
-            # Convertir Decimals a floats para serialización JSON estándar
             json_friendly = json.loads(json.dumps(result, default=float))
             return JsonResponse(json_friendly, status=200)
 

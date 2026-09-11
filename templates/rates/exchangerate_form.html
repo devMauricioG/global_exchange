@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-page-wrapper { max-width: 780px; margin: 0 auto; }
+    .form-page-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; }
+    .form-page-header a { color: var(--text-muted); text-decoration: none; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.35rem; transition: color 0.15s; }
+    .form-page-header a:hover { color: var(--primary); }
+    .form-page-header .separator { color: var(--border-light); font-size: 1.1rem; }
+    .form-page-header .breadcrumb-current { color: var(--text-main); font-size: 0.875rem; font-weight: 600; }
+
+    .form-card-main { background: linear-gradient(145deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); backdrop-filter: blur(10px); border: 1px solid var(--border-color); border-radius: 1rem; overflow: hidden; box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.4); }
+    .form-card-header { padding: 2rem 2.25rem 1.75rem; border-bottom: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; gap: 1.25rem; }
+    .form-icon-wrapper { width: 52px; height: 52px; border-radius: 12px; background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(99, 102, 241, 0.2)); border: 1px solid rgba(56, 189, 248, 0.3); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+    .form-card-header h1 { font-size: 1.5rem; font-weight: 800; color: #f8fafc; margin-bottom: 0.25rem; }
+    .form-card-header p { color: var(--text-muted); font-size: 0.9rem; }
+    .form-card-body { padding: 2.25rem; }
+    
+    .form-section { margin-bottom: 2.25rem; }
+    .form-section-title { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); }
+    .form-section-title::before { content: ''; display: inline-block; width: 3px; height: 14px; background: var(--primary); border-radius: 2px; }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    
+    .toggle-group { display: flex; align-items: center; gap: 1rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem 1.25rem; cursor: pointer; transition: border-color 0.2s; }
+    .toggle-switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #374151; border-radius: 24px; transition: 0.25s; cursor: pointer; }
+    .toggle-slider::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.25s; }
+    .toggle-switch input:checked + .toggle-slider { background-color: #10b981; }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+    
+    .error-banner { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.75rem; display: flex; gap: 0.75rem; align-items: flex-start; }
+    .field-error-list { color: #f87171; font-size: 0.8rem; list-style: none; padding: 0; margin: 0.4rem 0 0 0; }
+    .form-input-error { border-color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1) !important; }
+    
+    .form-card-footer { display: flex; justify-content: flex-end; gap: 0.875rem; padding: 1.5rem 2.25rem; border-top: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.4); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="form-page-wrapper">
+    <div class="form-page-header">
+        <a href="{% url 'rates:rate-list' %}">📈 Cotizaciones</a>
+        <span class="separator">/</span>
+        <span class="breadcrumb-current">{{ action|default:'Registrar' }} Tasa</span>
+    </div>
+
+    <div class="form-card-main">
+        <div class="form-card-header">
+            <div class="form-icon-wrapper">
+                {% if action == 'Actualizar' %}✏️{% else %}➕{% endif %}
+            </div>
+            <div>
+                <h1>{{ title }}</h1>
+                <p>Establece los precios de compra y venta para un par de monedas.</p>
+            </div>
+        </div>
+
+        <div class="form-card-body">
+            <form method="post" id="rateForm">
+                {% csrf_token %}
+
+                {% if form.errors %}
+                    <div class="error-banner">
+                        <span class="error-banner-icon">⚠️</span>
+                        <div class="error-banner-body">
+                            <strong>Errores de validación:</strong>
+                            <ul>
+                                {% for field in form %}
+                                    {% for error in field.errors %}
+                                        <li>{{ field.label }}: {{ error }}</li>
+                                    {% endfor %}
+                                {% endfor %}
+                                {% for error in form.non_field_errors %}
+                                    <li>{{ error }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <div class="form-section">
+                    <div class="form-section-title">Par de Divisas</div>
+                    <div class="form-grid-2">
+                        <div class="form-group">
+                            <label class="form-label">{{ form.base_currency.label }} *</label>
+                            {{ form.base_currency }}
+                            {% if form.base_currency.errors %}<ul class="field-error-list">{% for error in form.base_currency.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">{{ form.target_currency.label }} *</label>
+                            {{ form.target_currency }}
+                            {% if form.target_currency.errors %}<ul class="field-error-list">{% for error in form.target_currency.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <div class="form-section-title">Valores de Cotización</div>
+                    <div class="form-grid-2">
+                        <div class="form-group">
+                            <label class="form-label">{{ form.buy_rate.label }} *</label>
+                            {{ form.buy_rate }}
+                            {% if form.buy_rate.errors %}<ul class="field-error-list">{% for error in form.buy_rate.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">{{ form.sell_rate.label }} *</label>
+                            {{ form.sell_rate }}
+                            {% if form.sell_rate.errors %}<ul class="field-error-list">{% for error in form.sell_rate.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Vigencia y Estado</div>
+                    <div class="form-grid-2">
+                        <div class="form-group">
+                            <label class="form-label">{{ form.valid_to.label }}</label>
+                            {{ form.valid_to }}
+                            <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 0.25rem;">Dejar en blanco para que tenga vigencia indefinida.</span>
+                            {% if form.valid_to.errors %}<ul class="field-error-list">{% for error in form.valid_to.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem;">Estado de Cotización</label>
+                            <label class="toggle-group" for="{{ form.is_active.id_for_label }}">
+                                <div class="toggle-switch">
+                                    {{ form.is_active }}
+                                    <span class="toggle-slider"></span>
+                                </div>
+                                <div class="toggle-label-group">
+                                    <strong>Activa</strong>
+                                </div>
+                            </label>
+                            {% if form.is_active.errors %}<ul class="field-error-list">{% for error in form.is_active.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                    </div>
+                </div>
+
+            </form>
+        </div>
+
+        <div class="form-card-footer">
+            <a href="{% url 'rates:rate-list' %}" class="btn btn-secondary">Cancelar</a>
+            <button type="submit" form="rateForm" class="btn btn-primary" id="submitBtn">
+                {% if action == 'Actualizar' %}✅ Guardar Cambios{% else %}➕ Registrar Cotización{% endif %}
+            </button>
+        </div>
+    </div>
+</div>
+<script>
+    document.getElementById('{{ form.is_active.id_for_label }}').classList.remove('form-checkbox');
+    document.getElementById('rateForm').addEventListener('submit', function() {
+        document.getElementById('submitBtn').textContent = '⏳ Guardando...';
+    });
+</script>
+{% endblock %}

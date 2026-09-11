@@ -1008,3 +1008,125 @@ class AdditionalModelAndServiceCoverageTest(TestCase):
                 exchange_rate=self.rate,
                 amount='abc_invalid',
             )
+
+
+class CurrencyAndExchangeRateViewsTest(TestCase):
+    """
+    Pruebas unitarias para las vistas CBVs de Monedas y Tasas de Cambio (SCRUM-51).
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='operador_crud', email='op@test.com', password='Password123!')
+        self.client.force_login(self.user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar Estadounidense', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní Paraguayo', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+
+    def test_currency_list_view_and_filtering(self):
+        res = self.client.get(reverse('rates:currency-list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTemplateUsed(res, 'rates/currency_list.html')
+        self.assertIn('currencies', res.context)
+
+        # Filtro por texto
+        res_q = self.client.get(reverse('rates:currency-list'), {'q': 'USD'})
+        self.assertEqual(res_q.status_code, 200)
+        self.assertEqual(len(res_q.context['currencies']), 1)
+
+        # Filtro por inactivo
+        res_inact = self.client.get(reverse('rates:currency-list'), {'is_active': 'false'})
+        self.assertEqual(res_inact.status_code, 200)
+        self.assertEqual(len(res_inact.context['currencies']), 0)
+
+    def test_currency_create_view(self):
+        res_get = self.client.get(reverse('rates:currency-create'))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, 'rates/currency_form.html')
+
+        res_post = self.client.post(
+            reverse('rates:currency-create'),
+            {
+                'code': 'BRL',
+                'name': 'Real Brasileño',
+                'symbol': 'R$',
+                'decimals': 2,
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.assertTrue(Currency.objects.filter(code='BRL').exists())
+
+    def test_currency_update_view(self):
+        res_post = self.client.post(
+            reverse('rates:currency-update', kwargs={'pk': self.usd.id}),
+            {
+                'code': 'USD',
+                'name': 'Dólar Americano Modificado',
+                'symbol': '$',
+                'decimals': 2,
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.name, 'Dólar Americano Modificado')
+
+    def test_currency_toggle_status_view(self):
+        res_toggle = self.client.post(reverse('rates:currency-toggle', kwargs={'pk': self.usd.id}))
+        self.assertEqual(res_toggle.status_code, 302)
+        self.usd.refresh_from_db()
+        self.assertFalse(self.usd.is_active)
+
+    def test_exchangerate_list_view_and_filtering(self):
+        res = self.client.get(reverse('rates:rate-list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTemplateUsed(res, 'rates/exchangerate_list.html')
+        self.assertIn('rates', res.context)
+
+        # Filtro por moneda
+        res_cur = self.client.get(reverse('rates:rate-list'), {'currency': self.usd.id})
+        self.assertEqual(res_cur.status_code, 200)
+        self.assertEqual(len(res_cur.context['rates']), 1)
+
+    def test_exchangerate_create_view(self):
+        eur = Currency.objects.create(code='EUR', name='Euro', symbol='€', decimals=2)
+        res_post = self.client.post(
+            reverse('rates:rate-create'),
+            {
+                'base_currency': eur.id,
+                'target_currency': self.pyg.id,
+                'buy_rate': '8000.000000',
+                'sell_rate': '8200.000000',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.assertTrue(ExchangeRate.objects.filter(base_currency=eur, target_currency=self.pyg).exists())
+
+    def test_exchangerate_update_view(self):
+        res_post = self.client.post(
+            reverse('rates:rate-update', kwargs={'pk': self.rate.id}),
+            {
+                'base_currency': self.usd.id,
+                'target_currency': self.pyg.id,
+                'buy_rate': '7420.000000',
+                'sell_rate': '7520.000000',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.rate.refresh_from_db()
+        self.assertEqual(self.rate.buy_rate, Decimal('7420.000000'))
+
+    def test_exchangerate_toggle_status_view(self):
+        res_toggle = self.client.post(reverse('rates:rate-toggle', kwargs={'pk': self.rate.id}))
+        self.assertEqual(res_toggle.status_code, 302)
+        self.rate.refresh_from_db()
+        self.assertFalse(self.rate.is_active)
+
