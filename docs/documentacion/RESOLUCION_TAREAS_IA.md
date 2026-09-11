@@ -18,6 +18,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-42** | Actualización de Documentos de Diseño UML y Casos de Prueba | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-43** | Documentación de Docstrings en Código Fuente y Sphinx | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-50** | Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates) | Sprint 2 | Pablo Elizeche | Finalizado |
 
 ---
 
@@ -210,3 +211,29 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-55_CRUD_MEDIOS_DE_PAGO.md`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/chat_ia.md`
+
+---
+
+### 11. SCRUM-50: Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates)
+
+* **Objetivo:** Crear la aplicación Django `rates` y definir las entidades del motor financiero transaccional: catálogo de divisas (`Currency`), cotizaciones con cálculo automático de spread (`ExchangeRate`) y reglas tarifarias/bonificaciones por segmento de cliente (`SegmentCommission`), con administración Django y pruebas unitarias con cobertura del 100%.
+* **Aportes y Solución con IA:**
+  * Creación y registro de la aplicación `rates` en `config/settings/base.py`.
+  * Definición del modelo `Currency` con validación estricta de códigos ISO 4217 de 3 caracteres alfabéticos, normalización en mayúsculas, símbolo y precisión decimal.
+  * Definición del modelo `ExchangeRate` con claves foráneas protegidas (`models.PROTECT`), validaciones financieras de consistencia (`sell_rate >= buy_rate`, tasas positivas, pares distintos, coherencia de vigencia) y cálculo automático de `spread = sell_rate - buy_rate` al persistir.
+  * Definición del modelo `SegmentCommission` vinculado a las opciones de `Cliente.Segmentacion` con campos de porcentaje (0 a 100%), cargo fijo, descuento sobre el spread y métodos auxiliares `calculate_commission()` y `apply_spread_discount()`.
+  * Configuración del panel de administración Django (`rates/admin.py`) con filtros, búsquedas, jerarquía de fechas y asignación automática de usuario operador en `save_model()`.
+  * Desarrollo de 21 pruebas unitarias completas en `rates/tests.py`, elevando la suite general del proyecto a 117 tests con 100% de éxito y 100% de cobertura en el nuevo módulo.
+* **Archivos intervenidos:**
+  * `rates/__init__.py`
+  * `rates/apps.py`
+  * `rates/models.py`
+  * `rates/admin.py`
+  * `rates/tests.py`
+  * `rates/migrations/0001_initial.py`
+  * `config/settings/base.py`
+  * `docs/documentacion/SCRUM-50_MODELOS_RATES.md`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/chat_ia.md`
+

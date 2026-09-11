@@ -135,3 +135,19 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Recompilación exitosa del árbol completo de documentación HTML en `docs/sphinx/build/html/` y verificación de consistencia mediante la ejecución de la suite de pruebas automatizadas del proyecto.
 
 ---
+
+## Pablo Elizeche — 10/09/2026 — Antigravity / Gemini & Claude
+
+**Contexto:** Sprint 2 — Definición de modelos de datos para Monedas, Tasas de Cambio y Comisiones (SCRUM-50)
+
+**Resumen:**
+- Diseñé y creé la aplicación Django `rates` integrándola formalmente en `INSTALLED_APPS` (`config/settings/base.py`).
+- Implementé el modelo de catálogo de divisas `Currency` con validación estricta de códigos ISO 4217 de 3 letras alfabéticas mayúsculas, símbolo, decimales y control de activación.
+- Desarrollé el modelo de cotizaciones `ExchangeRate` con relaciones `models.PROTECT` para proteger la integridad referencial, validaciones de negocio (`sell_rate >= buy_rate`, tasas positivas, pares distintos, coherencia de vigencia), propiedad dinámica `is_current` y cálculo automático del margen cambiario (`spread = sell_rate - buy_rate`) al persistir.
+- Definí el modelo `SegmentCommission` parametrizado con las opciones de segmentación del cliente (`Cliente.Segmentacion`), con porcentajes de comisión, cargos fijos y bonificaciones sobre el spread, e implementé los métodos de cálculo financiero `calculate_commission(amount)` y `apply_spread_discount(original_spread)`.
+- Configuré el panel de administración de Django (`rates/admin.py`) con interfaces avanzadas de búsqueda, filtros por fechas y asignación del usuario autenticado en `save_model()`.
+- Escribí una suite completa de 21 pruebas unitarias en `rates/tests.py`, elevando la suite general del proyecto a 117 tests con 100% de éxito y logrando una cobertura del 100% en el módulo `rates`.
+- Generé la migración inicial de base de datos (`rates/migrations/0001_initial.py`) y redacté la especificación técnica en `docs/documentacion/SCRUM-50_MODELOS_RATES.md`.
+
+---
+
