@@ -46,7 +46,7 @@ from .forms import (
     SegmentCommissionForm,
 )
 from .models import Currency, ExchangeRate, SegmentCommission
-from .services import RateCalculationService, get_active_customer
+from .services import QuoteFreezeService, RateCalculationService, get_active_customer
 
 logger = logging.getLogger(__name__)
 
@@ -553,13 +553,19 @@ class RateCalculatorView(LoginRequiredMixin, View):
                 messages.error(request, f'Error en el cálculo: {err.message_dict if hasattr(err, "message_dict") else err}')
 
         active_rates = ExchangeRate.objects.filter(is_active=True).select_related('base_currency', 'target_currency')
+        frozen_quote = QuoteFreezeService.get_frozen_quote(request)
+
+        if not calculation_result and frozen_quote:
+            calculation_result = frozen_quote.get('calculation')
 
         context = {
             'form': form,
             'calculation': calculation_result,
             'active_customer': active_customer,
             'active_rates': active_rates,
+            'currencies': Currency.objects.filter(is_active=True).order_by('code'),
             'commission_rules': SegmentCommission.objects.filter(is_active=True),
+            'frozen_quote': frozen_quote,
         }
         return render(request, self.template_name, context)
 
@@ -594,13 +600,19 @@ class RateCalculatorView(LoginRequiredMixin, View):
             messages.warning(request, 'Por favor revise los datos ingresados en el cotizador.')
 
         active_rates = ExchangeRate.objects.filter(is_active=True).select_related('base_currency', 'target_currency')
+        frozen_quote = QuoteFreezeService.get_frozen_quote(request)
+
+        if not calculation_result and frozen_quote:
+            calculation_result = frozen_quote.get('calculation')
 
         context = {
             'form': form,
             'calculation': calculation_result,
             'active_customer': active_customer,
             'active_rates': active_rates,
+            'currencies': Currency.objects.filter(is_active=True).order_by('code'),
             'commission_rules': SegmentCommission.objects.filter(is_active=True),
+            'frozen_quote': frozen_quote,
         }
         return render(request, self.template_name, context)
 
@@ -735,3 +747,165 @@ class SegmentCommissionDetailApiView(View):
                 status=404,
             )
         return JsonResponse({'success': True, 'rule': _serialize_commission_rule(rule)}, status=200)
+
+
+# ==============================================================================
+# ENDPOINTS API REST: CONGELAMIENTO DE COTIZACIONES (SCRUM-54)
+# ==============================================================================
+
+@method_decorator(csrf_exempt, name='dispatch')
+class FreezeQuoteApiView(View):
+    """
+    Endpoint API REST para congelar una cotización durante 5 minutos (SCRUM-54).
+    Recibe los parámetros de la cotización o una estructura de cálculo ya ejecutada,
+    calcula o valida los datos financieros, y almacena el token en la sesión.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        params = {}
+        if request.content_type == 'application/json' and request.body:
+            try:
+                params = json.loads(request.body.decode('utf-8'))
+            except json.JSONDecodeError:
+                pass
+        if not params:
+            params = request.POST.dict()
+
+        calculation_payload = params.get('calculation')
+
+        if not calculation_payload:
+            rate_id = params.get('exchange_rate_id') or params.get('exchange_rate')
+            base_code = params.get('base_currency')
+            target_code = params.get('target_currency')
+
+            exchange_rate = None
+            if rate_id:
+                try:
+                    exchange_rate = ExchangeRate.objects.filter(id=rate_id, is_active=True).select_related(
+                        'base_currency', 'target_currency'
+                    ).first()
+                except (ValueError, TypeError):
+                    pass
+
+            if not exchange_rate and base_code and target_code:
+                exchange_rate = RateCalculationService.get_latest_exchange_rate(base_code, target_code)
+
+            if not exchange_rate:
+                return JsonResponse(
+                    {
+                        'success': False,
+                        'error': 'No se encontró una cotización activa válida para congelar.',
+                    },
+                    status=404,
+                )
+
+            active_customer = get_active_customer(request)
+            cliente_id = params.get('cliente_id')
+            segment = params.get('segment')
+
+            segment_target = segment
+            if not segment_target and cliente_id:
+                c = Cliente.objects.filter(id=cliente_id, is_active=True).first()
+                if c:
+                    segment_target = c.segmentacion
+
+            if not segment_target and active_customer:
+                segment_target = active_customer.segmentacion
+
+            amount_raw = params.get('amount', '100.00')
+            op_type = str(params.get('operation_type', 'BUY')).upper()
+            is_source_base = str(params.get('is_source_base', 'true')).lower() in ('true', '1', 'yes')
+
+            try:
+                calculation_payload = RateCalculationService.calculate_quotation(
+                    exchange_rate=exchange_rate,
+                    segment_or_customer=segment_target,
+                    amount=amount_raw,
+                    operation_type=op_type,
+                    is_source_base=is_source_base,
+                )
+            except ValidationError as val_err:
+                return JsonResponse(
+                    {
+                        'success': False,
+                        'error': val_err.message_dict if hasattr(val_err, 'message_dict') else str(val_err),
+                    },
+                    status=400,
+                )
+            except Exception as exc:
+                return JsonResponse(
+                    {
+                        'success': False,
+                        'error': f'Error al generar cotización: {str(exc)}',
+                    },
+                    status=500,
+                )
+
+        frozen_data = QuoteFreezeService.freeze_quote(request, calculation_payload)
+        return JsonResponse(
+            {
+                'success': True,
+                'message': 'Cotización congelada exitosamente por 5 minutos (300 segundos).',
+                'frozen_quote': frozen_data,
+            },
+            status=201,
+        )
+
+
+class GetFrozenQuoteApiView(View):
+    """
+    Endpoint API REST para consultar el estado y tiempo restante de la cotización congelada activa.
+    """
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        token = request.GET.get('token')
+        frozen_data = QuoteFreezeService.get_frozen_quote(request, token=token)
+
+        if not frozen_data:
+            return JsonResponse(
+                {
+                    'success': False,
+                    'frozen_quote': None,
+                    'message': 'No existe ninguna cotización congelada activa en la sesión.',
+                },
+                status=404,
+            )
+
+        return JsonResponse(
+            {
+                'success': True,
+                'frozen_quote': frozen_data,
+                'is_expired': frozen_data.get('is_expired', False),
+                'remaining_seconds': frozen_data.get('remaining_seconds', 0),
+            },
+            status=200,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UnfreezeQuoteApiView(View):
+    """
+    Endpoint API REST para liberar/descongelar la cotización activa de la sesión.
+    """
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        token = None
+        if request.content_type == 'application/json' and request.body:
+            try:
+                body = json.loads(request.body.decode('utf-8'))
+                token = body.get('token')
+            except json.JSONDecodeError:
+                pass
+        if not token:
+            token = request.POST.get('token') or request.GET.get('token')
+
+        cleared = QuoteFreezeService.unfreeze_quote(request, token=token)
+        return JsonResponse(
+            {
+                'success': True,
+                'cleared': cleared,
+                'message': 'Cotización descongelada correctamente.' if cleared else 'No había cotización congelada activa para remover.',
+            },
+            status=200,
+        )
+

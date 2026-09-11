@@ -9,14 +9,17 @@ Provee las clases y funciones de negocio especializadas para:
    porcentuales/fijas y liquidaciones de cotización.
 """
 
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import logging
 from typing import Any, Dict, Optional, Tuple, Union
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import HttpRequest
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from customers.models import Cliente, CustomerUserAssignment
 from .models import Currency, ExchangeRate, SegmentCommission
@@ -420,3 +423,165 @@ class RateCalculationService:
             operation_type=operation_type,
             is_source_base=is_source_base,
         )
+
+
+class QuoteFreezeService:
+    """
+    Servicio de gestión y congelamiento temporal de cotizaciones para clientes (SCRUM-54).
+
+    Permite asegurar una tasa de cambio y desglose financiero durante un lapso de
+    5 minutos (300 segundos) mediante un token de sesión único.
+    """
+
+    FREEZE_DURATION_SECONDS = 300  # 5 minutos
+
+    @classmethod
+    def _sanitize_data(cls, data: Any) -> Any:
+        """
+        Convierte de forma recursiva Decimals a floats o estructuras compatibles
+        con JSON y la serialización de sesiones de Django.
+        """
+        if isinstance(data, Decimal):
+            return float(data)
+        if isinstance(data, (int, float, str, bool)) or data is None:
+            return data
+        if isinstance(data, dict):
+            return {str(k): cls._sanitize_data(v) for k, v in data.items()}
+        if isinstance(data, (list, tuple, set)):
+            return [cls._sanitize_data(item) for item in data]
+        return str(data)
+
+    @classmethod
+    def freeze_quote(cls, request: HttpRequest, calculation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Congela una cotización en la sesión HTTP del usuario por 5 minutos (300 segundos).
+
+        :param request: Solicitud HTTP del usuario/cliente.
+        :type request: django.http.HttpRequest
+        :param calculation_data: Diccionario retornado por RateCalculationService.calculate_quotation.
+        :type calculation_data: dict
+        :return: Diccionario con token, timestamps y cálculo serializado.
+        :rtype: dict
+        """
+        now = timezone.now()
+        expires_at = now + timedelta(seconds=cls.FREEZE_DURATION_SECONDS)
+        token = f"QTZ-{uuid.uuid4().hex[:12].upper()}"
+
+        sanitized_calc = cls._sanitize_data(calculation_data)
+
+        payload = {
+            'token': token,
+            'frozen_at': now.isoformat(),
+            'expires_at': expires_at.isoformat(),
+            'duration_seconds': cls.FREEZE_DURATION_SECONDS,
+            'calculation': sanitized_calc,
+        }
+
+        if hasattr(request, 'session'):
+            request.session['frozen_quote'] = payload
+            request.session.modified = True
+
+        return {
+            'success': True,
+            'token': token,
+            'frozen_at': now.isoformat(),
+            'expires_at': expires_at.isoformat(),
+            'duration_seconds': cls.FREEZE_DURATION_SECONDS,
+            'remaining_seconds': cls.FREEZE_DURATION_SECONDS,
+            'is_expired': False,
+            'calculation': sanitized_calc,
+        }
+
+    @classmethod
+    def get_frozen_quote(cls, request: HttpRequest, token: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Obtiene la cotización congelada activa de la sesión, calculando el tiempo restante y estado.
+
+        :param request: Solicitud HTTP.
+        :type request: django.http.HttpRequest
+        :param token: Token de cotización opcional para verificar coincidencia.
+        :type token: str or None
+        :return: Diccionario de la cotización con estado de expiración y segundos restantes, o None.
+        :rtype: dict or None
+        """
+        if not hasattr(request, 'session'):
+            return None
+
+        frozen = request.session.get('frozen_quote')
+        if not frozen or not isinstance(frozen, dict):
+            return None
+
+        if token and frozen.get('token') != token:
+            return None
+
+        expires_at_str = frozen.get('expires_at')
+        if not expires_at_str:
+            return None
+
+        try:
+            expires_at = parse_datetime(expires_at_str)
+            if expires_at is None:
+                return None
+            if timezone.is_naive(expires_at):
+                expires_at = timezone.make_aware(expires_at)
+        except Exception:
+            return None
+
+        now = timezone.now()
+        remaining_seconds = max(0, int((expires_at - now).total_seconds()))
+        is_expired = (now >= expires_at) or (remaining_seconds <= 0)
+
+        result = dict(frozen)
+        result['remaining_seconds'] = remaining_seconds
+        result['is_expired'] = is_expired
+        return result
+
+    @classmethod
+    def unfreeze_quote(cls, request: HttpRequest, token: Optional[str] = None) -> bool:
+        """
+        Descongela o remueve la cotización activa de la sesión del usuario.
+
+        :param request: Solicitud HTTP.
+        :type request: django.http.HttpRequest
+        :param token: Token opcional para validar antes de eliminar.
+        :type token: str or None
+        :return: True si se eliminó una cotización existente, False en caso contrario.
+        :rtype: bool
+        """
+        if not hasattr(request, 'session'):
+            return False
+
+        frozen = request.session.get('frozen_quote')
+        if not frozen:
+            return False
+
+        if token and frozen.get('token') != token:
+            return False
+
+        del request.session['frozen_quote']
+        request.session.modified = True
+        return True
+
+    @classmethod
+    def validate_quote_token(cls, request: HttpRequest, token: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+        """
+        Valida si un token de cotización existe en sesión y se encuentra vigente dentro de los 5 minutos.
+
+        :param request: Solicitud HTTP.
+        :type request: django.http.HttpRequest
+        :param token: Token a verificar.
+        :type token: str
+        :return: Tupla (es_valido, datos_cotizacion, mensaje_estado).
+        :rtype: tuple[bool, dict or None, str]
+        """
+        if not token:
+            return False, None, "Token de cotización no provisto."
+
+        frozen = cls.get_frozen_quote(request, token=token)
+        if not frozen:
+            return False, None, "No se encontró una cotización congelada para este token o sesión."
+
+        if frozen.get('is_expired', False):
+            return False, frozen, "La cotización congelada ha expirado (límite de 5 minutos excedido)."
+
+        return True, frozen, "Cotización congelada válida y vigente."

@@ -999,3 +999,98 @@ class CustomerUserAssignmentTests(TestCase):
         self.assertEqual(data['assignments'][0]['user_id'], self.user_titular.id)
         self.assertTrue(data['assignments'][0]['is_primary_representative'])
 
+
+class ActiveCustomerSelectorTests(TestCase):
+    """
+    Suite de pruebas para el selector y cambio dinámico de Cliente Activo (SCRUM-40).
+    """
+
+    def setUp(self):
+        """Inicializa clientes, usuarios y cliente de pruebas."""
+        self.user = User.objects.create_user(
+            username='selector_user',
+            email='selector@test.com',
+            first_name='Selector',
+            last_name='Tester',
+            password='Password123!',
+        )
+        self.cliente_a = Cliente.objects.create(
+            nombre='Empresa Alfa S.A.',
+            documento_ruc='80011111-1',
+            correo='alfa@test.com',
+            segmentacion=Cliente.Segmentacion.CORPORATIVO,
+        )
+        self.cliente_b = Cliente.objects.create(
+            nombre='Empresa Beta S.R.L.',
+            documento_ruc='80022222-2',
+            correo='beta@test.com',
+            segmentacion=Cliente.Segmentacion.MAYORISTA,
+        )
+        self.cliente_no_asignado = Cliente.objects.create(
+            nombre='Empresa Ajena S.A.',
+            documento_ruc='80099999-9',
+            correo='ajena@test.com',
+        )
+
+        from customers.models import CustomerUserAssignment
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_a,
+            user=self.user,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_b,
+            user=self.user,
+            is_primary_representative=False,
+            is_active=True,
+        )
+
+        self.client_auth = Client()
+        self.client_auth.force_login(self.user)
+
+    def test_context_processor_injects_active_and_available_customers(self):
+        """Verifica que el procesador de contexto inyecte el cliente activo y los disponibles."""
+        from django.test import RequestFactory
+        from customers.context_processors import active_customer
+
+        factory = RequestFactory()
+        request = factory.get('/')
+        request.user = self.user
+        request.session = {'active_customer_id': self.cliente_b.id}
+
+        context = active_customer(request)
+        self.assertEqual(context['active_customer'], self.cliente_b)
+        self.assertIn(self.cliente_a, context['available_customers'])
+        self.assertIn(self.cliente_b, context['available_customers'])
+
+    def test_switch_active_customer_success(self):
+        """Verifica que al hacer POST a cambiar-activo se actualice el cliente activo en sesión."""
+        url = reverse('customers:switch-active-customer', kwargs={'customer_id': self.cliente_b.id})
+        response = self.client_auth.post(url, HTTP_REFERER='/')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client_auth.session['active_customer_id'], self.cliente_b.id)
+
+    def test_switch_active_customer_unauthorized_returns_404(self):
+        """Verifica que un usuario no pueda activar un cliente al que no está asignado."""
+        url = reverse('customers:switch-active-customer', kwargs={'customer_id': self.cliente_no_asignado.id})
+        response = self.client_auth.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_navbar_renders_active_customer_and_dropdown(self):
+        """Verifica que la barra superior renderice el nombre, RUC y opciones de cambio de cliente."""
+        response = self.client_auth.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode('utf-8')
+
+        # Debe mostrar el selector y los datos del cliente activo
+        self.assertIn('activeCustomerDropdown', content)
+        self.assertIn('Empresa Alfa S.A.', content)
+        self.assertIn('80011111-1', content)
+
+        # Debe contener la opción para alternar hacia el segundo cliente
+        self.assertIn('Empresa Beta S.R.L.', content)
+        self.assertIn('80022222-2', content)
+        self.assertIn(f'/customers/cambiar-activo/{self.cliente_b.id}/', content)
+
+
