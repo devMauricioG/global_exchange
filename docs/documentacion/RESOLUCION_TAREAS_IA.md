@@ -19,6 +19,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-43** | Documentación de Docstrings en Código Fuente y Sphinx | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-50** | Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates) | Sprint 2 | Pablo Elizeche | Finalizado |
+| **SCRUM-56** | Suite de Pruebas Unitarias e Integración para Monedas, Cotizaciones, Comisiones, Medios de Pago, Usuarios y Clientes | Sprint 2 | Equipo de Desarrollo | Finalizado |
 
 ---
 
@@ -268,4 +269,20 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/chat_ia.md`
 
+---
+
+### 13. SCRUM-56: Suite de Pruebas Unitarias e Integración para los módulos de negocio
+
+* **Objetivo:** Consolidar la validación automatizada de los módulos de monedas, cotizaciones, comisiones, medios de pago, clientes y autenticación de usuarios mediante pruebas unitarias e integración con Django `TestCase`.
+* **Aportes y Solución con IA:**
+  * Verificación de creación, normalización y validación de monedas; cálculo automático de spread; y reglas de comisión segmentadas, incluyendo descuentos sobre el spread.
+  * Cobertura de los flujos CRUD web y API de clientes y medios de pago, con validación de aislamiento por cliente y de medio predeterminado.
+  * Pruebas de autenticación, vinculación de usuarios OIDC/Keycloak y cierre de sesión, comprobando la invalidación de la sesión local y la redirección SSO.
+  * Se corrigió la selección de cotizaciones para que el cotizador descarte tasas expiradas y tasas cuya vigencia aún no inició. Las pruebas de integración verifican que el endpoint de cálculo responda `404` si no hay una cotización vigente.
+  * Ejecución integral de la suite: **182 pruebas aprobadas**.
+* **Archivos intervenidos:**
+  * `rates/services.py`
+  * `rates/tests.py`
+  * `authentication/tests.py`
+  * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
 

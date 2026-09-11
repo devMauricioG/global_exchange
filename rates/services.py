@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import HttpRequest
+from django.utils import timezone
 
 from customers.models import Cliente, CustomerUserAssignment
 from .models import Currency, ExchangeRate, SegmentCommission
@@ -152,6 +153,7 @@ class RateCalculationService:
         base_code = base_currency.code if isinstance(base_currency, Currency) else str(base_currency).upper().strip()
         target_code = target_currency.code if isinstance(target_currency, Currency) else str(target_currency).upper().strip()
 
+        now = timezone.now()
         return (
             ExchangeRate.objects.filter(
                 base_currency__code=base_code,
@@ -159,7 +161,9 @@ class RateCalculationService:
                 target_currency__code=target_code,
                 target_currency__is_active=True,
                 is_active=True,
+                valid_from__lte=now,
             )
+            .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=now))
             .select_related('base_currency', 'target_currency')
             .order_by('-valid_from', '-created_at')
             .first()

@@ -9,7 +9,7 @@ y la renderización condicional de la barra de navegación y el dashboard princi
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Group
 from django.template import Context, Template
-from django.test import Client, RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from authentication.context_processors import auth_roles
@@ -438,3 +438,28 @@ class AuthRoleInheritanceTests(TestCase):
         self.assertFalse(ctx_std['is_admin'])
         self.assertFalse(ctx_std['is_operator'])
         self.assertTrue(ctx_std['is_user_role'])
+
+
+class KeycloakLogoutIntegrationTests(TestCase):
+    """Pruebas de integración para la invalidación de sesión OIDC."""
+
+    @override_settings(
+        OIDC_OP_LOGOUT_ENDPOINT='https://keycloak.example.test/logout',
+        OIDC_RP_CLIENT_ID='global-exchange-test',
+        LOGOUT_REDIRECT_URL='/',
+    )
+    def test_logout_invalidates_local_session_and_redirects_to_keycloak(self):
+        user = User.objects.create_user(
+            username='logout_user',
+            email='logout@test.com',
+            password='Password123!',
+        )
+        client = Client()
+        client.force_login(user)
+
+        response = client.get(reverse('authentication:logout'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('https://keycloak.example.test/logout?', response.url)
+        self.assertIn('client_id=global-exchange-test', response.url)
+        self.assertNotIn('_auth_user_id', client.session)
