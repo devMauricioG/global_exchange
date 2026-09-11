@@ -16,7 +16,8 @@ Including another URLconf
 """
 from authentication.views import home_view
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from config.views import serve_sphinx_docs
 
 urlpatterns = [
     path('', home_view, name='home'),
@@ -25,6 +26,7 @@ urlpatterns = [
     path('auth/', include('authentication.urls')),
     path('customers/', include('customers.urls')),
     path('payments/', include('payments.urls')),
+    re_path(r'^docs/(?P<path>.*)$', serve_sphinx_docs, name='sphinx_docs'),
 ]
 
 
