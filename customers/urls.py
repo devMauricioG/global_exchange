@@ -10,6 +10,7 @@ Rutas Web:
     * ``/customers/<pk>/`` (nombre: ``cliente-detail``): Detalle del cliente.
     * ``/customers/<pk>/editar/`` (nombre: ``cliente-update``): Formulario de edición.
     * ``/customers/<pk>/eliminar/`` (nombre: ``cliente-delete``): Confirmación y borrado.
+    * ``/customers/cambiar-activo/<int:customer_id>/`` (nombre: ``switch-active-customer``): Cambia el cliente activo en sesión.
 
 Rutas API REST:
     * ``/customers/api/`` (nombre: ``api-cliente-list-create``): Listar y crear vía JSON.
@@ -30,6 +31,9 @@ urlpatterns = [
     path('<int:pk>/', views.ClienteDetailView.as_view(), name='cliente-detail'),
     path('<int:pk>/editar/', views.ClienteUpdateView.as_view(), name='cliente-update'),
     path('<int:pk>/eliminar/', views.ClienteDeleteView.as_view(), name='cliente-delete'),
+
+     # Gestión de Cliente Activo en Sesión
+    path('cambiar-activo/<int:customer_id>/', views.SwitchActiveCustomerView.as_view(), name='switch-active-customer'),
 
     # Endpoints API REST (JSON)
     path('api/', views.ClienteListCreateAPIView.as_view(), name='api-cliente-list-create'),
