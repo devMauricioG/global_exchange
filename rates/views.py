@@ -8,6 +8,7 @@ Implementa:
 4. **Endpoints API REST (JSON)** para consultas programáticas y consumo asíncrono desde el frontend.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 import json
 import logging
@@ -22,6 +23,7 @@ from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
+from django.utils import timezone
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import (
@@ -31,6 +33,7 @@ from django.views.generic import (
     ListView,
     UpdateView,
 )
+from django.views.generic import TemplateView
 
 from customers.models import Cliente
 from .forms import (
@@ -252,6 +255,104 @@ class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
         messages.success(request, f'Tasa de cambio {rate.base_currency.code}/{rate.target_currency.code} {status} exitosamente.')
         next_url = request.META.get('HTTP_REFERER', reverse_lazy('rates:rate-list'))
         return redirect(next_url)
+
+
+# ==============================================================================
+# DASHBOARD DE COTIZACIONES HISTÓRICAS (SCRUM-52)
+# ==============================================================================
+
+class ExchangeRateDashboardView(LoginRequiredMixin, TemplateView):
+    """Muestra el tablero de cotizaciones y sus indicadores operativos actuales."""
+
+    template_name = 'rates/exchange_rate_dashboard.html'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        now = timezone.now()
+        current_rates = ExchangeRate.objects.filter(
+            is_active=True,
+            valid_from__lte=now,
+        ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=now)).select_related(
+            'base_currency', 'target_currency'
+        ).order_by('base_currency__code', 'target_currency__code', '-valid_from', '-created_at')
+
+        latest_quotes = []
+        seen_pairs = set()
+        for rate in current_rates:
+            pair = (rate.base_currency_id, rate.target_currency_id)
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                latest_quotes.append(rate)
+
+        historical_pairs = ExchangeRate.objects.select_related(
+            'base_currency', 'target_currency'
+        ).order_by('base_currency__code', 'target_currency__code').values(
+            'base_currency_id', 'base_currency__code', 'target_currency_id', 'target_currency__code'
+        ).distinct()
+
+        context.update({
+            'latest_quotes': latest_quotes,
+            'historical_pairs': historical_pairs,
+            'active_quotes_count': len(latest_quotes),
+            'currencies_count': Currency.objects.filter(is_active=True).count(),
+            'updated_today_count': ExchangeRate.objects.filter(
+                updated_at__date=now.date(), is_active=True
+            ).count(),
+            'range_options': (
+                ('7d', 'Últimos 7 días'),
+                ('30d', 'Últimos 30 días'),
+                ('90d', 'Últimos 90 días'),
+                ('1y', 'Último año'),
+            ),
+        })
+        return context
+
+
+class ExchangeRateHistoryApiView(LoginRequiredMixin, View):
+    """Entrega las series históricas de compra y venta para el gráfico de cotizaciones."""
+
+    PERIOD_DAYS = {'7d': 7, '30d': 30, '90d': 90, '1y': 365}
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        period = request.GET.get('period', '30d')
+        if period not in self.PERIOD_DAYS:
+            return JsonResponse(
+                {'success': False, 'error': 'El período seleccionado no es válido.'}, status=400
+            )
+
+        try:
+            base_currency_id, target_currency_id = (
+                int(value) for value in request.GET.get('pair', '').split(':', 1)
+            )
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {'success': False, 'error': 'El par de monedas seleccionado no es válido.'}, status=400
+            )
+
+        end_date = timezone.now()
+        start_date = end_date - timedelta(days=self.PERIOD_DAYS[period])
+        rates = list(ExchangeRate.objects.filter(
+            base_currency_id=base_currency_id,
+            target_currency_id=target_currency_id,
+            valid_from__gte=start_date,
+            valid_from__lte=end_date,
+        ).select_related('base_currency', 'target_currency').order_by('valid_from', 'created_at'))
+
+        if not rates:
+            return JsonResponse({
+                'success': True, 'period': period, 'pair': None,
+                'labels': [], 'buy_rates': [], 'sell_rates': [],
+            })
+
+        first_rate = rates[0]
+        return JsonResponse({
+            'success': True,
+            'period': period,
+            'pair': f'{first_rate.base_currency.code}/{first_rate.target_currency.code}',
+            'labels': [rate.valid_from.strftime('%d/%m/%Y %H:%M') for rate in rates],
+            'buy_rates': [float(rate.buy_rate) for rate in rates],
+            'sell_rates': [float(rate.sell_rate) for rate in rates],
+        })
 
 
 # ==============================================================================

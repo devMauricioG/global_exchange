@@ -1130,3 +1130,57 @@ class CurrencyAndExchangeRateViewsTest(TestCase):
         self.rate.refresh_from_db()
         self.assertFalse(self.rate.is_active)
 
+
+class ExchangeRateDashboardTests(TestCase):
+    """Pruebas del tablero y API de evolución histórica de SCRUM-52."""
+
+    def setUp(self):
+        self.user = User.objects.create_user('dashboard_user', password='Password123!')
+        self.client.force_login(self.user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        now = timezone.now()
+        self.recent_rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            valid_from=now - timedelta(days=2),
+        )
+        ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7300.000000'),
+            sell_rate=Decimal('7400.000000'),
+            valid_from=now - timedelta(days=20),
+        )
+
+    def test_dashboard_displays_summary_and_chart_controls(self):
+        response = self.client.get(reverse('rates:dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'rates/exchange_rate_dashboard.html')
+        self.assertEqual(response.context['active_quotes_count'], 1)
+        self.assertContains(response, 'Últimos 90 días')
+        self.assertContains(response, 'USD/PYG')
+
+    def test_history_api_returns_only_requested_period(self):
+        response = self.client.get(
+            reverse('rates:api_history'), {'pair': f'{self.usd.id}:{self.pyg.id}', 'period': '7d'}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['pair'], 'USD/PYG')
+        self.assertEqual(data['buy_rates'], [7400.0])
+        self.assertEqual(data['sell_rates'], [7500.0])
+
+    def test_history_api_rejects_invalid_parameters(self):
+        invalid_period = self.client.get(reverse('rates:api_history'), {'pair': '1:2', 'period': '2y'})
+        invalid_pair = self.client.get(reverse('rates:api_history'), {'pair': 'USD/PYG', 'period': '7d'})
+        self.assertEqual(invalid_period.status_code, 400)
+        self.assertEqual(invalid_pair.status_code, 400)
+
+    def test_dashboard_and_api_require_authentication(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse('rates:dashboard')).status_code, 302)
+        self.assertEqual(self.client.get(reverse('rates:api_history')).status_code, 302)
