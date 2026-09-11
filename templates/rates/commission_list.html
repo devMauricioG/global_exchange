@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Comisiones por Segmento — Global Exchange{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                ⚙️ Parametrización de Comisiones por Segmento
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Configure las políticas tarifarias, cargos fijos y bonificaciones de spread aplicables a cada categoría de cliente.
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a href="{% url 'rates:rate_calculator' %}" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+                🧮 Abrir Cotizador
+            </a>
+            <a href="{% url 'rates:commission_create' %}" class="btn btn-primary">
+                ➕ Nueva Regla de Comisión
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Métricas Resumen -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid var(--primary);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Reglas Parametrizadas</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-top: 0.35rem;">
+            {{ total_rules }} <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-subtle);">/ {{ available_segments_count }} segmentos</span>
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid var(--success);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Reglas Activas</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #34d399; margin-top: 0.35rem;">
+            {{ active_rules }}
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid #818cf8;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Comisión Promedio</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #a5b4fc; margin-top: 0.35rem;">
+            {{ avg_commission|floatformat:2 }}%
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid #fbbf24;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Bonificación Spread Prom.</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #fbbf24; margin-top: 0.35rem;">
+            {{ avg_spread_discount|floatformat:2 }}%
+        </div>
+    </div>
+</div>
+
+<!-- Filtros -->
+<div class="card" style="margin-bottom: 1.5rem; padding: 1.25rem;">
+    <form method="get" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 180px;">
+            <label for="filter_segment" class="form-label" style="margin-bottom: 0.35rem;">Segmento:</label>
+            {{ filter_form.segment }}
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+            <label for="filter_is_active" class="form-label" style="margin-bottom: 0.35rem;">Estado:</label>
+            {{ filter_form.is_active }}
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary" style="padding: 0.625rem 1.25rem;">Filtrar</button>
+            <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary" style="padding: 0.625rem 1rem;">Limpiar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Tabla de Comisiones -->
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div style="overflow-x: auto;">
+        <table class="table" style="width: 100%; margin: 0;">
+            <thead>
+                <tr>
+                    <th>Segmento Comercial</th>
+                    <th style="text-align: right;">Comisión (%)</th>
+                    <th style="text-align: right;">Cargo Fijo</th>
+                    <th style="text-align: right;">Descuento Spread (%)</th>
+                    <th style="text-align: center;">Estado</th>
+                    <th>Última Actualización</th>
+                    <th style="text-align: center;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for commission in commissions %}
+                <tr>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <span class="badge {% if commission.segment == 'MIN' %}badge-min{% elif commission.segment == 'MAY' %}badge-may{% elif commission.segment == 'COR' %}badge-cor{% elif commission.segment == 'VIP' %}badge-vip{% else %}badge-min{% endif %}" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+                                {{ commission.get_segment_display }}
+                            </span>
+                            <span style="color: var(--text-subtle); font-size: 0.8rem; font-family: monospace;">({{ commission.segment }})</span>
+                        </div>
+                    </td>
+                    <td style="text-align: right; font-weight: 700; color: #a5b4fc; font-size: 1rem;">
+                        {{ commission.commission_percentage }}%
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: var(--text-main);">
+                        ${{ commission.fixed_fee|floatformat:2 }}
+                    </td>
+                    <td style="text-align: right; font-weight: 700; color: #fbbf24;">
+                        {{ commission.spread_discount_percentage }}%
+                    </td>
+                    <td style="text-align: center;">
+                        {% if commission.is_active %}
+                            <span class="badge badge-active">Activo</span>
+                        {% else %}
+                            <span class="badge badge-inactive">Inactivo</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">
+                        {{ commission.updated_at|date:"d/m/Y H:i" }}
+                    </td>
+                    <td style="text-align: center;">
+                        <div style="display: flex; gap: 0.4rem; justify-content: center;">
+                            <a href="{% url 'rates:commission_detail' commission.id %}" class="btn btn-sm btn-secondary" title="Ver análisis de comisiones">
+                                👁️ Detalle
+                            </a>
+                            <a href="{% url 'rates:commission_update' commission.id %}" class="btn btn-sm btn-primary" title="Editar tarifas">
+                                ✏️ Editar
+                            </a>
+                            <a href="{% url 'rates:commission_delete' commission.id %}" class="btn btn-sm btn-danger" title="Eliminar regla">
+                                🗑️
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📊</div>
+                        <h3 style="color: var(--text-main); font-weight: 700; margin-bottom: 0.5rem;">No se encontraron reglas de comisión</h3>
+                        <p style="margin-bottom: 1.25rem;">Aún no se han configurado parámetros para los segmentos o el filtro no arrojó resultados.</p>
+                        <a href="{% url 'rates:commission_create' %}" class="btn btn-primary">Parametrizar Primer Segmento</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

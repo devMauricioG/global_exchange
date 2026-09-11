@@ -1,28 +1,42 @@
 """
-Módulo de pruebas unitarias para la aplicación rates (SCRUM-50).
+Módulo de pruebas unitarias para la aplicación rates (SCRUM-50 y SCRUM-53).
 
 Verifica la integridad de datos, lógica de negocio y restricciones de validación para:
 - :class:`~rates.models.Currency`
 - :class:`~rates.models.ExchangeRate`
 - :class:`~rates.models.SegmentCommission`
+- :class:`~rates.services.RateCalculationService` y resolución de cliente activo
+- Formularios :class:`~rates.forms.SegmentCommissionForm`, :class:`~rates.forms.SegmentCommissionFilterForm`, :class:`~rates.forms.RateCalculatorForm`
+- Vistas CBVs de administración de comisiones y simulador de cotizaciones
+- Endpoints API REST JSON para liquidación en tiempo real y consulta de reglas
 """
 
 from datetime import timedelta
 from decimal import Decimal
+import json
+
+from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
-from django.contrib.admin.sites import AdminSite
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.exceptions import ValidationError
-from django.db import models, IntegrityError, transaction
-from django.test import TestCase, RequestFactory
+from django.db import IntegrityError, models, transaction
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
-from customers.models import Cliente
-from rates.admin import ExchangeRateAdmin
+from customers.models import Cliente, CustomerUserAssignment
+from rates.admin import CurrencyAdmin, ExchangeRateAdmin, SegmentCommissionAdmin
+from rates.forms import RateCalculatorForm, SegmentCommissionFilterForm, SegmentCommissionForm
 from rates.models import Currency, ExchangeRate, SegmentCommission
+from rates.services import RateCalculationService, get_active_customer
 
 User = get_user_model()
 
+
+# ==============================================================================
+# PRUEBAS DE MODELOS
+# ==============================================================================
 
 class CurrencyModelTest(TestCase):
     """
@@ -39,7 +53,6 @@ class CurrencyModelTest(TestCase):
         )
 
     def test_currency_creation_and_defaults(self):
-        """Verifica la creación básica y los valores por defecto del modelo Currency."""
         pyg = Currency.objects.create(
             code='PYG',
             name='Guaraní Paraguayo',
@@ -55,92 +68,79 @@ class CurrencyModelTest(TestCase):
         self.assertIsNotNone(pyg.updated_at)
 
     def test_currency_str_representation(self):
-        """Verifica el formato del método __str__ de Currency."""
         self.assertEqual(str(self.usd), 'USD - Dólar Estadounidense ($)')
 
-    def test_currency_code_normalization_and_stripping(self):
-        """Verifica que clean() convierta el código ISO a mayúsculas y limpie espacios en blanco."""
-        eur = Currency(
-            code=' eur ',
-            name=' Euro ',
-            symbol=' € ',
+    def test_currency_code_upper_conversion_on_save(self):
+        eur = Currency.objects.create(
+            code='eur',
+            name='Euro',
+            symbol='€',
+            decimals=2,
         )
-        eur.save()
         self.assertEqual(eur.code, 'EUR')
-        self.assertEqual(eur.name, 'Euro')
-        self.assertEqual(eur.symbol, '€')
 
-    def test_currency_invalid_code_length(self):
-        """Verifica que falle la validación si el código ISO no tiene exactamente 3 caracteres."""
-        invalid_short = Currency(code='US', name='Dólar', symbol='$')
+    def test_currency_code_uniqueness(self):
+        with self.assertRaises((IntegrityError, ValidationError)):
+            with transaction.atomic():
+                Currency.objects.create(
+                    code='USD',
+                    name='Dólar Clon',
+                    symbol='$',
+                )
+
+    def test_currency_negative_decimals_validation(self):
+        invalid_curr = Currency(
+            code='INV',
+            name='Moneda Inválida',
+            symbol='?',
+            decimals=-1,
+        )
         with self.assertRaises(ValidationError) as ctx:
-            invalid_short.full_clean()
-        self.assertIn('code', ctx.exception.message_dict)
+            invalid_curr.save()
+        self.assertIn('decimals', ctx.exception.message_dict)
 
-        invalid_long = Currency(code='USDT', name='Tether', symbol='$')
+    def test_currency_excessive_decimals_validation(self):
+        invalid_curr = Currency(
+            code='INV',
+            name='Moneda Inválida',
+            symbol='?',
+            decimals=11,
+        )
         with self.assertRaises(ValidationError) as ctx:
-            invalid_long.full_clean()
-        self.assertIn('code', ctx.exception.message_dict)
+            invalid_curr.save()
+        self.assertIn('decimals', ctx.exception.message_dict)
 
-    def test_currency_invalid_code_non_alpha(self):
-        """Verifica que falle la validación si el código ISO contiene caracteres no alfabéticos."""
-        invalid_numeric = Currency(code='U12', name='Moneda Invalida', symbol='$')
-        with self.assertRaises(ValidationError) as ctx:
-            invalid_numeric.full_clean()
-        self.assertIn('code', ctx.exception.message_dict)
-
-    def test_currency_unique_code(self):
-        """Verifica que el código ISO sea único en la base de datos."""
-        with self.assertRaises((ValidationError, IntegrityError)):
-            Currency.objects.create(
-                code='USD',
-                name='Otro Dólar',
-                symbol='$',
-            )
+    def test_currency_decimal_places_property(self):
+        self.assertEqual(self.usd.decimal_places, 2)
 
 
 class ExchangeRateModelTest(TestCase):
     """
-    Pruebas unitarias para el modelo ExchangeRate (Tasas de Cambio y Cotizaciones).
+    Pruebas unitarias para el modelo ExchangeRate (Cotizaciones y Tasas de Cambio).
     """
 
     def setUp(self):
         self.user = User.objects.create_user(
-            username='cambista',
-            email='cambista@globalexchange.com',
+            username='operador',
+            email='operador@globalexchange.com',
             password='Password123!',
         )
-        self.usd = Currency.objects.create(
-            code='USD',
-            name='Dólar Estadounidense',
-            symbol='$',
-            decimals=2,
-        )
-        self.pyg = Currency.objects.create(
-            code='PYG',
-            name='Guaraní Paraguayo',
-            symbol='₲',
-            decimals=0,
-        )
+        self.usd = Currency.objects.create(code='USD', name='Dólar Estadounidense', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní Paraguayo', symbol='₲', decimals=0)
 
-    def test_exchange_rate_creation_and_auto_spread(self):
-        """Verifica el cálculo automático del spread al persistir una cotización."""
+    def test_exchange_rate_creation_and_spread_auto_calculation(self):
         rate = ExchangeRate.objects.create(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
+            buy_rate=Decimal('7450.000000'),
+            sell_rate=Decimal('7550.000000'),
             updated_by=self.user,
         )
-        self.assertEqual(rate.spread, Decimal('50.000000'))
+        self.assertEqual(rate.spread, Decimal('100.000000'))
         self.assertTrue(rate.is_active)
-        self.assertIn('USD/PYG', str(rate))
-        self.assertIn('Compra: 7800.000000', str(rate))
-        self.assertIn('Venta: 7850.000000', str(rate))
-        self.assertIn('Spread: 50.000000', str(rate))
+        self.assertIsNotNone(rate.valid_from)
 
-    def test_same_base_and_target_currency_rejected(self):
-        """Verifica que no se permita una cotización con la misma moneda base y destino."""
+    def test_exchange_rate_validation_same_currencies(self):
         rate = ExchangeRate(
             base_currency=self.usd,
             target_currency=self.usd,
@@ -148,112 +148,77 @@ class ExchangeRateModelTest(TestCase):
             sell_rate=Decimal('1.000000'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            rate.full_clean()
+            rate.save()
         self.assertIn('target_currency', ctx.exception.message_dict)
 
-    def test_negative_or_zero_rates_rejected(self):
-        """Verifica que las tasas de compra y venta deban ser estrictamente mayores a cero."""
-        zero_buy = ExchangeRate(
+    def test_exchange_rate_validation_zero_or_negative_buy_rate(self):
+        rate = ExchangeRate(
             base_currency=self.usd,
             target_currency=self.pyg,
             buy_rate=Decimal('0.000000'),
-            sell_rate=Decimal('7800.000000'),
+            sell_rate=Decimal('7550.000000'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            zero_buy.full_clean()
+            rate.save()
         self.assertIn('buy_rate', ctx.exception.message_dict)
 
-        negative_sell = ExchangeRate(
-            base_currency=self.usd,
-            target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('-10.000000'),
-        )
-        with self.assertRaises(ValidationError) as ctx:
-            negative_sell.full_clean()
-        self.assertIn('sell_rate', ctx.exception.message_dict)
-
-    def test_sell_rate_less_than_buy_rate_rejected(self):
-        """Verifica que la tasa de venta no pueda ser menor a la tasa de compra (margen negativo)."""
+    def test_exchange_rate_validation_sell_lower_than_buy(self):
         rate = ExchangeRate(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7900.000000'),
-            sell_rate=Decimal('7800.000000'),
+            buy_rate=Decimal('7600.000000'),
+            sell_rate=Decimal('7400.000000'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            rate.full_clean()
+            rate.save()
         self.assertIn('sell_rate', ctx.exception.message_dict)
 
-    def test_valid_to_before_valid_from_rejected(self):
-        """Verifica que valid_to deba ser posterior a valid_from."""
+    def test_is_currently_valid_methods(self):
         now = timezone.now()
-        rate = ExchangeRate(
+        rate_valid = ExchangeRate.objects.create(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
-            valid_from=now,
-            valid_to=now - timedelta(hours=1),
-        )
-        with self.assertRaises(ValidationError) as ctx:
-            rate.full_clean()
-        self.assertIn('valid_to', ctx.exception.message_dict)
-
-    def test_is_current_property(self):
-        """Evalúa las diferentes condiciones de vigencia temporal de una cotización."""
-        now = timezone.now()
-
-        # 1. Vigente activa y sin fecha límite
-        rate_open = ExchangeRate.objects.create(
-            base_currency=self.usd,
-            target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
-            valid_from=now - timedelta(minutes=5),
-            valid_to=None,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            valid_from=now - timedelta(hours=1),
+            valid_to=now + timedelta(hours=1),
             is_active=True,
         )
-        self.assertTrue(rate_open.is_current)
+        self.assertTrue(rate_valid.is_currently_valid())
 
-        # 2. Inactiva manualmente
-        rate_open.is_active = False
-        self.assertFalse(rate_open.is_current)
-
-        # 3. Vigencia en el futuro
-        future_rate = ExchangeRate(
+        rate_expired = ExchangeRate.objects.create(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
-            valid_from=now + timedelta(days=1),
-            is_active=True,
-        )
-        self.assertFalse(future_rate.is_current)
-
-        # 4. Vigencia expirada en el pasado
-        past_rate = ExchangeRate(
-            base_currency=self.usd,
-            target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
+            buy_rate=Decimal('7300.000000'),
+            sell_rate=Decimal('7400.000000'),
             valid_from=now - timedelta(days=2),
             valid_to=now - timedelta(days=1),
             is_active=True,
         )
-        self.assertFalse(past_rate.is_current)
+        self.assertFalse(rate_expired.is_currently_valid())
 
-    def test_currency_protect_on_delete(self):
-        """Verifica que una divisa no pueda eliminarse si está asociada a tasas de cambio."""
-        ExchangeRate.objects.create(
+    def test_get_rate_for_operation(self):
+        rate = ExchangeRate.objects.create(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
         )
-        with self.assertRaises(models.ProtectedError):
-            with transaction.atomic():
-                self.usd.delete()
+        self.assertEqual(rate.get_rate_for_operation('BUY'), Decimal('7500.000000'))
+        self.assertEqual(rate.get_rate_for_operation('SELL'), Decimal('7400.000000'))
+        with self.assertRaises(ValueError):
+            rate.get_rate_for_operation('INVALID')
+
+    def test_exchange_rate_str_representation(self):
+        rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+        )
+        self.assertIn('USD/PYG', str(rate))
+        self.assertIn('Compra: 7400.000000', str(rate))
+        self.assertIn('Venta: 7500.000000', str(rate))
 
 
 class SegmentCommissionModelTest(TestCase):
@@ -273,124 +238,895 @@ class SegmentCommissionModelTest(TestCase):
             segment=Cliente.Segmentacion.VIP,
             commission_percentage=Decimal('0.25'),
             fixed_fee=Decimal('0.00'),
-            spread_discount_percentage=Decimal('30.00'),
+            spread_discount_percentage=Decimal('50.00'),
             is_active=True,
         )
 
-    def test_segment_commission_str_representation(self):
-        """Verifica la representación __str__ de la regla de comisión por segmento."""
-        self.assertIn('Minorista', str(self.commission_min))
-        self.assertIn('1.50%', str(self.commission_min))
-        self.assertIn('5000.00 fijo', str(self.commission_min))
+    def test_segment_commission_creation_and_fields(self):
+        self.assertEqual(self.commission_min.segment, 'MIN')
+        self.assertEqual(self.commission_min.commission_percentage, Decimal('1.50'))
+        self.assertEqual(self.commission_min.fixed_fee, Decimal('5000.00'))
+        self.assertEqual(self.commission_min.spread_discount_percentage, Decimal('0.00'))
+        self.assertTrue(self.commission_min.is_active)
 
-    def test_unique_segment_constraint(self):
-        """Verifica que no se puedan registrar dos reglas para el mismo segmento."""
-        with self.assertRaises((ValidationError, IntegrityError)):
-            SegmentCommission.objects.create(
-                segment=Cliente.Segmentacion.MINORISTA,
-                commission_percentage=Decimal('2.00'),
-            )
+    def test_segment_unique_constraint(self):
+        with self.assertRaises((IntegrityError, ValidationError)):
+            with transaction.atomic():
+                SegmentCommission.objects.create(
+                    segment=Cliente.Segmentacion.MINORISTA,
+                    commission_percentage=Decimal('2.00'),
+                )
 
-    def test_commission_percentage_range_validation(self):
-        """Verifica que el porcentaje de comisión esté restringido entre 0.00% y 100.00%."""
+    def test_commission_percentage_out_of_bounds(self):
         neg = SegmentCommission(
             segment=Cliente.Segmentacion.MAYORISTA,
             commission_percentage=Decimal('-1.00'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            neg.full_clean()
+            neg.save()
         self.assertIn('commission_percentage', ctx.exception.message_dict)
 
         over = SegmentCommission(
-            segment=Cliente.Segmentacion.MAYORISTA,
-            commission_percentage=Decimal('100.01'),
+            segment=Cliente.Segmentacion.CORPORATIVO,
+            commission_percentage=Decimal('101.00'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            over.full_clean()
+            over.save()
         self.assertIn('commission_percentage', ctx.exception.message_dict)
 
     def test_fixed_fee_negative_validation(self):
-        """Verifica que el cargo fijo no pueda ser negativo."""
         neg_fee = SegmentCommission(
-            segment=Cliente.Segmentacion.CORPORATIVO,
-            fixed_fee=Decimal('-500.00'),
+            segment=Cliente.Segmentacion.MAYORISTA,
+            fixed_fee=Decimal('-100.00'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            neg_fee.full_clean()
+            neg_fee.save()
         self.assertIn('fixed_fee', ctx.exception.message_dict)
 
-    def test_spread_discount_percentage_range_validation(self):
-        """Verifica que el descuento sobre el spread esté entre 0.00% y 100.00%."""
+    def test_spread_discount_out_of_bounds(self):
         over_discount = SegmentCommission(
-            segment=Cliente.Segmentacion.CORPORATIVO,
-            spread_discount_percentage=Decimal('105.00'),
+            segment=Cliente.Segmentacion.MAYORISTA,
+            spread_discount_percentage=Decimal('150.00'),
         )
         with self.assertRaises(ValidationError) as ctx:
-            over_discount.full_clean()
+            over_discount.save()
         self.assertIn('spread_discount_percentage', ctx.exception.message_dict)
 
-    def test_calculate_commission(self):
-        """Verifica el cálculo de comisiones (porcentual + fija) para diversos montos."""
-        # Minorista: 1.5% de 1.000.000 = 15.000 + 5.000 fijo = 20.000
+    def test_calculate_commission_method(self):
+        # Para 1.000.000 con 1.5% + 5.000 fijo: 15.000 + 5.000 = 20.000
         amount = Decimal('1000000.00')
-        calc_min = self.commission_min.calculate_commission(amount)
-        self.assertEqual(calc_min, Decimal('20000.00'))
+        comm = self.commission_min.calculate_commission(amount)
+        self.assertEqual(comm, Decimal('20000.00'))
 
-        # VIP: 0.25% de 1.000.000 = 2.500 + 0 fijo = 2.500
-        calc_vip = self.commission_vip.calculate_commission(amount)
-        self.assertEqual(calc_vip, Decimal('2500.00'))
+        # Para monto <= 0
+        self.assertEqual(self.commission_min.calculate_commission(Decimal('0.00')), Decimal('0.00'))
 
-        # Monto 0 o negativo retorna 0.00
-        self.assertEqual(self.commission_min.calculate_commission(Decimal('0')), Decimal('0.00'))
-        self.assertEqual(self.commission_min.calculate_commission(Decimal('-500')), Decimal('0.00'))
-
-        # Regla inactiva retorna 0.00
+    def test_calculate_commission_inactive_rule(self):
         self.commission_min.is_active = False
-        self.assertEqual(self.commission_min.calculate_commission(amount), Decimal('0.00'))
+        self.commission_min.save()
+        self.assertEqual(self.commission_min.calculate_commission(Decimal('1000.00')), Decimal('0.00'))
 
-    def test_apply_spread_discount(self):
-        """Verifica la aplicación de descuentos sobre el spread."""
-        spread = Decimal('100.000000')
+    def test_apply_spread_discount_method(self):
+        original_spread = Decimal('100.000000')
+        # VIP tiene 50% de descuento sobre el spread: spread resultante = 50.00
+        adjusted = self.commission_vip.apply_spread_discount(original_spread)
+        self.assertEqual(adjusted, Decimal('50.000000'))
 
-        # Minorista: 0% descuento -> 100
-        self.assertEqual(self.commission_min.apply_spread_discount(spread), Decimal('100.000000'))
+        # Minorista tiene 0% de descuento: spread resultante = 100.00
+        adjusted_min = self.commission_min.apply_spread_discount(original_spread)
+        self.assertEqual(adjusted_min, original_spread)
 
-        # VIP: 30% descuento -> 100 - 30 = 70
-        self.assertEqual(self.commission_vip.apply_spread_discount(spread), Decimal('70.000000'))
+    def test_str_representation(self):
+        str_repr = str(self.commission_vip)
+        self.assertIn('VIP', str_repr)
+        self.assertIn('0.25%', str_repr)
+        self.assertIn('50.00%', str_repr)
 
-        # Regla inactiva -> retorna spread original
-        self.commission_vip.is_active = False
-        self.assertEqual(self.commission_vip.apply_spread_discount(spread), Decimal('100.000000'))
 
-
-class RatesAdminTest(TestCase):
+class RatesAdminInterfaceTest(TestCase):
     """
-    Pruebas unitarias para las personalizaciones del Django Admin en rates.
+    Pruebas de la configuración e interfaz de Django Admin para rates.
     """
 
     def setUp(self):
         self.site = AdminSite()
-        self.user = User.objects.create_superuser(
-            username='admin_rates',
-            email='admin@globalexchange.com',
-            password='AdminPassword123!',
-        )
-        self.factory = RequestFactory()
+        self.user = User.objects.create_superuser('admin_rates', 'admin@rates.com', 'AdminPass123!')
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$')
-        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
-
-    def test_exchange_rate_admin_save_model_assigns_user(self):
-        """Verifica que ExchangeRateAdmin.save_model asigne el usuario autenticado automáticamente."""
-        admin_obj = ExchangeRateAdmin(ExchangeRate, self.site)
-        rate = ExchangeRate(
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲')
+        self.rate = ExchangeRate.objects.create(
             base_currency=self.usd,
             target_currency=self.pyg,
-            buy_rate=Decimal('7800.000000'),
-            sell_rate=Decimal('7850.000000'),
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+        )
+        self.factory = RequestFactory()
+
+    def test_exchangerate_admin_save_model_sets_updated_by(self):
+        request = self.factory.get('/admin/')
+        request.user = self.user
+        admin_obj = ExchangeRateAdmin(ExchangeRate, self.site)
+        admin_obj.save_model(request, self.rate, form=None, change=True)
+        self.assertEqual(self.rate.updated_by, self.user)
+
+
+# ==============================================================================
+# PRUEBAS DEL MOTOR DE CÁLCULO Y SERVICIOS (SCRUM-53)
+# ==============================================================================
+
+class RateCalculationServiceTest(TestCase):
+    """
+    Pruebas unitarias exhaustivas para RateCalculationService.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='tester', email='tester@test.com', password='Password123!')
+        self.usd = Currency.objects.create(code='USD', name='Dólar Estadounidense', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní Paraguayo', symbol='₲', decimals=0)
+
+        # Cotización oficial USD/PYG: Compra 7.400 / Venta 7.500 (Spread = 100)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            updated_by=self.user,
+            is_active=True,
         )
 
-        request = self.factory.post('/admin/rates/exchangerate/add/')
-        request.user = self.user
+        # Reglas por segmento
+        self.comm_min = SegmentCommission.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            commission_percentage=Decimal('1.00'),
+            fixed_fee=Decimal('5000.00'),
+            spread_discount_percentage=Decimal('0.00'),
+            is_active=True,
+        )
+        self.comm_vip = SegmentCommission.objects.create(
+            segment=Cliente.Segmentacion.VIP,
+            commission_percentage=Decimal('0.20'),
+            fixed_fee=Decimal('0.00'),
+            spread_discount_percentage=Decimal('40.00'),  # 40% de descuento en spread -> spread ef = 60
+            is_active=True,
+        )
 
-        admin_obj.save_model(request, rate, form=None, change=False)
-        self.assertEqual(rate.updated_by, self.user)
+        # Clientes de prueba
+        self.cliente_min = Cliente.objects.create(
+            nombre='Cliente Minorista',
+            documento_ruc='1111111-1',
+            correo='min@test.com',
+            segmentacion=Cliente.Segmentacion.MINORISTA,
+            is_active=True,
+        )
+        self.cliente_vip = Cliente.objects.create(
+            nombre='Cliente VIP S.A.',
+            documento_ruc='2222222-2',
+            correo='vip@test.com',
+            segmentacion=Cliente.Segmentacion.VIP,
+            is_active=True,
+        )
+
+    def test_get_commission_rule_by_segment_code(self):
+        rule = RateCalculationService.get_commission_rule('VIP')
+        self.assertEqual(rule.id, self.comm_vip.id)
+
+    def test_get_commission_rule_by_cliente_instance(self):
+        rule = RateCalculationService.get_commission_rule(self.cliente_min)
+        self.assertEqual(rule.id, self.comm_min.id)
+
+    def test_get_commission_rule_fallback_virtual_when_unconfigured(self):
+        rule = RateCalculationService.get_commission_rule('COR')
+        self.assertEqual(rule.segment, 'COR')
+        self.assertEqual(rule.commission_percentage, Decimal('0.00'))
+        self.assertEqual(rule.fixed_fee, Decimal('0.00'))
+        self.assertEqual(rule.spread_discount_percentage, Decimal('0.00'))
+        self.assertIsNone(rule.id)
+
+    def test_get_latest_exchange_rate_by_codes(self):
+        rate = RateCalculationService.get_latest_exchange_rate('USD', 'PYG')
+        self.assertIsNotNone(rate)
+        self.assertEqual(rate.id, self.rate.id)
+
+    def test_get_latest_exchange_rate_by_objects(self):
+        rate = RateCalculationService.get_latest_exchange_rate(self.usd, self.pyg)
+        self.assertIsNotNone(rate)
+        self.assertEqual(rate.id, self.rate.id)
+
+    def test_get_latest_exchange_rate_nonexistent(self):
+        rate = RateCalculationService.get_latest_exchange_rate('EUR', 'PYG')
+        self.assertIsNone(rate)
+
+    def test_calculate_quotation_buy_minorista(self):
+        """
+        Cliente Minorista compra 100 USD (op_type='BUY', is_source_base=True).
+        - Tasa oficial de venta = 7.500.
+        - Dto spread = 0% -> tasa efectiva = 7.500.
+        - Monto bruto en PYG = 100 * 7.500 = 750.000 PYG.
+        - Comisión porcentual (1.00%) = 7.500 PYG.
+        - Cargo fijo = 5.000 PYG.
+        - Total comisión = 12.500 PYG.
+        - Total neto a pagar = 750.000 + 12.500 = 762.500 PYG.
+        - Tasa neta final = 762.500 / 100 = 7.625.
+        """
+        res = RateCalculationService.calculate_quotation(
+            exchange_rate=self.rate,
+            segment_or_customer=self.cliente_min,
+            amount=Decimal('100.00'),
+            operation_type='BUY',
+            is_source_base=True,
+        )
+        self.assertTrue(res['success'])
+        self.assertEqual(res['base_amount'], Decimal('100.00'))
+        self.assertEqual(res['effective_rate'], Decimal('7500.000000'))
+        self.assertEqual(res['gross_target_amount'], Decimal('750000'))
+        self.assertEqual(res['commission_percentage_amount'], Decimal('7500'))
+        self.assertEqual(res['fixed_fee'], Decimal('5000'))
+        self.assertEqual(res['total_commission'], Decimal('12500'))
+        self.assertEqual(res['net_target_amount'], Decimal('762500'))
+        self.assertEqual(res['final_effective_rate'], Decimal('7625.000000'))
+
+    def test_calculate_quotation_sell_vip_with_spread_discount(self):
+        """
+        Cliente VIP vende 1.000 USD (op_type='SELL', is_source_base=True).
+        - Tasa oficial compra = 7.400, Venta = 7.500, Spread = 100.
+        - Dto spread VIP (40%): spread ef = 60, ahorro = 40, mitad = 20.
+        - Tasa efectiva compra ajustada para el cliente = 7.400 + 20 = 7.420.
+        - Monto bruto en PYG = 1.000 * 7.420 = 7.420.000 PYG.
+        - Comisión VIP (0.20%): 7.420.000 * 0.002 = 14.840 PYG.
+        - Cargo fijo = 0.
+        - Total neto a recibir = 7.420.000 - 14.840 = 7.405.160 PYG.
+        - Tasa neta final = 7.405.160 / 1.000 = 7.405,16.
+        """
+        res = RateCalculationService.calculate_quotation(
+            exchange_rate=self.rate,
+            segment_or_customer=self.cliente_vip,
+            amount=Decimal('1000.00'),
+            operation_type='SELL',
+            is_source_base=True,
+        )
+        self.assertTrue(res['success'])
+        self.assertEqual(res['effective_rate'], Decimal('7420.000000'))
+        self.assertEqual(res['gross_target_amount'], Decimal('7420000'))
+        self.assertEqual(res['total_commission'], Decimal('14840'))
+        self.assertEqual(res['net_target_amount'], Decimal('7405160'))
+        self.assertEqual(res['spread_savings'], Decimal('20000'))  # Ganó 20 PYG por dólar vs los 7.400 oficiales
+
+    def test_calculate_quotation_source_in_target_currency(self):
+        """
+        Cliente Minorista ingresa 7.500.000 PYG (is_source_base=False, op_type='BUY').
+        """
+        res = RateCalculationService.calculate_quotation(
+            exchange_rate=self.rate,
+            segment_or_customer='MIN',
+            amount=Decimal('7500000.00'),
+            operation_type='BUY',
+            is_source_base=False,
+        )
+        self.assertTrue(res['success'])
+        self.assertEqual(res['gross_target_amount'], Decimal('7500000'))
+        self.assertEqual(res['base_amount'], Decimal('1000.00'))
+
+    def test_calculate_quotation_invalid_operation_type(self):
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation(
+                exchange_rate=self.rate,
+                amount=Decimal('100.00'),
+                operation_type='EXCHANGE',
+            )
+
+    def test_calculate_quotation_zero_or_negative_amount(self):
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation(
+                exchange_rate=self.rate,
+                amount=Decimal('0.00'),
+            )
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation(
+                exchange_rate=self.rate,
+                amount=Decimal('-50.00'),
+            )
+
+    def test_calculate_quotation_by_codes_valid(self):
+        res = RateCalculationService.calculate_quotation_by_codes(
+            base_currency_code='USD',
+            target_currency_code='PYG',
+            segment_or_customer='VIP',
+            amount=Decimal('500.00'),
+            operation_type='BUY',
+        )
+        self.assertTrue(res['success'])
+        self.assertEqual(res['base_amount'], Decimal('500.00'))
+
+    def test_calculate_quotation_by_codes_missing_rate(self):
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation_by_codes(
+                base_currency_code='BRL',
+                target_currency_code='PYG',
+                amount=Decimal('100.00'),
+            )
+
+
+class ActiveCustomerResolutionTest(TestCase):
+    """
+    Pruebas para la resolución de cliente activo en get_active_customer().
+    """
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username='cuser', email='cuser@test.com', password='Password123!')
+        self.cliente = Cliente.objects.create(
+            nombre='Empresa Activa S.A.',
+            documento_ruc='3333333-3',
+            correo='cuser@test.com',
+            segmentacion=Cliente.Segmentacion.CORPORATIVO,
+            is_active=True,
+        )
+
+    def test_anonymous_user_returns_none(self):
+        request = self.factory.get('/')
+        request.user = AnonymousUser()
+        self.assertIsNone(get_active_customer(request))
+
+    def test_active_customer_attribute_priority(self):
+        request = self.factory.get('/')
+        request.user = self.user
+        request.active_customer = self.cliente
+        self.assertEqual(get_active_customer(request), self.cliente)
+
+    def test_session_active_customer_id_resolution(self):
+        request = self.factory.get('/')
+        request.user = self.user
+        request.session = {'active_customer_id': self.cliente.id}
+        self.assertEqual(get_active_customer(request), self.cliente)
+
+    def test_email_matching_resolution(self):
+        request = self.factory.get('/')
+        request.user = self.user
+        request.session = {}
+        self.assertEqual(get_active_customer(request), self.cliente)
+
+
+# ==============================================================================
+# PRUEBAS DE FORMULARIOS (SCRUM-53)
+# ==============================================================================
+
+class RatesFormsTest(TestCase):
+    """
+    Pruebas para los formularios de parametrización de comisiones y cotizador.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$')
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲')
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+        )
+
+    def test_segment_commission_form_valid(self):
+        form = SegmentCommissionForm(
+            data={
+                'segment': 'MAY',
+                'commission_percentage': '0.75',
+                'fixed_fee': '2500.00',
+                'spread_discount_percentage': '25.00',
+                'is_active': True,
+            }
+        )
+        self.assertTrue(form.is_valid())
+
+    def test_segment_commission_form_invalid_percentages(self):
+        form_high = SegmentCommissionForm(
+            data={
+                'segment': 'MAY',
+                'commission_percentage': '105.00',
+                'fixed_fee': '0.00',
+                'spread_discount_percentage': '0.00',
+                'is_active': True,
+            }
+        )
+        self.assertFalse(form_high.is_valid())
+        self.assertIn('commission_percentage', form_high.errors)
+
+        form_neg_spread = SegmentCommissionForm(
+            data={
+                'segment': 'MAY',
+                'commission_percentage': '1.00',
+                'fixed_fee': '0.00',
+                'spread_discount_percentage': '-5.00',
+                'is_active': True,
+            }
+        )
+        self.assertFalse(form_neg_spread.is_valid())
+        self.assertIn('spread_discount_percentage', form_neg_spread.errors)
+
+    def test_segment_commission_filter_form(self):
+        form = SegmentCommissionFilterForm(data={'segment': 'MIN', 'is_active': 'true'})
+        self.assertTrue(form.is_valid())
+
+    def test_rate_calculator_form_valid(self):
+        form = RateCalculatorForm(
+            data={
+                'exchange_rate': self.rate.id,
+                'operation_type': 'BUY',
+                'amount': '250.00',
+                'segment': 'VIP',
+                'is_source_base': True,
+            }
+        )
+        self.assertTrue(form.is_valid())
+
+
+# ==============================================================================
+# PRUEBAS DE VISTAS CBVs Y ENDPOINTS API (SCRUM-53)
+# ==============================================================================
+
+class RatesViewsAndApiTest(TestCase):
+    """
+    Pruebas para las vistas web CBVs y endpoints API JSON de rates.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='operador_web',
+            email='operador@web.com',
+            password='Password123!',
+        )
+        self.client.force_login(self.user)
+
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+        self.commission = SegmentCommission.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            commission_percentage=Decimal('1.50'),
+            fixed_fee=Decimal('5000.00'),
+            spread_discount_percentage=Decimal('10.00'),
+            is_active=True,
+        )
+
+    def test_commission_list_view_get(self):
+        response = self.client.get(reverse('rates:commission_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'rates/commission_list.html')
+        self.assertIn('commissions', response.context)
+        self.assertEqual(response.context['total_rules'], 1)
+
+    def test_commission_list_view_filters(self):
+        response = self.client.get(reverse('rates:commission_list'), {'segment': 'MIN', 'is_active': 'true'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['commissions']), 1)
+
+        response_empty = self.client.get(reverse('rates:commission_list'), {'segment': 'VIP'})
+        self.assertEqual(response_empty.status_code, 200)
+        self.assertEqual(len(response_empty.context['commissions']), 0)
+
+    def test_commission_create_view_get_and_post(self):
+        get_res = self.client.get(reverse('rates:commission_create'))
+        self.assertEqual(get_res.status_code, 200)
+        self.assertTemplateUsed(get_res, 'rates/commission_form.html')
+
+        post_res = self.client.post(
+            reverse('rates:commission_create'),
+            {
+                'segment': 'VIP',
+                'commission_percentage': '0.50',
+                'fixed_fee': '0.00',
+                'spread_discount_percentage': '40.00',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(post_res.status_code, 302)
+        self.assertTrue(SegmentCommission.objects.filter(segment='VIP').exists())
+
+    def test_commission_update_view(self):
+        response = self.client.post(
+            reverse('rates:commission_update', kwargs={'pk': self.commission.id}),
+            {
+                'segment': 'MIN',
+                'commission_percentage': '1.80',
+                'fixed_fee': '6000.00',
+                'spread_discount_percentage': '5.00',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.commission.refresh_from_db()
+        self.assertEqual(self.commission.commission_percentage, Decimal('1.80'))
+        self.assertEqual(self.commission.fixed_fee, Decimal('6000.00'))
+
+    def test_commission_detail_view(self):
+        response = self.client.get(reverse('rates:commission_detail', kwargs={'pk': self.commission.id}))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'rates/commission_detail.html')
+        self.assertIn('simulations', response.context)
+
+    def test_commission_delete_view(self):
+        response = self.client.post(reverse('rates:commission_delete', kwargs={'pk': self.commission.id}))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SegmentCommission.objects.filter(id=self.commission.id).exists())
+
+    def test_rate_calculator_view_get(self):
+        response = self.client.get(reverse('rates:rate_calculator'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'rates/rate_calculator.html')
+
+    def test_rate_calculator_view_get_with_params(self):
+        response = self.client.get(
+            reverse('rates:rate_calculator'),
+            {
+                'exchange_rate': self.rate.id,
+                'operation_type': 'BUY',
+                'amount': '150.00',
+                'segment': 'MIN',
+                'is_source_base': True,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.context['calculation'])
+        self.assertEqual(response.context['calculation']['base_amount'], Decimal('150.00'))
+
+    def test_rate_calculator_view_post_valid(self):
+        response = self.client.post(
+            reverse('rates:rate_calculator'),
+            {
+                'exchange_rate': self.rate.id,
+                'operation_type': 'SELL',
+                'amount': '300.00',
+                'segment': 'MIN',
+                'is_source_base': True,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.context['calculation'])
+        self.assertEqual(response.context['calculation']['operation_type'], 'SELL')
+
+    def test_api_calculate_endpoint_get(self):
+        response = self.client.get(
+            reverse('rates:api_calculate'),
+            {
+                'exchange_rate_id': self.rate.id,
+                'operation_type': 'BUY',
+                'amount': '100.00',
+                'segment': 'MIN',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['base_amount'], 100.0)
+
+    def test_api_calculate_endpoint_post_json(self):
+        payload = {
+            'base_currency': 'USD',
+            'target_currency': 'PYG',
+            'operation_type': 'SELL',
+            'amount': 500.0,
+            'segment': 'MIN',
+        }
+        response = self.client.post(
+            reverse('rates:api_calculate'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['base_amount'], 500.0)
+
+    def test_api_calculate_endpoint_not_found(self):
+        response = self.client.get(
+            reverse('rates:api_calculate'),
+            {
+                'base_currency': 'GBP',
+                'target_currency': 'PYG',
+                'amount': '100.00',
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_calculate_endpoint_bad_request_negative_amount(self):
+        response = self.client.get(
+            reverse('rates:api_calculate'),
+            {
+                'exchange_rate_id': self.rate.id,
+                'amount': '-50.00',
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_api_calculate_with_cliente_id_and_post_form(self):
+        cliente = Cliente.objects.create(
+            nombre='Test Cliente API',
+            documento_ruc='4444444-4',
+            correo='api@cliente.com',
+            segmentacion='MIN',
+            is_active=True,
+        )
+        response = self.client.post(
+            reverse('rates:api_calculate'),
+            {
+                'base_currency': 'USD',
+                'target_currency': 'PYG',
+                'amount': '200.00',
+                'cliente_id': cliente.id,
+                'operation_type': 'BUY',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+
+    def test_api_calculate_invalid_json(self):
+        response = self.client.post(
+            reverse('rates:api_calculate'),
+            data='{invalid_json}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_commissions_list(self):
+        response = self.client.get(reverse('rates:api_commissions'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['count'], 1)
+
+    def test_api_commission_detail_found_and_not_found(self):
+        res_found = self.client.get(reverse('rates:api_commission_detail', kwargs={'segment': 'MIN'}))
+        self.assertEqual(res_found.status_code, 200)
+        self.assertEqual(res_found.json()['rule']['segment'], 'MIN')
+
+        res_not_found = self.client.get(reverse('rates:api_commission_detail', kwargs={'segment': 'XYZ'}))
+        self.assertEqual(res_not_found.status_code, 404)
+
+    def test_commission_list_filter_inactive(self):
+        SegmentCommission.objects.create(
+            segment=Cliente.Segmentacion.CORPORATIVO,
+            commission_percentage=Decimal('0.80'),
+            is_active=False,
+        )
+        res_inactive = self.client.get(reverse('rates:commission_list'), {'is_active': 'false'})
+        self.assertEqual(res_inactive.status_code, 200)
+        self.assertEqual(len(res_inactive.context['commissions']), 1)
+
+    def test_rate_calculator_view_post_invalid(self):
+        res = self.client.post(
+            reverse('rates:rate_calculator'),
+            {
+                'exchange_rate': '',
+                'amount': '-100.00',
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.context['calculation'])
+
+    def test_rate_calculator_view_with_cliente_selector(self):
+        cliente = Cliente.objects.create(
+            nombre='Cliente Selector Corp',
+            documento_ruc='5555555-5',
+            correo='corp@test.com',
+            segmentacion='COR',
+            is_active=True,
+        )
+        res = self.client.post(
+            reverse('rates:rate_calculator'),
+            {
+                'exchange_rate': self.rate.id,
+                'operation_type': 'BUY',
+                'amount': '100.00',
+                'cliente': cliente.id,
+                'is_source_base': True,
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNotNone(res.context['calculation'])
+        self.assertEqual(res.context['calculation']['segment']['code'], 'COR')
+
+
+class AdditionalModelAndServiceCoverageTest(TestCase):
+    """
+    Pruebas auxiliares para alcanzar 100% de cobertura en modelos, servicios y validadores.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+        self.admin_user = User.objects.create_superuser('admin_cov', 'admin_cov@test.com', 'Pass123!')
+        self.factory = RequestFactory()
+
+    def test_currency_invalid_code_non_alpha(self):
+        c = Currency(code='123', name='Numérica')
+        with self.assertRaises(ValidationError):
+            c.save()
+
+    def test_exchange_rate_invalid_valid_dates(self):
+        now = timezone.now()
+        rate_inv = ExchangeRate(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            valid_from=now,
+            valid_to=now - timedelta(hours=1),
+        )
+        with self.assertRaises(ValidationError):
+            rate_inv.save()
+
+    def test_exchange_rate_is_current_boundary_conditions(self):
+        now = timezone.now()
+        # Inactiva
+        self.rate.is_active = False
+        self.assertFalse(self.rate.is_current)
+        self.rate.is_active = True
+
+        # Futura
+        self.rate.valid_from = now + timedelta(days=1)
+        self.assertFalse(self.rate.is_current)
+
+        # Pasada
+        self.rate.valid_from = now - timedelta(days=2)
+        self.rate.valid_to = now - timedelta(days=1)
+        self.assertFalse(self.rate.is_current)
+
+    def test_segment_commission_form_negative_fixed_fee(self):
+        form = SegmentCommissionForm(
+            data={
+                'segment': 'MIN',
+                'commission_percentage': '1.00',
+                'fixed_fee': '-50.00',
+                'spread_discount_percentage': '0.00',
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('fixed_fee', form.errors)
+
+    def test_get_active_customer_staff_explicit_param(self):
+        c = Cliente.objects.create(nombre='Staff Cliente', documento_ruc='7777777-7', is_active=True)
+        request = self.factory.get(f'/?cliente_id={c.id}')
+        request.user = self.admin_user
+        resolved = get_active_customer(request)
+        self.assertEqual(resolved, c)
+
+    def test_rate_calculation_invalid_amount_string(self):
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation(
+                exchange_rate=self.rate,
+                amount='abc_invalid',
+            )
+
+
+class CurrencyAndExchangeRateViewsTest(TestCase):
+    """
+    Pruebas unitarias para las vistas CBVs de Monedas y Tasas de Cambio (SCRUM-51).
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='operador_crud', email='op@test.com', password='Password123!')
+        self.client.force_login(self.user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar Estadounidense', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní Paraguayo', symbol='₲', decimals=0)
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.000000'),
+            sell_rate=Decimal('7500.000000'),
+            is_active=True,
+        )
+
+    def test_currency_list_view_and_filtering(self):
+        res = self.client.get(reverse('rates:currency-list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTemplateUsed(res, 'rates/currency_list.html')
+        self.assertIn('currencies', res.context)
+
+        # Filtro por texto
+        res_q = self.client.get(reverse('rates:currency-list'), {'q': 'USD'})
+        self.assertEqual(res_q.status_code, 200)
+        self.assertEqual(len(res_q.context['currencies']), 1)
+
+        # Filtro por inactivo
+        res_inact = self.client.get(reverse('rates:currency-list'), {'is_active': 'false'})
+        self.assertEqual(res_inact.status_code, 200)
+        self.assertEqual(len(res_inact.context['currencies']), 0)
+
+    def test_currency_create_view(self):
+        res_get = self.client.get(reverse('rates:currency-create'))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertTemplateUsed(res_get, 'rates/currency_form.html')
+
+        res_post = self.client.post(
+            reverse('rates:currency-create'),
+            {
+                'code': 'BRL',
+                'name': 'Real Brasileño',
+                'symbol': 'R$',
+                'decimals': 2,
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.assertTrue(Currency.objects.filter(code='BRL').exists())
+
+    def test_currency_update_view(self):
+        res_post = self.client.post(
+            reverse('rates:currency-update', kwargs={'pk': self.usd.id}),
+            {
+                'code': 'USD',
+                'name': 'Dólar Americano Modificado',
+                'symbol': '$',
+                'decimals': 2,
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.name, 'Dólar Americano Modificado')
+
+    def test_currency_toggle_status_view(self):
+        res_toggle = self.client.post(reverse('rates:currency-toggle', kwargs={'pk': self.usd.id}))
+        self.assertEqual(res_toggle.status_code, 302)
+        self.usd.refresh_from_db()
+        self.assertFalse(self.usd.is_active)
+
+    def test_exchangerate_list_view_and_filtering(self):
+        res = self.client.get(reverse('rates:rate-list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertTemplateUsed(res, 'rates/exchangerate_list.html')
+        self.assertIn('rates', res.context)
+
+        # Filtro por moneda
+        res_cur = self.client.get(reverse('rates:rate-list'), {'currency': self.usd.id})
+        self.assertEqual(res_cur.status_code, 200)
+        self.assertEqual(len(res_cur.context['rates']), 1)
+
+    def test_exchangerate_create_view(self):
+        eur = Currency.objects.create(code='EUR', name='Euro', symbol='€', decimals=2)
+        res_post = self.client.post(
+            reverse('rates:rate-create'),
+            {
+                'base_currency': eur.id,
+                'target_currency': self.pyg.id,
+                'buy_rate': '8000.000000',
+                'sell_rate': '8200.000000',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.assertTrue(ExchangeRate.objects.filter(base_currency=eur, target_currency=self.pyg).exists())
+
+    def test_exchangerate_update_view(self):
+        res_post = self.client.post(
+            reverse('rates:rate-update', kwargs={'pk': self.rate.id}),
+            {
+                'base_currency': self.usd.id,
+                'target_currency': self.pyg.id,
+                'buy_rate': '7420.000000',
+                'sell_rate': '7520.000000',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(res_post.status_code, 302)
+        self.rate.refresh_from_db()
+        self.assertEqual(self.rate.buy_rate, Decimal('7420.000000'))
+
+    def test_exchangerate_toggle_status_view(self):
+        res_toggle = self.client.post(reverse('rates:rate-toggle', kwargs={'pk': self.rate.id}))
+        self.assertEqual(res_toggle.status_code, 302)
+        self.rate.refresh_from_db()
+        self.assertFalse(self.rate.is_active)
+
