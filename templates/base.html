@@ -185,6 +185,284 @@
             box-shadow: 0 0 6px var(--success);
         }
 
+        /* Active Customer Selector (SCRUM-40) */
+        .active-customer-selector {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .customer-selector-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 9999px;
+            padding: 0.3rem 0.85rem 0.3rem 0.4rem;
+            color: var(--text-main);
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            outline: none;
+        }
+
+        .customer-selector-btn:hover,
+        .customer-selector-btn:focus-visible,
+        .customer-selector-btn.is-open {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+        }
+
+        .customer-avatar-mini {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            color: #082f49;
+            font-weight: 800;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .customer-meta-display {
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+            line-height: 1.2;
+        }
+
+        .customer-name-display {
+            font-size: 0.825rem;
+            font-weight: 700;
+            color: #f8fafc;
+            white-space: nowrap;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .customer-ruc-display {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            white-space: nowrap;
+        }
+
+        .customer-dropdown-arrow {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            transition: transform 0.2s ease;
+            margin-left: 0.2rem;
+        }
+
+        .customer-selector-btn.is-open .customer-dropdown-arrow {
+            transform: rotate(180deg);
+            color: var(--primary);
+        }
+
+        .customer-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 310px;
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-light);
+            border-radius: 0.875rem;
+            box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.7), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+            z-index: 150;
+            overflow: hidden;
+            animation: dropdownFadeIn 0.15s ease-out forwards;
+        }
+
+        .customer-dropdown-menu.is-open {
+            display: block;
+        }
+
+        @keyframes dropdownFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .customer-dropdown-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: rgba(30, 41, 59, 0.5);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .dropdown-header-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .dropdown-header-count {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--primary);
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 0.15rem 0.45rem;
+            border-radius: 9999px;
+        }
+
+        .customer-dropdown-list {
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 0.35rem 0;
+        }
+
+        .customer-dropdown-list::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .customer-dropdown-list::-webkit-scrollbar-thumb {
+            background: var(--border-light);
+            border-radius: 9999px;
+        }
+
+        .customer-switch-form {
+            margin: 0;
+            padding: 0;
+        }
+
+        .customer-item-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.65rem 1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-family: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+            position: relative;
+        }
+
+        .customer-item-btn:hover {
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .customer-item-btn.is-active {
+            background: rgba(56, 189, 248, 0.14);
+            border-left: 3px solid var(--primary);
+        }
+
+        .customer-item-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #1e293b, #334155);
+            color: #e2e8f0;
+            font-weight: 700;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            border: 1px solid var(--border-color);
+        }
+
+        .customer-item-btn.is-active .customer-item-avatar {
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            color: #082f49;
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+
+        .customer-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .customer-item-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .customer-item-sub {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            margin-top: 0.15rem;
+        }
+
+        .customer-item-ruc {
+            font-size: 0.725rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        .badge-mini {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .customer-item-check {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #082f49;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 900;
+            flex-shrink: 0;
+        }
+
+        .customer-selector-empty {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fbbf24;
+            padding: 0.35rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.775rem;
+            font-weight: 600;
+        }
+
+        @media (max-width: 640px) {
+            .customer-name-display {
+                max-width: 90px;
+            }
+            .customer-dropdown-menu {
+                width: 270px;
+                right: -10px;
+            }
+        }
+
         /* Mobile Hamburger */
         .menu-toggle {
             display: none;
@@ -535,6 +813,63 @@
 
         <div class="nav-user-section">
             {% if user.is_authenticated %}
+                <!-- Selector Interactivo de Cliente Activo (SCRUM-40) -->
+                <div class="active-customer-selector" id="activeCustomerDropdown">
+                    {% if active_customer %}
+                        <button class="customer-selector-btn" id="activeCustomerBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Cliente activo: {{ active_customer.nombre }} ({{ active_customer.documento_ruc }})">
+                            <div class="customer-avatar-mini">
+                                {{ active_customer.nombre|slice:":2"|upper }}
+                            </div>
+                            <div class="customer-meta-display">
+                                <span class="customer-name-display">{{ active_customer.nombre }}</span>
+                                <span class="customer-ruc-display">RUC: {{ active_customer.documento_ruc }}</span>
+                            </div>
+                            {% if available_customers|length > 1 %}
+                                <span class="customer-dropdown-arrow" aria-hidden="true">▾</span>
+                            {% endif %}
+                        </button>
+
+                        {% if available_customers|length > 1 %}
+                            <div class="customer-dropdown-menu" id="customerDropdownMenu" role="menu" aria-labelledby="activeCustomerBtn">
+                                <div class="customer-dropdown-header">
+                                    <span class="dropdown-header-title">🏢 Clientes Asociados</span>
+                                    <span class="dropdown-header-count">{{ available_customers|length }} disp.</span>
+                                </div>
+                                <div class="customer-dropdown-list">
+                                    {% for c in available_customers %}
+                                        <form method="post" action="{% url 'customers:switch-active-customer' customer_id=c.id %}" class="customer-switch-form">
+                                            {% csrf_token %}
+                                            <button type="submit" class="customer-item-btn {% if c.id == active_customer.id %}is-active{% endif %}" role="menuitem" title="Cambiar a {{ c.nombre }}">
+                                                <div class="customer-item-avatar">
+                                                    {{ c.nombre|slice:":2"|upper }}
+                                                </div>
+                                                <div class="customer-item-info">
+                                                    <div class="customer-item-name">{{ c.nombre }}</div>
+                                                    <div class="customer-item-sub">
+                                                        <span class="customer-item-ruc">{{ c.documento_ruc }}</span>
+                                                        {% if c.segmentacion %}
+                                                            <span class="badge-mini badge-{{ c.segmentacion|lower }}">{{ c.get_segmentacion_display }}</span>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                                {% if c.id == active_customer.id %}
+                                                    <div class="customer-item-check" title="Cliente activo actual">✓</div>
+                                                {% endif %}
+                                            </button>
+                                        </form>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <!-- Estado sin cliente vinculado o activo -->
+                        <div class="customer-selector-empty" title="Usuario sin ficha de cliente vinculada">
+                            <span>🏢</span>
+                            <span>Sin Cliente</span>
+                        </div>
+                    {% endif %}
+                </div>
+
                 <!-- Role Badge dinámico -->
                 {% user_role_badge user %}
 
@@ -574,6 +909,38 @@
         if (toggleBtn && navCenter) {
             toggleBtn.addEventListener('click', () => {
                 navCenter.classList.toggle('open');
+            });
+        }
+
+        // Toggle y control interactivo del selector de Cliente Activo (SCRUM-40)
+        const customerBtn = document.getElementById('activeCustomerBtn');
+        const customerMenu = document.getElementById('customerDropdownMenu');
+
+        if (customerBtn && customerMenu) {
+            customerBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = customerMenu.classList.toggle('is-open');
+                customerBtn.classList.toggle('is-open', isOpen);
+                customerBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+
+            // Cerrar menú al hacer clic fuera
+            document.addEventListener('click', (e) => {
+                if (!customerMenu.contains(e.target) && !customerBtn.contains(e.target)) {
+                    customerMenu.classList.remove('is-open');
+                    customerBtn.classList.remove('is-open');
+                    customerBtn.setAttribute('aria-expanded', 'false');
+                }
+            });
+
+            // Cerrar menú al presionar tecla Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && customerMenu.classList.contains('is-open')) {
+                    customerMenu.classList.remove('is-open');
+                    customerBtn.classList.remove('is-open');
+                    customerBtn.setAttribute('aria-expanded', 'false');
+                    customerBtn.focus();
+                }
             });
         }
     </script>
