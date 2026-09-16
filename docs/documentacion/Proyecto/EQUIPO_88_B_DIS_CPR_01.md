@@ -1,5 +1,7 @@
 # Detalle de la Infraestructura de Producción — EQUIPO 88 B DIS CPR 01
 
+> Última actualización: SCRUM 57 — incorpora los casos de prueba para `rates` (monedas, tasas, comisiones, cotizador) y `payments` (medios de pago), derivados de RF28–RF31 y RN08–RN18 de la ERS v3.2.
+
 ## 1. Descripción general
 
 El PDF presenta un diagrama titulado **“Infraestructura de Producción”**.
@@ -1127,13 +1129,20 @@ API SIFEN / DNIT
              └───────────────┘
 ```
 
-> **Alcance:** este documento conserva la terminología y los elementos visibles en el PDF inicial e incorpora formalmente la especificación y matriz de casos de prueba del sistema conforme a los requerimientos del Sprint 2 (SCRUM-42).
+> **Alcance:** este documento conserva la terminología y los elementos visibles en el PDF inicial e incorpora formalmente la especificación y matriz de casos de prueba del sistema conforme a los requerimientos del Sprint 2 (SCRUM-42) y del SCRUM 57 (rates, comisiones, cotizador y payments).
 
 ---
 
 # 28. MATRIZ FORMAL DE CASOS DE PRUEBA DE SOFTWARE (DIS_CPR_01)
 
-Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funcionalidades críticas incorporadas en el Sprint 2: la entidad intermedia de multi-representación `CustomerUserAssignment`, las reglas de negocio para la gestión y cambio dinámico de Cliente Activo en sesión, y las pruebas del Visualizador de Documentación Técnica integrada (Sphinx).
+Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funcionalidades críticas del sistema: la entidad intermedia de multi-representación `CustomerUserAssignment`, las reglas de negocio para la gestión y cambio dinámico de Cliente Activo en sesión, las pruebas del Visualizador de Documentación Técnica integrada (Sphinx), y los módulos de `rates` (monedas, tasas, comisiones, cotizador) y `payments` (medios de pago).
+
+| Entorno | Configuración |
+|---|---|
+| Framework | Django TestCase y cliente de pruebas Django |
+| Datos | Monedas USD y PYG activas, cliente con segmento MIN o VIP; usuario autenticado cuando la interfaz lo exige |
+| Precisión | `Decimal`; USD con 2 decimales y PYG con 0 decimales cuando corresponda |
+| Rutas base | `/rates/` y `/payments/` |
 
 ---
 
@@ -1173,4 +1182,87 @@ Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funciona
 | **CPR-DOC-004** | Manejo de archivo inexistente en documentación | Documentación compilada. | 1. Enviar solicitud `GET /docs/modulo_inexistente.html`. | El controlador captura `FileNotFoundError` y devuelve una respuesta limpia **`HTTP 404 Not Found`**. | Media |
 | **CPR-DOC-005** | Presencia y navegación del enlace en Menú Principal | Usuario visualiza cualquier página basada en `templates/base.html`. | 1. Inspeccionar la barra de navegación.<br>2. Hacer clic en el enlace "Documentación Técnica". | El enlace a `/docs/` está visible, estilizado acorde a la paleta institucional y redirige exitosamente a la documentación. | Media |
 | **CPR-DOC-006** | Control de acceso por roles (Auditor / Administrador) | Vista de documentación configurada con restricción de acceso. | 1. Usuario anónimo intenta acceder a `/docs/`.<br>2. Usuario con rol autorizado accede a `/docs/`. | El usuario anónimo es redirigido a login OIDC; el usuario autorizado accede transparentemente a la documentación. | Alta |
+
+---
+
+## 28.4. Módulo 4: Pruebas de Monedas y Tasas de Cambio (`rates`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-RAT-001** | Crear moneda válida | Usuario autenticado; código no existente | Crear USD con 2 decimales | Se persiste con código USD y estado activo | Alta |
+| **CPR-RAT-002** | Normalizar código ISO | No existe moneda `usd` | Guardar código con espacios y minúsculas | Se almacena `USD` | Alta |
+| **CPR-RAT-003** | Rechazar código ISO inválido | Ninguna | Crear código con menos, más de 3 caracteres o dígitos | Error de validación; no se persiste | Alta |
+| **CPR-RAT-004** | Rechazar precisión fuera de rango | Moneda en creación | Informar decimales menor a 0 o mayor a 10 | Error de validación | Media |
+| **CPR-RAT-005** | Crear tasa y calcular spread | USD y PYG activas | Crear USD/PYG con compra 7000 y venta 7100 | Spread guardado igual a 100 | Crítica |
+| **CPR-RAT-006** | Rechazar par idéntico | USD activa | Crear USD/USD | Error en moneda destino | Alta |
+| **CPR-RAT-007** | Rechazar tasa no positiva | Par USD/PYG | Informar compra o venta cero o negativa | Error de validación | Alta |
+| **CPR-RAT-008** | Rechazar venta menor que compra | Par USD/PYG | Informar compra 7100 y venta 7000 | Error en venta; no se persiste | Crítica |
+| **CPR-RAT-009** | Validar vigencia cronológica | Par USD/PYG | Informar `valid_to` anterior o igual a `valid_from` | Error de validación | Alta |
+| **CPR-RAT-010** | Evaluar tasa vigente | Tasa activa con periodo actual | Consultar `is_current` | Retorna verdadero; una inactiva, futura o vencida retorna falso | Alta |
+| **CPR-RAT-011** | Seleccionar tasa por operación | Tasa compra 7000, venta 7100 | Solicitar BUY y SELL | BUY devuelve 7100; SELL devuelve 7000 | Alta |
+| **CPR-RAT-012** | Consultar historial por periodo | Varias tasas del mismo par | Llamar `/rates/api/history/` con par y periodo válidos | JSON contiene solo registros del periodo solicitado | Media |
+| **CPR-RAT-013** | Rechazar parámetros de historial inválidos | Usuario autenticado | Enviar par o periodo inválido | Respuesta 400; no se exponen datos inconsistentes | Media |
+
+---
+
+## 28.5. Módulo 5: Pruebas de Comisiones por Segmento (`rates.SegmentCommission`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-COM-001** | Crear regla por segmento | Segmento MIN sin regla | Crear regla 1.5%, cargo 1000, descuento 10% | Registro activo persistido | Alta |
+| **CPR-COM-002** | Impedir segmento duplicado | Existe regla MIN | Intentar crear otra regla MIN | Error de unicidad | Crítica |
+| **CPR-COM-003** | Validar porcentaje de comisión | Segmento disponible | Informar -0.01 o 100.01 | Error de validación | Alta |
+| **CPR-COM-004** | Validar cargo fijo | Segmento disponible | Informar cargo fijo negativo | Error de validación | Alta |
+| **CPR-COM-005** | Validar descuento de spread | Segmento disponible | Informar descuento fuera de 0 a 100 | Error de validación | Alta |
+| **CPR-COM-006** | Calcular comisión activa | Regla 1.5% y fijo 1000 | Calcular sobre 100000 | Resultado 2500 | Alta |
+| **CPR-COM-007** | Regla inactiva | Regla inactiva | Calcular sobre monto positivo | Resultado 0; no aplica descuento | Alta |
+| **CPR-COM-008** | Aplicar descuento de spread | Spread 100 y descuento 10% | Ejecutar método de descuento | Spread efectivo 90 | Media |
+| **CPR-COM-009** | API de lista de comisiones | Existen reglas | GET `/rates/api/commissions/` | JSON con reglas disponibles | Media |
+| **CPR-COM-010** | API de detalle inexistente | Segmento sin regla | GET detalle con código inexistente | Respuesta 404 | Media |
+
+---
+
+## 28.6. Módulo 6: Pruebas del Cotizador (`rates.RateCalculationService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-COT-001** | Cotizar compra minorista | Tasa USD/PYG vigente; cliente MIN | Cotizar BUY por 100 USD | Retorna tasa de venta, importes brutos, comisión y total a pagar | Crítica |
+| **CPR-COT-002** | Cotizar venta VIP con bonificación | Tasa vigente; regla VIP con descuento | Cotizar SELL por 100 USD | Tasa efectiva superior a compra; monto neto descuenta comisión | Crítica |
+| **CPR-COT-003** | Cotizar monto en moneda destino | Tasa vigente | Enviar `is_source_base=false` y monto PYG | Calcula base mediante división y respeta precisión de ambas monedas | Alta |
+| **CPR-COT-004** | Regla neutral sin configuración | Segmento sin regla activa | Cotizar monto positivo | Comisión y descuento son cero; cotización se completa | Alta |
+| **CPR-COT-005** | Rechazar operación inválida | Tasa vigente | Enviar tipo distinto de BUY o SELL | Respuesta 400 con error de parámetro | Alta |
+| **CPR-COT-006** | Rechazar monto cero o negativo | Tasa vigente | Enviar 0 o monto negativo | Respuesta 400; no se genera resultado | Alta |
+| **CPR-COT-007** | Tasa no encontrada | No hay tasa activa para el par | Solicitar cotización | Respuesta 404 o error controlado de tasa no disponible | Alta |
+| **CPR-COT-008** | API por GET | Datos válidos | GET `/rates/api/calculate/` con parámetros | Respuesta 200 JSON y estructura completa | Alta |
+| **CPR-COT-009** | API por POST JSON | Datos válidos | POST JSON a la API | Respuesta 200 JSON y valores equivalentes al GET | Alta |
+| **CPR-COT-010** | JSON inválido | API disponible | POST con cuerpo no JSON y sin parámetros alternativos | Respuesta 404 controlada por falta de cotización; no hay error de servidor ni efectos persistentes | Media |
+| **CPR-COT-011** | Formulario web válido | Usuario autenticado y tasa vigente | POST `/rates/calculator/` | Renderiza resultado de cotización | Media |
+| **CPR-COT-012** | Formulario web inválido | Usuario autenticado | POST con campos inválidos | Renderiza errores y conserva el formulario | Media |
+
+---
+
+## 28.7. Módulo 7: Pruebas de Medios de Pago (`payments`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-PAY-001** | Crear primer medio | Cliente activo sin medios | Registrar transferencia válida | Se crea activa y predeterminada | Alta |
+| **CPR-PAY-002** | Crear medio adicional | Cliente con predeterminado | Registrar segunda billetera | Se crea sin quitar preferencia al anterior, salvo selección explícita | Alta |
+| **CPR-PAY-003** | Exclusividad de predeterminado | Cliente con dos medios | Marcar el segundo como predeterminado | El primero pierde la marca en una operación atómica | Crítica |
+| **CPR-PAY-004** | Impedir predeterminado inactivo | Medio inactivo | Crear o editar con ambas banderas | Error de validación | Alta |
+| **CPR-PAY-005** | Desactivar predeterminado | Medio predeterminado activo | POST de cambio de estado | Queda inactivo y deja de ser predeterminado | Alta |
+| **CPR-PAY-006** | Aislamiento de listado | Dos clientes con medios distintos | Consultar listado con cliente A activo | Solo se muestran medios de A | Crítica |
+| **CPR-PAY-007** | Proteger edición IDOR | Cliente A activo; medio de B | Solicitar URL de edición del medio B | Rechazo o 404; no se modifica B | Crítica |
+| **CPR-PAY-008** | Proteger eliminación IDOR | Cliente A activo; medio de B | Solicitar URL de eliminación del medio B | Rechazo o 404; no se elimina B | Crítica |
+| **CPR-PAY-009** | API crear medio | Cliente activo | POST JSON válido a `/payments/api/` | Respuesta 201 con medio asociado al cliente activo | Alta |
+| **CPR-PAY-010** | API actualizar y eliminar | Medio propio existente | PUT/PATCH y luego DELETE al detalle | Respuestas 200 y eliminación confirmada | Alta |
+| **CPR-PAY-011** | Validar campos de titularidad | Cliente activo | Enviar entidad, cuenta o titular vacíos | Respuesta 400 con errores de campo | Media |
+
+---
+
+## 29. Criterios de Aprobación
+
+- Todos los casos críticos y altos deben aprobar antes de integrar cada Sprint.
+- Los cálculos deben comparar objetos `Decimal` o valores serializados equivalentes, sin tolerancias de punto flotante.
+- Los casos de aislamiento deben ejecutarse con dos clientes y dos usuarios para demostrar que no hay fuga horizontal de datos.
+- Las pruebas de API deben comprobar código HTTP, forma del JSON y ausencia de efectos persistentes en los escenarios de error.
 

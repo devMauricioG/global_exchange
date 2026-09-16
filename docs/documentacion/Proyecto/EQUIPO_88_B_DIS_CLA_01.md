@@ -1,5 +1,7 @@
 # Detalle del Diagrama de Clases — EQUIPO 88 B DIS CLA 01
 
+> Última actualización: SCRUM 57 — incorpora las clases `Currency`, `SegmentCommission`, `PaymentMethod` y el servicio `RateCalculationService`. Expande `ExchangeRate` con par de monedas, vigencia y operador responsable.
+
 ## 1. Descripción general
 
 El PDF presenta un **diagrama de clases UML** orientado a un sistema de gestión de clientes, usuarios/cajeros, cajas registradoras, transacciones, tipos de cambio y documentos electrónicos.
@@ -410,36 +412,151 @@ Una caja puede acumular múltiples transacciones.
 
 ---
 
-# 10. Clase `ExchangeRate`
+# 10. Clase `Currency`
 
-`ExchangeRate` representa una tasa de cambio.
+`Currency` representa una divisa operativa del catálogo.
 
 ## Atributos
 
-| Atributo | Tipo | Descripción |
+| Atributo | Tipo | Restricción | Descripción |
+|---|---|---|---|
+| `id` | `BigInt` | PK, Auto | Identificador de la moneda |
+| `code` | `CharField(3)` | Único, indexado | Código ISO 4217 normalizado a mayúsculas |
+| `name` | `CharField(50)` | Obligatorio | Nombre descriptivo de la divisa |
+| `symbol` | `CharField(10)` | Obligatorio | Símbolo de presentación |
+| `decimals` | `PositiveSmallIntegerField` | 0 a 10 | Precisión monetaria |
+| `is_active` | `BooleanField` | Por defecto verdadero | Habilita la moneda para cotizaciones |
+| `created_at` | `DateTime` | Auto | Fecha de creación |
+| `updated_at` | `DateTime` | Auto | Fecha de última actualización |
+
+## Métodos
+
+| Método | Retorno | Descripción |
 |---|---|---|
-| `id` | `BigInt` | Identificador del registro |
-| `currency_code` | `String` | Código de moneda |
-| `buy_rate` | `Decimal` | Tasa de compra |
-| `sell_rate` | `Decimal` | Tasa de venta |
-| `spread` | `Decimal` | Diferencia o margen entre tasas |
-| `updated_at` | `DateTime` | Fecha y hora de actualización |
+| `clean()` | `void` | Rechaza códigos que no tengan tres letras y precisiones fuera del rango permitido. |
+| `save()` | `void` | Normaliza los textos y ejecuta la validación. |
+| `decimal_places` | `int` | Propiedad que devuelve la precisión monetaria. |
+
+### Representación
+
+```text
+Currency
+ ├── id
+ ├── code
+ ├── name
+ ├── symbol
+ ├── decimals
+ ├── is_active
+ ├── created_at
+ └── updated_at
+ + clean(): void
+ + save(): void
+ + decimal_places: int
+```
+
+---
+
+# 11. Clase `ExchangeRate` (actualizada)
+
+`ExchangeRate` registra una cotización de un par `base_currency`/`target_currency`.
+
+## Atributos
+
+| Atributo | Tipo | Restricción | Descripción |
+|---|---|---|---|
+| `id` | `BigInt` | PK, Auto | Identificador del registro |
+| `base_currency` | `ForeignKey(Currency)` | `PROTECT` | Moneda cuya unidad se cotiza |
+| `target_currency` | `ForeignKey(Currency)` | `PROTECT` | Moneda en la que se expresa el precio |
+| `buy_rate` | `DecimalField(18,6)` | Mayor que cero | Precio de compra de la moneda base |
+| `sell_rate` | `DecimalField(18,6)` | Mayor o igual a compra | Precio de venta de la moneda base |
+| `spread` | `DecimalField(18,6)` | No editable | `sell_rate - buy_rate` |
+| `valid_from` | `DateTimeField` | Obligatorio | Inicio de vigencia |
+| `valid_to` | `DateTimeField` | Nullable | Fin de vigencia (posterior al inicio) |
+| `is_active` | `BooleanField` | Por defecto verdadero | Estado de habilitación |
+| `updated_by` | `ForeignKey(User)` | Nulo permitido, `SET_NULL` | Operador responsable |
+| `created_at` | `DateTime` | Auto | Fecha de creación |
+| `updated_at` | `DateTime` | Auto | Fecha de última actualización |
+
+## Métodos
+
+| Método | Retorno | Descripción |
+|---|---|---|
+| `clean()` | `void` | Valida par no idéntico, tasas positivas, venta ≥ compra y vigencia cronológica. |
+| `save()` | `void` | Calcula el spread y ejecuta validación. |
+| `is_current` | `bool` | Propiedad: verdadera si la tasa está activa, ya inició su vigencia y no venció. |
+| `get_rate_for_operation(operation_type)` | `Decimal` | Devuelve `sell_rate` para `BUY` y `buy_rate` para `SELL`. |
 
 ### Representación
 
 ```text
 ExchangeRate
  ├── id
- ├── currency_code
+ ├── base_currency: FK(Currency)
+ ├── target_currency: FK(Currency)
  ├── buy_rate
  ├── sell_rate
  ├── spread
+ ├── valid_from
+ ├── valid_to
+ ├── is_active
+ ├── updated_by: FK(User)
+ ├── created_at
  └── updated_at
+ + clean(): void
+ + save(): void
+ + is_current: bool
+ + get_rate_for_operation(): Decimal
 ```
 
 ---
 
-# 11. Relación `ExchangeRate` — `Transaction`
+# 11b. Clase `SegmentCommission`
+
+`SegmentCommission` parametriza las condiciones comerciales de un segmento de `Cliente`.
+
+## Atributos
+
+| Atributo | Tipo | Restricción | Descripción |
+|---|---|---|---|
+| `id` | `BigInt` | PK, Auto | Identificador |
+| `segment` | `CharField(3)` | Único | Código de `Cliente.Segmentacion` |
+| `commission_percentage` | `DecimalField(5,2)` | 0 a 100 | Comisión sobre el monto bruto |
+| `fixed_fee` | `DecimalField(12,2)` | ≥ 0 | Cargo administrativo fijo |
+| `spread_discount_percentage` | `DecimalField(5,2)` | 0 a 100 | Bonificación sobre el spread |
+| `is_active` | `BooleanField` | Por defecto verdadero | Vigencia de la política |
+| `created_at` | `DateTime` | Auto | Fecha de creación |
+| `updated_at` | `DateTime` | Auto | Fecha de última actualización |
+
+## Métodos
+
+| Método | Retorno | Descripción |
+|---|---|---|
+| `clean()` | `void` | Valida rangos de porcentaje y cargo fijo. |
+| `calculate_commission(amount)` | `Decimal` | Retorna el componente porcentual más el fijo cuando la regla está activa. |
+| `apply_spread_discount(spread)` | `Decimal` | Reduce el spread sin permitir resultados negativos. |
+
+### Representación
+
+```text
+SegmentCommission
+ ├── id
+ ├── segment
+ ├── commission_percentage
+ ├── fixed_fee
+ ├── spread_discount_percentage
+ ├── is_active
+ ├── created_at
+ └── updated_at
+ + clean(): void
+ + calculate_commission(amount): Decimal
+ + apply_spread_discount(spread): Decimal
+```
+
+No existe una clave foránea entre cliente y regla de comisión: la asociación se resuelve por el valor de `segmentacion`. Funcionalmente, un segmento tiene cero o una regla por la unicidad de `SegmentCommission.segment`.
+
+---
+
+# 12. Relación `ExchangeRate` — `Transaction`
 
 El diagrama muestra:
 
@@ -452,17 +569,89 @@ Esto indica:
 - Un registro de `ExchangeRate` puede estar relacionado con cero o muchas transacciones.
 - Cada `Transaction` está relacionada con un único `ExchangeRate` según la multiplicidad mostrada.
 
-Esta relación tiene sentido con el atributo:
+### Relaciones adicionales de `ExchangeRate` (SCRUM 57)
 
-```text
-Transaction.applied_rate
-```
-
-ya que una transacción registra una tasa aplicada mientras `ExchangeRate` contiene las tasas de referencia.
+- Una `Currency` puede ser base o destino en muchas tasas, pero cada tasa referencia exactamente una base y un destino.
+- La eliminación de una moneda con tasas relacionadas está protegida por `PROTECT`.
+- `User` (0..1) puede ser el `updated_by` de muchas tasas.
 
 ---
 
-# 12. Clase `ElectronicDocument`
+# 12b. Clase `PaymentMethod`
+
+`PaymentMethod` identifica un instrumento de pago perteneciente a una sola ficha de cliente.
+
+## Atributos
+
+| Atributo | Tipo | Restricción | Descripción |
+|---|---|---|---|
+| `id` | `BigInt` | PK, Auto | Identificador |
+| `cliente` | `ForeignKey(Cliente)` | `CASCADE` | Titular del medio de pago |
+| `tipo_medio` | `TextChoices` | Obligatorio | Transferencia, billetera, tarjeta, efectivo u otro |
+| `entidad_bancaria` | `CharField(100)` | No vacío | Banco, cooperativa o proveedor |
+| `numero_cuenta` | `CharField(50)` | No vacío | Cuenta o teléfono de billetera |
+| `titular` | `CharField(150)` | No vacío | Titular o razón social |
+| `documento_titular` | `CharField(30)` | Opcional | CI o RUC informado |
+| `es_predeterminado` | `BooleanField` | Uno por cliente | Preferencia para liquidaciones |
+| `activo` | `BooleanField` | Predeterminado verdadero | Habilitación lógica |
+| `created_at` | `DateTime` | Auto | Fecha de creación |
+| `updated_at` | `DateTime` | Auto | Fecha de última actualización |
+
+## Métodos
+
+| Método | Retorno | Descripción |
+|---|---|---|
+| `clean()` | `void` | Valida que un medio inactivo no pueda ser predeterminado. |
+| `save()` | `void` | Dentro de una transacción atómica, desmarca otros medios predeterminados del mismo cliente. |
+
+### Representación
+
+```text
+PaymentMethod
+ ├── id
+ ├── cliente: FK(Cliente)
+ ├── tipo_medio
+ ├── entidad_bancaria
+ ├── numero_cuenta
+ ├── titular
+ ├── documento_titular
+ ├── es_predeterminado
+ ├── activo
+ ├── created_at
+ └── updated_at
+ + clean(): void
+ + save(): void
+```
+
+Un cliente tiene cero o muchos medios de pago; un medio pertenece a exactamente un cliente y se elimina si se elimina ese cliente (`CASCADE`).
+
+---
+
+# 12c. Servicio `RateCalculationService`
+
+`RateCalculationService` es un servicio (no persistente) que encapsula la lógica del cotizador.
+
+## Métodos
+
+| Método | Retorno | Descripción |
+|---|---|---|
+| `get_commission_rule(segment_or_customer)` | `SegmentCommission` | Busca la regla activa del segmento; si no la encuentra crea una regla neutral en memoria. |
+| `get_latest_exchange_rate(base, target)` | `ExchangeRate?` | Busca la tasa activa más reciente para el par de códigos solicitado. |
+| `calculate_quotation(rate, customer, amount, operation, source)` | `Dict` | Calcula la cotización completa con todos los componentes. |
+| `calculate_quotation_by_codes(base, target, customer, amount, operation, source)` | `Dict` | Variante que resuelve el par por códigos ISO. |
+
+### Lógica de operación
+
+| Operación | Tasa oficial | Ajuste por bonificación | Comisión | Monto neto |
+|---|---|---|---|---|
+| `BUY` | `sell_rate` | Reduce la tasa efectiva | Se suma | Total que paga el cliente |
+| `SELL` | `buy_rate` | Aumenta la tasa efectiva | Se resta | Total que recibe el cliente |
+
+El servicio usa las entidades anteriores sin crear asociaciones persistentes entre una cotización informativa y un medio de pago.
+
+---
+
+# 13. Clase `ElectronicDocument`
 
 `ElectronicDocument` representa un documento electrónico asociado a una transacción.
 
@@ -493,7 +682,7 @@ El atributo `sifen_status` muestra que el modelo contempla un estado relacionado
 
 ---
 
-# 13. Relación `Transaction` — `ElectronicDocument`
+# 14. Relación `Transaction` — `ElectronicDocument`
 
 El diagrama muestra:
 
@@ -506,25 +695,105 @@ Esto significa:
 - Una `Transaction` puede tener cero o un `ElectronicDocument`.
 - Cada `ElectronicDocument` está asociado con una única `Transaction`.
 
-### Ejemplo
-
-```text
-Transaction
-     │
-     └──── ElectronicDocument
-```
-
-Pero el documento es opcional:
-
-```text
-Transaction ──── 0..1 ElectronicDocument
-```
-
 Por lo tanto, una transacción puede existir sin que exista todavía un documento electrónico asociado.
 
 ---
 
-# 14. Mapa general de relaciones
+# 15. Diagrama UML actualizado (SCRUM 57)
+
+```mermaid
+classDiagram
+    class Cliente {
+        +id: BigInt
+        +segmentacion: String
+        +is_active: Boolean
+    }
+
+    class User {
+        +id: BigInt
+        +username: String
+    }
+
+    class Currency {
+        +id: BigInt
+        +code: String
+        +name: String
+        +symbol: String
+        +decimals: PositiveSmallInt
+        +is_active: Boolean
+        +created_at: DateTime
+        +updated_at: DateTime
+        +clean() void
+        +save() void
+        +decimal_places: int
+    }
+
+    class ExchangeRate {
+        +id: BigInt
+        +buy_rate: Decimal
+        +sell_rate: Decimal
+        +spread: Decimal
+        +valid_from: DateTime
+        +valid_to: DateTime?
+        +is_active: Boolean
+        +created_at: DateTime
+        +updated_at: DateTime
+        +clean() void
+        +save() void
+        +is_current: bool
+        +get_rate_for_operation(operation_type) Decimal
+    }
+
+    class SegmentCommission {
+        +id: BigInt
+        +segment: String
+        +commission_percentage: Decimal
+        +fixed_fee: Decimal
+        +spread_discount_percentage: Decimal
+        +is_active: Boolean
+        +created_at: DateTime
+        +updated_at: DateTime
+        +clean() void
+        +calculate_commission(amount) Decimal
+        +apply_spread_discount(spread) Decimal
+    }
+
+    class PaymentMethod {
+        +id: BigInt
+        +tipo_medio: TipoMedio
+        +entidad_bancaria: String
+        +numero_cuenta: String
+        +titular: String
+        +documento_titular: String
+        +es_predeterminado: Boolean
+        +activo: Boolean
+        +created_at: DateTime
+        +updated_at: DateTime
+        +clean() void
+        +save() void
+    }
+
+    class RateCalculationService {
+        <<service>>
+        +get_commission_rule(segment_or_customer) SegmentCommission
+        +get_latest_exchange_rate(base, target) ExchangeRate?
+        +calculate_quotation(rate, customer, amount, operation, source) Dict
+        +calculate_quotation_by_codes(base, target, customer, amount, operation, source) Dict
+    }
+
+    Currency "1" <-- "0..*" ExchangeRate : base_currency
+    Currency "1" <-- "0..*" ExchangeRate : target_currency
+    User "0..1" <-- "0..*" ExchangeRate : updated_by
+    Cliente "1" <-- "0..*" PaymentMethod : cliente
+    Cliente ..> SegmentCommission : coincide por segmentacion
+    RateCalculationService ..> ExchangeRate : consulta
+    RateCalculationService ..> SegmentCommission : aplica
+    RateCalculationService ..> Cliente : resuelve segmento
+```
+
+---
+
+# 16. Mapa general de relaciones
 
 El modelo completo puede resumirse de la siguiente manera:
 
@@ -533,20 +802,19 @@ El modelo completo puede resumirse de la siguiente manera:
                          │     User     │
                          └──────┬───────┘
                                 │
-                    cajero      │ 1
-                                │
-                              0..*
-                                │
-                         ┌──────▼───────┐
-                         │ CashRegister │
-                         └──────┬───────┘
-                                │
-                              0..*
-                                │
-                                │
-                         ┌──────▼───────┐
-                         │ Transaction  │
-                         └───┬────┬─────┘
+                    cajero      │ 1          updated_by 0..1
+                                │                  │
+                              0..*                 │
+                                │                  │
+                         ┌──────▼───────┐   ┌──────▼───────┐
+                         │ CashRegister │   │ ExchangeRate │
+                         └──────┬───────┘   └───┬──────┬───┘
+                                │               │      │
+                              0..*            FK│    FK│
+                                │               │      │
+                         ┌──────▼───────┐   ┌───▼──────▼───┐
+                         │ Transaction  │   │   Currency   │
+                         └───┬────┬─────┘   └──────────────┘
                              │    │
                   0..1       │    │       0..1
                              │    ▼
@@ -555,30 +823,19 @@ El modelo completo puede resumirse de la siguiente manera:
                          0..*│
                              │
                        ┌─────▼──────┐
-                       │  Customer  │
-                       └─────┬─────┘
-                             │
-                           0..*
-                             │
-                 ┌───────────▼────────────┐
-                 │ CustomerUserAssignment │
+                       │  Customer  │──────────── segmentacion
+                       └─────┬──┬───┘                  │
+                             │  │                      ▼
+                           0..*│              SegmentCommission
+                             │  │
+                 ┌───────────▼──┘──────────┐
+                 │ CustomerUserAssignment  │
                  └───────────┬────────────┘
-                             │
-                           0..*
-                             │
-                            User
-```
-
-Además:
-
-```text
-ExchangeRate
-     │
-     │ 1
-     │
-     │ 0..*
-     ▼
-Transaction
+                             │                ┌───────────────┐
+                           0..*               │ PaymentMethod │
+                             │                └───────────────┘
+                            User                    │
+                                              Cliente 1 ── 0..*
 ```
 
 ---
@@ -811,12 +1068,14 @@ El diagrama utiliza los siguientes tipos:
 | Tipo | Clases donde aparece |
 |---|---|
 | `UUID` | `User` |
-| `String` | `User`, `Customer`, `CashRegister`, `Transaction`, `ExchangeRate`, `ElectronicDocument` |
-| `Boolean` | `User`, `Customer`, `CustomerUserAssignment` |
-| `BigInt` | `Customer`, `CustomerUserAssignment`, `CashRegister`, `Transaction`, `ExchangeRate`, `ElectronicDocument` |
-| `Decimal` | `CashRegister`, `Transaction`, `ExchangeRate` |
-| `DateTime` | `CustomerUserAssignment`, `CashRegister`, `Transaction`, `ExchangeRate`, `ElectronicDocument` |
+| `String` | `User`, `Customer`, `Currency`, `CashRegister`, `Transaction`, `ExchangeRate`, `SegmentCommission`, `PaymentMethod`, `ElectronicDocument` |
+| `Boolean` | `User`, `Customer`, `Currency`, `CustomerUserAssignment`, `ExchangeRate`, `SegmentCommission`, `PaymentMethod` |
+| `BigInt` | `Customer`, `CustomerUserAssignment`, `Currency`, `CashRegister`, `Transaction`, `ExchangeRate`, `SegmentCommission`, `PaymentMethod`, `ElectronicDocument` |
+| `Decimal` | `CashRegister`, `Transaction`, `ExchangeRate`, `SegmentCommission`, `PaymentMethod` |
+| `DateTime` | `CustomerUserAssignment`, `Currency`, `CashRegister`, `Transaction`, `ExchangeRate`, `SegmentCommission`, `PaymentMethod`, `ElectronicDocument` |
 | `List` | Retorno de `User.get_realm_roles()` |
+| `TextChoices` | `PaymentMethod` |
+| `Dict` | Retorno de `RateCalculationService` |
 
 ---
 
@@ -854,10 +1113,18 @@ keycloak_id : UUID
 | `User` | `cajero` | `CashRegister` | `1` → `0..*` |
 | `Customer` | tiene | `Transaction` | `1` → `0..*` |
 | `CashRegister` | registra | `Transaction` | `0..*` / `0..1` |
+| `Currency` | `base_currency` | `ExchangeRate` | `1` → `0..*` |
+| `Currency` | `target_currency` | `ExchangeRate` | `1` → `0..*` |
+| `User` | `updated_by` | `ExchangeRate` | `0..1` → `0..*` |
 | `ExchangeRate` | asociada | `Transaction` | `1` → `0..*` |
 | `Transaction` | genera/asocia | `ElectronicDocument` | `1` → `0..1` |
+| `Customer` | titular | `PaymentMethod` | `1` → `0..*` |
+| `Customer` | segmentación | `SegmentCommission` | coincide por valor (0..1) |
+| `RateCalculationService` | consulta | `ExchangeRate` | dependencia |
+| `RateCalculationService` | aplica | `SegmentCommission` | dependencia |
+| `RateCalculationService` | resuelve | `Cliente` | dependencia |
 
-> La tabla conserva las multiplicidades visibles en el diagrama. Para las relaciones sin nombre explícito, el término de la columna "Relación" es descriptivo y no corresponde necesariamente a un nombre formal definido en el PDF.
+> La tabla conserva las multiplicidades visibles en el diagrama. Las relaciones del SCRUM 57 incluyen las nuevas clases `Currency`, `SegmentCommission`, `PaymentMethod` y `RateCalculationService`.
 
 ---
 
@@ -1052,39 +1319,20 @@ Transaction 1 ─── 0..1 ElectronicDocument
 
 # 23. Resumen final
 
-El diagrama define un modelo centrado en **clientes y transacciones**, con usuarios que pueden actuar como cajeros y que también pueden ser asignados a clientes.
-
-La estructura principal es:
-
-```text
-                         User
-                          │
-              ┌───────────┴───────────┐
-              │                       │
-              │ cajero                │
-              ▼                       ▼
-        CashRegister       CustomerUserAssignment
-              │                       │
-              │                       │
-              ▼                       ▼
-        Transaction                Customer
-              │                       │
-        ┌─────┼──────┐                │
-        │     │      │                │
-        ▼     ▼      ▼                │
- ExchangeRate  │  ElectronicDocument  │
-               │                      │
-               └──────────────────────┘
-```
+El diagrama define un modelo centrado en **clientes y transacciones**, con usuarios que pueden actuar como cajeros y que también pueden ser asignados a clientes. La actualización del SCRUM 57 incorpora las entidades de parametrización financiera (`Currency`, `ExchangeRate` expandido, `SegmentCommission`), medios de pago (`PaymentMethod`) y el servicio de cálculo del cotizador (`RateCalculationService`).
 
 En términos de responsabilidades:
 
 - **`User`** → identidad y roles.
-- **`Customer`** → información del cliente.
+- **`Customer`** → información del cliente y segmentación.
 - **`CustomerUserAssignment`** → relación/asignación usuario-cliente.
 - **`CashRegister`** → gestión de cajas.
 - **`Transaction`** → operaciones realizadas.
-- **`ExchangeRate`** → tasas de cambio.
+- **`Currency`** → catálogo de divisas operativas.
+- **`ExchangeRate`** → tasas de cambio con par de monedas, vigencia y operador responsable.
+- **`SegmentCommission`** → condiciones comerciales por segmento de cliente.
+- **`PaymentMethod`** → instrumentos de pago por cliente.
+- **`RateCalculationService`** → lógica de cotización neta (no persistente).
 - **`ElectronicDocument`** → documentación electrónica asociada a transacciones.
 
-> **Alcance:** este documento se basa en los elementos visibles del PDF. No se agregan claves foráneas, restricciones, endpoints, reglas de negocio, nombres de tablas, índices ni otros atributos que no estén representados explícitamente en el diagrama.
+> **Alcance:** este documento se basa en los elementos visibles del PDF e incorpora las clases y relaciones del SCRUM 57 para los módulos `rates` y `payments`.

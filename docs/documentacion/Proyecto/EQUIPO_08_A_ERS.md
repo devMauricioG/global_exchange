@@ -1,10 +1,10 @@
-# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.0)
+# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.2)
 
 **Proyecto:** Global Exchange – Casa de Cambio Digital e Híbrida
 
-**Estado:** Documento Consolidado (ERS v2.0 + NCR Keycloak IAM)
+**Estado:** Documento Consolidado (ERS v3.1 + Hito 4 SCRUM 57)
 
-**Fecha de Actualización:** 17 de Agosto de 2026
+**Fecha de Actualización:** 11 de Septiembre de 2026
 
 ### TABLA DE CONTENIDOS
 
@@ -71,6 +71,18 @@ Este documento representa la base técnica definitiva para las etapas de arquite
 | **Arqueo de Caja** | Proceso de conteo y verificación del efectivo físico frente al saldo contable esperado al cierre de turno.          |
 | ---                | ---                                                                                                                 |
 | **SIFEN / DNIT**   | Sistema Integrado de Facturación Electrónica Nacional de la Dirección Nacional de Ingresos Tributarios.             |
+| ---                | ---                                                                                                                 |
+| **Moneda**         | Divisa del catálogo identificada por un código ISO 4217 de tres letras.                                             |
+| ---                | ---                                                                                                                 |
+| **Tasa de cambio** | Precio de una moneda base expresado en una moneda destino, con valores de compra y venta.                           |
+| ---                | ---                                                                                                                 |
+| **Spread**         | Diferencia calculada entre la tasa de venta y la tasa de compra.                                                    |
+| ---                | ---                                                                                                                 |
+| **Comisión por segmento** | Regla comercial aplicable a un segmento de cliente; combina porcentaje, cargo fijo y descuento sobre el spread. |
+| ---                | ---                                                                                                                 |
+| **Cotización neta** | Resultado informativo que expone tasa efectiva, importes brutos, comisiones y monto final.                         |
+| ---                | ---                                                                                                                 |
+| **Medio de pago**  | Instrumento de cobro o liquidación registrado por el cliente: transferencia, billetera, tarjeta, efectivo u otro.   |
 | ---                | ---                                                                                                                 |
 
 #### 1.3. Alcance
@@ -140,6 +152,12 @@ El producto abarcará 8 módulos mínimos obligatorios:
 - Auditoría inmutable de movimientos de caja enlazada al ID de Keycloak del operador.
 - Emisión e integración de Facturas y Notas de Crédito Electrónicas (SIFEN/DNIT).
 - Panel de administración de parámetros Keycloak, monedas, operaciones y métodos de pago.
+- Gestión de catálogo de divisas con validación ISO 4217, activación y desactivación de monedas.
+- Administración de tasas de cambio por par de monedas con intervalo de vigencia, spread calculado y operador responsable.
+- Tablero histórico de evolución de tasas de compra y venta por par y por periodo.
+- Gestión de comisiones por segmento de cliente: porcentaje, cargo fijo y descuento de spread.
+- Cotizador de tasas netas con simulación de compra o venta, resolución de segmento y cálculo de monto final.
+- Registro, consulta, edición y eliminación de medios de pago del cliente activo con selección de predeterminado.
 
 #### 3.2. Contexto del Producto
 
@@ -152,7 +170,10 @@ El núcleo central omnicanal interactúa con:
 
 #### 3.3. Perspectivas futuras del producto
 
-No aplican por el momento.
+- Confirmación o persistencia de una cotización como transacción.
+- Congelamiento o reserva temporal de tasa (5 minutos).
+- Ejecución bancaria, conciliación o integración con proveedores de billetera.
+- Cifrado o tokenización de datos de cuentas antes de manejar datos financieros sensibles en producción.
 
 #### 3.4. Reglas y Funciones de Negocio
 
@@ -163,6 +184,17 @@ No aplican por el momento.
 - **RN05 (Gestión de Cajas):** Las operaciones de cobro o entrega de efectivo exigen que el usuario posea una caja en estado "Abierta" y cuente con el rol Cajero en su token JWT.
 - **RN06 (Expiración de Cotización):** Cotizaciones en estado "Pendiente" expiran tras 5 minutos sin confirmación de pago.
 - **RN07 (Anulaciones y Notas de Crédito):** Toda transacción "Pagada" que sea anulada requiere la emisión obligatoria de una Nota de Crédito Electrónica.
+- **RN08 (Código de Moneda):** El código de moneda debe contener exactamente tres caracteres alfabéticos; el sistema lo normaliza a mayúsculas.
+- **RN09 (Par de Monedas):** Una tasa solo puede relacionar monedas distintas y debe tener tasas de compra y venta estrictamente positivas.
+- **RN10 (Spread):** La tasa de venta no puede ser inferior a la tasa de compra; el spread se calcula como `sell_rate - buy_rate`.
+- **RN11 (Vigencia de Tasa):** Si una tasa define fin de vigencia, este debe ser posterior al inicio. Una tasa usable debe estar activa y vigente.
+- **RN12 (Unicidad de Comisión):** Cada segmento puede tener una única regla de comisión. Porcentajes de comisión y descuento deben estar entre 0 y 100; el cargo fijo no puede ser negativo.
+- **RN13 (Dirección de Tasa):** El cotizador aplica la tasa de venta cuando el cliente compra la moneda base y la tasa de compra cuando la vende.
+- **RN14 (Bonificación de Spread):** La bonificación se aplica sobre el spread. En compra reduce la tasa efectiva y en venta la incrementa antes de calcular cargos.
+- **RN15 (Comisión Total):** La comisión total es la suma del componente porcentual sobre el monto bruto y el cargo fijo. En compra se suma al monto a pagar; en venta se resta del monto a recibir, sin producir un monto neto negativo.
+- **RN16 (Regla Neutral):** Una regla inactiva o ausente no agrega cargos ni descuentos; el sistema usa una regla neutral para el segmento correspondiente.
+- **RN17 (Medio de Pago Único):** Cada medio de pago pertenece a un solo cliente. Solo puede existir un medio predeterminado por cliente y este debe estar activo.
+- **RN18 (Aislamiento de Medios de Pago):** Un cliente solo puede consultar o modificar sus propios medios de pago. El primer medio registrado se establece como predeterminado.
 
 ### 4\. Descripción Detallada de Requerimientos
 
@@ -238,6 +270,34 @@ No aplican por el momento.
     - Entrega de páginas HTML y recursos estáticos (`.css`, `.js`, imágenes) con resolución de tipos MIME adecuados.
     - Mitigación de vulnerabilidades de _Path Traversal_ sobre el árbol de compilación `docs/sphinx/build/html/`.
     - Integración del acceso directo mediante enlace visible en la barra de navegación (`templates/base.html`).
+- **RF28: Gestión de Monedas y Tasas de Cambio**
+  - **Descripción:** El usuario autenticado debe poder listar, filtrar, crear, editar y activar o desactivar monedas y tasas de cambio. Cada tasa debe conservar las monedas base y destino, compra, venta, spread calculado, intervalo de vigencia, estado y responsable de la actualización.
+  - **Criterios de aceptación:**
+    - Las monedas inactivas no se consideran disponibles para una cotización.
+    - El sistema rechaza pares de la misma moneda, importes no positivos y venta menor que compra.
+    - El listado permite filtrar tasas por par, estado y vigencia.
+    - El tablero permite revisar el historial de compra y venta por par y por periodo.
+- **RF29: Gestión de Comisiones por Segmento**
+  - **Descripción:** El usuario autenticado debe poder crear, consultar, editar y eliminar reglas de comisión para los segmentos definidos en `Cliente.Segmentación`.
+  - **Criterios de aceptación:**
+    - La regla identifica un segmento único y conserva porcentaje, cargo fijo, descuento de spread y estado.
+    - El sistema valida los límites de los tres valores antes de persistirlos.
+    - La API expone la lista de reglas y el detalle de una regla por código de segmento.
+- **RF30: Cotizador de Tasas Netas**
+  - **Descripción:** El Cliente autenticado debe poder simular una compra o venta entre dos monedas activas mediante una tasa vigente. La simulación debe usar el cliente activo para resolver el segmento comercial, salvo que un operador autorizado indique un cliente explícito.
+  - **Criterios de aceptación:**
+    - La entrada admite monto, moneda base, moneda destino, tipo de operación `BUY` o `SELL` e indicación de la moneda en que se expresa el monto.
+    - El resultado presenta tasa oficial, spread oficial y efectivo, tasa efectiva, importes base y destino, comisión porcentual, cargo fijo, total de comisión, monto neto y ahorro por spread.
+    - Los montos se redondean con la precisión configurada para cada moneda.
+    - La interfaz web está disponible en `/rates/calculator/`; la API de cálculo acepta `GET` y `POST` en `/rates/api/calculate/`.
+    - Ante un par inexistente, monto no positivo, tipo de operación inválido o JSON inválido, el sistema debe informar un error sin generar una transacción.
+- **RF31: Gestión de Medios de Pago**
+  - **Descripción:** El Cliente autenticado debe poder crear, listar, filtrar, editar, activar, desactivar, eliminar y seleccionar su medio de pago predeterminado. El sistema debe admitir transferencia, billetera, tarjeta, efectivo y otros medios autorizados.
+  - **Criterios de aceptación:**
+    - Cada registro conserva tipo, entidad o billetera, cuenta o teléfono, titular, documento opcional, estado y preferencia.
+    - Las vistas y los endpoints JSON restringen los registros al cliente activo, evitando el acceso directo a recursos de otro cliente.
+    - Al seleccionar un medio como predeterminado, el sistema desmarca atómicamente los anteriores del mismo cliente.
+    - Al desactivar el medio predeterminado, se elimina su marca de preferencia.
 
 
 #### 4.3. Requerimientos No Funcionales
@@ -245,9 +305,13 @@ No aplican por el momento.
 - **RNF-SEC-01 (Autenticación Centralizada e Integridad IAM):** La autenticación debe estar delegada en Keycloak mediante OIDC. La contraseña del usuario nunca debe transitar ni guardarse en las bases de datos de la aplicación.
 - **RNF-SEC-02 (Validación Stateless y Verificación JWKS):** Cada microservicio o API Gateway debe verificar de forma independiente la firma digital (algoritmo RS256) del token JWT utilizando las claves públicas del endpoint JWKS de Keycloak.
 - **RNF-SEC-03 (Protección en Tránsito y PKCE):** Comunicaciones cifradas mediante TLS 1.3 (HTTPS). Es obligatorio el uso de PKCE (_Proof Key for Code Exchange_) en el cliente frontend para proteger el flujo de autenticación.
+- **RNF-SEC-04 (Aislamiento de Datos por Cliente):** Las interfaces HTML de `rates` y todas las interfaces de `payments` requieren autenticación. Los recursos de pagos deben filtrar por cliente activo para prevenir acceso horizontal no autorizado.
 - **RNF-PERF-01 (Rendimiento de Validación JWT):** La verificación local del token JWT en el backend no debe exceder los 10 ms mediante el almacenamiento en memoria (_caching_) del conjunto de llaves JWKS.
 - **RNF-PERF-02 (Tiempos de Respuesta de Negocio):** Actualización de tasas en pantalla \$\\le 2\$ segundos; respuesta del cotizador \$\\le 3\$ segundos.
 - **RNF-DISP-01 (Alta Disponibilidad e Integración):** Disponibilidad garantizada del 99.9% mensual. En caso de indisponibilidad de Keycloak, los servicios protegidos responderán por defecto 503 Service Unavailable (_Fail-Closed_).
+- **RNF-DAT-01 (Aritmética Financiera):** Los importes monetarios deben calcularse con `Decimal`; no se admite aritmética financiera basada en punto flotante.
+- **RNF-INT-01 (API JSON):** La API de cotización y las APIs de medios de pago deben responder JSON válido, con códigos 200, 201, 400 o 404 según corresponda.
+- **RNF-MAN-01 (Desacoplamiento del Cotizador):** La lógica de cálculo debe estar desacoplada en `RateCalculationService` para ser reutilizable por el cotizador y futuras transacciones.
 
 ### 5\. Requerimientos de Licencia
 
@@ -273,4 +337,6 @@ No aplican por el momento.
 | 17/08/2026 | \-                 | 3.0                | Incorporación de la Nota de Cambio de Requerimientos (NCR) para Autenticación y Autorización Delegada en Keycloak IAM (OIDC, OAuth 2.0, JWT, PKCE, RBAC, Single Logout). Eliminación del almacenamiento local de contraseñas e inclusión de RF-25, RF-26 y RNF-SEC.        | Equipo de Ingeniería de Software / Cátedra                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
 | 08/09/2026 | \-                 | 3.1                | Actualización Sprint 2 (SCRUM-42): formalización de la entidad intermedia CustomerUserAssignment (RF-21), reglas de selección y cambio de Cliente Activo en sesión (RF-04/05) e inclusión del Visualizador de Documentación Técnica Sphinx en portal web (RF-27).        | Pablo Elizeche / Equipo IS2                                      |
+| ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
+| 11/09/2026 | \-                 | 3.2                | Hito 4 SCRUM 57: Gestión de monedas y tasas de cambio (RF-28), comisiones por segmento (RF-29), cotizador de tasas netas (RF-30), medios de pago (RF-31), reglas de negocio RN08-RN18 y RNF complementarios (DAT-01, SEC-04, INT-01, MAN-01).                              | Equipo IS2                                                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
