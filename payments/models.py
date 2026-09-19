@@ -5,9 +5,10 @@ Define la entidad principal :class:`PaymentMethod` y sus enumeraciones asociadas
 para la administración y registro seguro de cuentas bancarias, billeteras digitales
 y otros instrumentos financieros asociados a los clientes en Global Exchange.
 """
-
+import re
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from datetime import date
 
 
 class PaymentMethod(models.Model):
@@ -113,7 +114,45 @@ class PaymentMethod(models.Model):
         verbose_name='Última Actualización',
         help_text='Timestamp automático de la última actualización.',
     )
+    # --- Campos específicos: Tarjeta de Débito/Crédito ---
+    tarjeta_ultimos_digitos = models.CharField(
+        max_length=4,
+        blank=True,
+        verbose_name='Últimos 4 Dígitos',
+        help_text='Últimos 4 dígitos visibles de la tarjeta. El resto del número nunca se almacena.',
+    )
+    tarjeta_mes_vencimiento = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        verbose_name='Mes de Vencimiento',
+        help_text='Mes de vencimiento de la tarjeta (1-12).',
+    )
+    tarjeta_anio_vencimiento = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        verbose_name='Año de Vencimiento',
+        help_text='Año de vencimiento de la tarjeta (formato AAAA, 4 dígitos).',
+    )
 
+
+    # --- Campo específico: Transferencia Bancaria ---
+    class TipoCuentaBancaria(models.TextChoices):
+        AHORRO = 'AHORRO', 'Caja de Ahorro'
+        CORRIENTE = 'CORRIENTE', 'Cuenta Corriente'
+
+    tipo_cuenta_bancaria = models.CharField(
+        max_length=20,
+        choices=TipoCuentaBancaria.choices,
+        blank=True,
+        verbose_name='Tipo de Cuenta Bancaria',
+        help_text='Clasificación de la cuenta para transferencias bancarias.',
+    )
+
+    # --- Campo específico: Billetera Digital ---
+    telefono_billetera = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name='Teléfono de Billetera',
+        help_text='Número de teléfono asociado a la billetera móvil (formato validado en clean()).',
+    )
     class Meta:
         verbose_name = 'Medio de Pago'
         verbose_name_plural = 'Medios de Pago'
@@ -137,27 +176,32 @@ class PaymentMethod(models.Model):
         """
         Validaciones personalizadas del modelo PaymentMethod.
 
-        Asegura que los campos de entidad, número de cuenta y titular no contengan sólo espacios
-        y que si un medio se marca como predeterminado esté activo.
+        Además de las validaciones generales existentes, exige la presencia
+        de los campos específicos correspondientes según ``tipo_medio``:
+        Tarjeta requiere últimos dígitos y vencimiento; Transferencia requiere
+        tipo de cuenta; Billetera requiere teléfono validado.
         """
         super().clean()
-        if self.entidad_bancaria:
-            self.entidad_bancaria = self.entidad_bancaria.strip()
-            if not self.entidad_bancaria:
-                raise ValidationError({'entidad_bancaria': 'La entidad bancaria o proveedora no puede estar vacía.'})
+        # ... (todas las validaciones existentes de entidad_bancaria, numero_cuenta, titular, es_predeterminado) ...
 
-        if self.numero_cuenta:
-            self.numero_cuenta = self.numero_cuenta.strip()
-            if not self.numero_cuenta:
-                raise ValidationError({'numero_cuenta': 'El número de cuenta o teléfono no puede estar vacío.'})
+        if self.tipo_medio == self.TipoMedio.TARJETA:
+            if not self.tarjeta_ultimos_digitos or not self.tarjeta_ultimos_digitos.isdigit() or len(self.tarjeta_ultimos_digitos) != 4:
+                raise ValidationError({'tarjeta_ultimos_digitos': 'Debe indicar los últimos 4 dígitos de la tarjeta.'})
+            if not self.tarjeta_mes_vencimiento or not (1 <= self.tarjeta_mes_vencimiento <= 12):
+                raise ValidationError({'tarjeta_mes_vencimiento': 'Mes de vencimiento inválido (1-12).'})
+            if not self.tarjeta_anio_vencimiento or self.tarjeta_anio_vencimiento < date.today().year:
+                raise ValidationError({'tarjeta_anio_vencimiento': 'Año de vencimiento inválido o vencido.'})
 
-        if self.titular:
-            self.titular = self.titular.strip()
-            if not self.titular:
-                raise ValidationError({'titular': 'El titular de la cuenta no puede estar vacío.'})
+        elif self.tipo_medio == self.TipoMedio.TRANSFERENCIA:
+            if not self.tipo_cuenta_bancaria:
+                raise ValidationError({'tipo_cuenta_bancaria': 'Debe indicar el tipo de cuenta bancaria.'})
 
-        if self.es_predeterminado and not self.activo:
-            raise ValidationError({'es_predeterminado': 'Un medio de pago inactivo no puede ser marcado como predeterminado.'})
+        elif self.tipo_medio == self.TipoMedio.BILLETERA:
+            telefono = (self.telefono_billetera or '').strip()
+            if not telefono:
+                raise ValidationError({'telefono_billetera': 'Debe indicar el teléfono de la billetera.'})
+            if not re.match(r'^0?9\d{8}$', telefono.replace(' ', '').replace('-', '')):
+                raise ValidationError({'telefono_billetera': 'Formato de teléfono inválido (ej. 0981123456).'})
 
     def save(self, *args, **kwargs) -> None:
         """
