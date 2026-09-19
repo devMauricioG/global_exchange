@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load currency_filters %}
 
 {% block title %}Tasas de Cambio - Global Exchange{% endblock %}
 
@@ -115,9 +116,9 @@
                     {% for rate in rates %}
                         <tr>
                             <td style="font-weight: 700; color: #93c5fd;">{{ rate.base_currency.code }} / {{ rate.target_currency.code }}</td>
-                            <td style="color: #34d399;">{{ rate.buy_rate }}</td>
-                            <td style="color: #fb7185;">{{ rate.sell_rate }}</td>
-                            <td style="color: var(--text-muted);">{{ rate.spread }}</td>
+                            <td style="color: #34d399;">{{ rate.buy_rate|format_rate }}</td>
+                            <td style="color: #fb7185;">{{ rate.sell_rate|format_rate }}</td>
+                            <td style="color: var(--text-muted);">{{ rate.spread|format_rate }}</td>
                             <td>{{ rate.valid_from|date:"d/m/Y H:i" }}</td>
                             <td>
                                 {% if rate.is_current %}

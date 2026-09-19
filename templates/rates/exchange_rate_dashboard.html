@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load currency_filters %}
 
 {% block title %}Dashboard de Cotizaciones - Global Exchange{% endblock %}
 
@@ -56,7 +57,7 @@
 </section>
 
 <section class="quotes-card"><div class="card-header"><h2 class="card-title">Cotizaciones vigentes</h2></div>
-    {% if latest_quotes %}<div class="quotes-grid">{% for quote in latest_quotes %}<article class="quote"><div class="quote-pair">{{ quote.base_currency.code }} / {{ quote.target_currency.code }}</div><div class="quote-rates"><div class="quote-rate buy"><small>Compra</small><strong>{{ quote.buy_rate }}</strong></div><div class="quote-rate sell"><small>Venta</small><strong>{{ quote.sell_rate }}</strong></div></div><p class="quote-time">Actualizada: {{ quote.updated_at|date:"d/m/Y H:i" }}</p></article>{% endfor %}</div>{% else %}<p class="empty-state">No existen cotizaciones vigentes en este momento.</p>{% endif %}
+    {% if latest_quotes %}<div class="quotes-grid">{% for quote in latest_quotes %}<article class="quote"><div class="quote-pair">{{ quote.base_currency.code }} / {{ quote.target_currency.code }}</div><div class="quote-rates"><div class="quote-rate buy"><small>Compra</small><strong>{{ quote.buy_rate|format_rate }}</strong></div><div class="quote-rate sell"><small>Venta</small><strong>{{ quote.sell_rate|format_rate }}</strong></div></div><p class="quote-time">Actualizada: {{ quote.updated_at|date:"d/m/Y H:i" }}</p></article>{% endfor %}</div>{% else %}<p class="empty-state">No existen cotizaciones vigentes en este momento.</p>{% endif %}
 </section>
 
 {% if historical_pairs %}
