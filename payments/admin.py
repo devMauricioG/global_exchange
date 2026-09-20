@@ -22,7 +22,7 @@ class PaymentMethodAdmin(admin.ModelAdmin):
         'created_at',
     )
     list_filter = ('tipo_medio', 'es_predeterminado', 'activo', 'created_at')
-    search_fields = ('entidad_bancaria', 'numero_cuenta', 'titular', 'cliente__nombre', 'cliente__documento_ruc')
+    search_fields = ('entidad_bancaria__nombre', 'numero_cuenta', 'titular', 'cliente__nombre', 'cliente__documento_ruc')
     raw_id_fields = ('cliente',)
     list_editable = ('es_predeterminado', 'activo')
 
