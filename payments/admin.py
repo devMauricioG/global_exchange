@@ -3,8 +3,7 @@ Configuración del panel de administración de Django para la aplicación de med
 """
 
 from django.contrib import admin
-from .models import PaymentMethod
-
+from .models import PaymentMethod, EntidadFinanciera
 
 @admin.register(PaymentMethod)
 class PaymentMethodAdmin(admin.ModelAdmin):
@@ -26,3 +25,9 @@ class PaymentMethodAdmin(admin.ModelAdmin):
     search_fields = ('entidad_bancaria', 'numero_cuenta', 'titular', 'cliente__nombre', 'cliente__documento_ruc')
     raw_id_fields = ('cliente',)
     list_editable = ('es_predeterminado', 'activo')
+
+@admin.register(EntidadFinanciera)
+class EntidadFinancieraAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'tipo', 'activo', 'orden')
+    list_filter = ('tipo', 'activo')
+    ordering = ('tipo', 'orden')
