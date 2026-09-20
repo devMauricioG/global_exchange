@@ -129,6 +129,8 @@ class PaymentMethod(models.Model):
         'EntidadFinanciera',
         on_delete=models.PROTECT,
         related_name='medios_pago',
+        null=True,
+        blank=True,
         verbose_name='Entidad Bancaria / Billetera',
         help_text='Entidad seleccionada del catálogo parametrizado.',
     )
@@ -236,7 +238,20 @@ class PaymentMethod(models.Model):
         tipo de cuenta; Billetera requiere teléfono validado.
         """
         super().clean()
-        # ... (todas las validaciones existentes de entidad_bancaria, numero_cuenta, titular, es_predeterminado) ...
+       
+        if self.numero_cuenta:
+            self.numero_cuenta = self.numero_cuenta.strip()
+            if not self.numero_cuenta:
+                raise ValidationError({'numero_cuenta': 'El número de cuenta o teléfono no puede estar vacío.'})
+
+        if self.titular:
+            self.titular = self.titular.strip()
+            if not self.titular:
+                raise ValidationError({'titular': 'El titular de la cuenta no puede estar vacío.'})
+
+        if self.es_predeterminado and not self.activo:
+            raise ValidationError({'es_predeterminado': 'Un medio de pago inactivo no puede ser marcado como predeterminado.'})
+
 
         if self.tipo_medio == self.TipoMedio.TARJETA:
             if not self.tarjeta_ultimos_digitos or not self.tarjeta_ultimos_digitos.isdigit() or len(self.tarjeta_ultimos_digitos) != 4:
