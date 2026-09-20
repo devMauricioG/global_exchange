@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static currency_filters %}
 
 {% block title %}Simulador de Cotizaciones y Congelamiento — Global Exchange{% endblock %}
 
@@ -226,10 +227,10 @@
                     {% endif %}
                 </div>
                 <div style="font-size: 2.2rem; font-weight: 800; color: #38bdf8; margin: 0.35rem 0;">
-                    {{ calculation.target_currency.symbol }} {{ calculation.net_target_amount|floatformat:calculation.target_currency.decimal_places }}
+                    {{ calculation.net_target_amount|format_currency:calculation.target_currency }}
                 </div>
                 <div style="font-size: 0.875rem; color: var(--text-muted);">
-                    Por un volumen de <strong style="color: var(--text-main);">{{ calculation.base_currency.symbol }} {{ calculation.base_amount|floatformat:calculation.base_currency.decimal_places }} {{ calculation.base_currency.code }}</strong>
+                    Por un volumen de <strong style="color: var(--text-main);">{{ calculation.base_amount|format_currency:calculation.base_currency }} {{ calculation.base_currency.code }}</strong>
                 </div>
             </div>
 
@@ -241,54 +242,54 @@
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Tasa Oficial de Mercado:</span>
-                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_rate }}</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_rate|format_rate }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Spread Base:</span>
-                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_spread }}</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.official_spread|format_rate }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: #fbbf24;">🌟 Descuento Spread Segmento ({{ calculation.segment.spread_discount_percentage }}%):</span>
-                    <span style="font-weight: 700; color: #fbbf24;">Spread Ef. {{ calculation.effective_spread }}</span>
+                    <span style="font-weight: 700; color: #fbbf24;">Spread Ef. {{ calculation.effective_spread|format_rate }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Tasa Preferencial Ajustada:</span>
-                    <span style="font-weight: 700; color: #34d399;">{{ calculation.effective_rate }}</span>
+                    <span style="font-weight: 700; color: #34d399;">{{ calculation.effective_rate|format_rate }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Importe Bruto Convertido:</span>
-                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.target_currency.symbol }} {{ calculation.gross_target_amount }}</span>
+                    <span style="font-weight: 600; color: var(--text-main);">{{ calculation.gross_target_amount|format_currency:calculation.target_currency }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Comisión Segmento ({{ calculation.segment.commission_percentage }}%):</span>
-                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.target_currency.symbol }} {{ calculation.commission_percentage_amount }}</span>
+                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.commission_percentage_amount|format_currency:calculation.target_currency }}</span>
                 </div>
 
                 {% if calculation.fixed_fee > 0 %}
                 <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.9rem; border-bottom: 1px solid rgba(51, 65, 85, 0.4);">
                     <span style="color: var(--text-muted);">Cargo Fijo Administrativo:</span>
-                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.target_currency.symbol }} {{ calculation.fixed_fee }}</span>
+                    <span style="font-weight: 600; color: #a5b4fc;">{{ calculation.fixed_fee|format_currency:calculation.target_currency }}</span>
                 </div>
                 {% endif %}
 
                 <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; font-size: 0.95rem; border-bottom: 2px solid var(--border-color); margin-top: 0.25rem;">
                     <span style="font-weight: 700; color: var(--text-main);">Total Comisiones:</span>
-                    <span style="font-weight: 700; color: #f87171;">{{ calculation.target_currency.symbol }} {{ calculation.total_commission }}</span>
+                    <span style="font-weight: 700; color: #f87171;">{{ calculation.total_commission|format_currency:calculation.target_currency }}</span>
                 </div>
 
                 <div style="display: flex; justify-content: space-between; padding: 0.75rem 0 0 0; font-size: 1rem;">
                     <span style="font-weight: 800; color: var(--primary);">Tasa Neta Final por Unidad:</span>
-                    <span style="font-weight: 800; color: var(--primary); font-size: 1.15rem;">{{ calculation.final_effective_rate }}</span>
+                    <span style="font-weight: 800; color: var(--primary); font-size: 1.15rem;">{{ calculation.final_effective_rate|format_rate }}</span>
                 </div>
 
                 {% if calculation.spread_savings > 0 %}
                 <div style="margin-top: 1rem; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0.5rem; padding: 0.65rem 0.85rem; font-size: 0.85rem; color: #34d399;">
-                    ✨ <strong>Ahorro Estimado:</strong> El cliente ahorra aprox. <strong>{{ calculation.target_currency.symbol }} {{ calculation.spread_savings }}</strong> gracias a la bonificación de spread de su segmento.
+                    ✨ <strong>Ahorro Estimado:</strong> El cliente ahorra aprox. <strong>{{ calculation.spread_savings|format_currency:calculation.target_currency }}</strong> gracias a la bonificación de spread de su segmento.
                 </div>
                 {% endif %}
             </div>
@@ -314,9 +315,9 @@
                 {% for rate in active_rates %}
                 <div onclick="selectExchangeRate('{{ rate.id }}')" style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); padding: 0.5rem 0.75rem; border-radius: 0.375rem; border: 1px solid var(--border-color); font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border-color)'">
                     <span style="font-weight: 700; color: var(--primary);">{{ rate.base_currency.code }}/{{ rate.target_currency.code }}</span>
-                    <span>Compra: <strong style="color: #34d399;">{{ rate.buy_rate }}</strong></span>
-                    <span>Venta: <strong style="color: #f87171;">{{ rate.sell_rate }}</strong></span>
-                    <span style="color: var(--text-subtle); font-size: 0.75rem;">Spread: {{ rate.spread }}</span>
+                    <span>Compra: <strong style="color: #34d399;">{{ rate.buy_rate|format_rate }}</strong></span>
+                    <span>Venta: <strong style="color: #f87171;">{{ rate.sell_rate|format_rate }}</strong></span>
+                    <span style="color: var(--text-subtle); font-size: 0.75rem;">Spread: {{ rate.spread|format_rate }}</span>
                 </div>
                 {% empty %}
                 <p style="color: var(--text-muted); font-size: 0.85rem;">No hay cotizaciones activas registradas.</p>
@@ -548,4 +549,5 @@
         50% { transform: scale(1.1); opacity: 0.85; }
     }
 </style>
+<script src="{% static 'js/currency_filters.js' %}"></script>
 {% endblock %}
