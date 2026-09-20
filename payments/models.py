@@ -10,7 +10,59 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from datetime import date
 
+class EntidadFinanciera(models.Model):
+    """
+    Catálogo parametrizado de entidades bancarias y proveedoras de billeteras
+    electrónicas disponibles para los medios de pago.
 
+    Permite gestionar bancos y billeteras digitales sin requerir cambios en
+    el código fuente ni migraciones, habilitando su administración dinámica
+    desde el panel de administración de Django.
+
+    :ivar nombre: Nombre comercial de la entidad (ej. 'Banco Itaú', 'Tigo Money').
+    :vartype nombre: str
+    :ivar tipo: Clasificación de la entidad ('BANCO' o 'BILLETERA').
+    :vartype tipo: str
+    :ivar activo: Indica si la entidad está disponible para selección.
+    :vartype activo: bool
+    :ivar orden: Prioridad de aparición en los dropdowns (menor = primero).
+    :vartype orden: int
+    """
+
+    class TipoEntidad(models.TextChoices):
+        BANCO = 'BANCO', 'Banco'
+        BILLETERA = 'BILLETERA', 'Billetera Digital'
+
+    nombre = models.CharField(
+        max_length=100,
+        unique=True,
+        verbose_name='Nombre de la Entidad',
+        help_text='Nombre comercial del banco o proveedor de billetera.',
+    )
+    tipo = models.CharField(
+        max_length=20,
+        choices=TipoEntidad.choices,
+        verbose_name='Tipo de Entidad',
+        help_text='Clasifica si es un banco o una billetera digital.',
+    )
+    activo = models.BooleanField(
+        default=True,
+        verbose_name='Activo',
+        help_text='Indica si la entidad está disponible para selección en los formularios.',
+    )
+    orden = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name='Orden de Aparición',
+        help_text='Define la prioridad de aparición en los dropdowns (menor valor aparece primero).',
+    )
+
+    class Meta:
+        verbose_name = 'Entidad Financiera'
+        verbose_name_plural = 'Entidades Financieras'
+        ordering = ['tipo', 'orden', 'nombre']
+
+    def __str__(self) -> str:
+        return f'{self.nombre} ({self.get_tipo_display()})'
 class PaymentMethod(models.Model):
     """
     Modelo que representa un Medio de Pago perteneciente a un Cliente.
@@ -73,10 +125,12 @@ class PaymentMethod(models.Model):
         verbose_name='Tipo de Medio',
         help_text='Clasificación del instrumento de pago.',
     )
-    entidad_bancaria = models.CharField(
-        max_length=100,
+    entidad_bancaria = models.ForeignKey(
+        'EntidadFinanciera',
+        on_delete=models.PROTECT,
+        related_name='medios_pago',
         verbose_name='Entidad Bancaria / Billetera',
-        help_text='Nombre de la entidad bancaria o proveedora (ej. Banco Itaú, Continental, Tigo Money, etc.).',
+        help_text='Entidad seleccionada del catálogo parametrizado.',
     )
     numero_cuenta = models.CharField(
         max_length=50,

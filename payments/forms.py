@@ -7,7 +7,7 @@ así como formularios de filtrado y búsqueda para la interfaz de usuario.
 
 from typing import Optional
 from django import forms
-from .models import PaymentMethod
+from .models import PaymentMethod, EntidadFinanciera
 
 
 class PaymentMethodForm(forms.ModelForm):
@@ -21,13 +21,18 @@ class PaymentMethodForm(forms.ModelForm):
     class Meta:
         model = PaymentMethod
         fields = [
-            'tipo_medio',
-            'entidad_bancaria',
-            'numero_cuenta',
-            'titular',
-            'documento_titular',
-            'es_predeterminado',
-            'activo',
+        'tipo_medio',
+        'entidad_bancaria',
+        'numero_cuenta',
+        'titular',
+        'documento_titular',
+        'tarjeta_ultimos_digitos',
+        'tarjeta_mes_vencimiento',
+        'tarjeta_anio_vencimiento',
+        'tipo_cuenta_bancaria',
+        'telefono_billetera',
+        'es_predeterminado',
+        'activo',
         ]
         widgets = {
             'tipo_medio': forms.Select(
@@ -35,11 +40,9 @@ class PaymentMethodForm(forms.ModelForm):
                     'class': 'form-select',
                 }
             ),
-            'entidad_bancaria': forms.TextInput(
+            'entidad_bancaria': forms.Select(
                 attrs={
-                    'class': 'form-input',
-                    'placeholder': 'Ej. Banco Itaú, Banco Continental, Tigo Money, etc.',
-                    'required': True,
+                    'class': 'form-select',
                 }
             ),
             'numero_cuenta': forms.TextInput(
@@ -72,6 +75,21 @@ class PaymentMethodForm(forms.ModelForm):
                     'class': 'form-checkbox',
                 }
             ),
+            'tarjeta_ultimos_digitos': forms.TextInput(
+                attrs={
+                    'class': 'form-input'}),
+            'tarjeta_mes_vencimiento': forms.NumberInput(
+                attrs={
+                    'class': 'form-input'}),
+            'tarjeta_anio_vencimiento': forms.NumberInput(
+                attrs={
+                    'class': 'form-input'}),
+            'tipo_cuenta_bancaria': forms.Select(
+                attrs={
+                    'class': 'form-select'}),
+            'telefono_billetera': forms.TextInput(
+                attrs={
+                    'class': 'form-input'}),
         }
         labels = {
             'tipo_medio': 'Tipo de Medio de Pago',
@@ -82,6 +100,10 @@ class PaymentMethodForm(forms.ModelForm):
             'es_predeterminado': 'Marcar como Predeterminado para transacciones',
             'activo': 'Medio de pago activo para operar',
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['entidad_bancaria'].queryset = EntidadFinanciera.objects.filter(activo=True)
 
     def clean(self):
         cleaned_data = super().clean()
