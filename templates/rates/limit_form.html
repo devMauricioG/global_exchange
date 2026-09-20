@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title|default:"Límite Operativo" }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 720px; margin: 0 auto;">
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                    🛡️ {{ page_title }}
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">
+                    Ajuste los topes transaccionales y acumulados para control de riesgos y prevención de lavado.
+                </p>
+            </div>
+            <a href="{% url 'rates:limit_list' %}" class="btn btn-sm btn-secondary">
+                ← Volver al Listado
+            </a>
+        </div>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" style="margin-bottom: 1.5rem;">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <!-- Segmento -->
+                <div class="form-group">
+                    <label for="id_segment" class="form-label">
+                        {{ form.segment.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.segment }}
+                    {% if form.segment.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.segment.help_text }}</small>
+                    {% endif %}
+                    {% if form.segment.errors %}
+                        <ul class="errorlist">{{ form.segment.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <!-- Divisa -->
+                <div class="form-group">
+                    <label for="id_currency" class="form-label">
+                        {{ form.currency.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.currency }}
+                    {% if form.currency.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.currency.help_text }}</small>
+                    {% endif %}
+                    {% if form.currency.errors %}
+                        <ul class="errorlist">{{ form.currency.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <!-- Monto Mínimo por Operación -->
+                <div class="form-group">
+                    <label for="id_monto_minimo" class="form-label">
+                        {{ form.monto_minimo.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.monto_minimo }}
+                    {% if form.monto_minimo.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.monto_minimo.help_text }}</small>
+                    {% endif %}
+                    {% if form.monto_minimo.errors %}
+                        <ul class="errorlist">{{ form.monto_minimo.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <!-- Monto Máximo por Operación -->
+                <div class="form-group">
+                    <label for="id_monto_maximo" class="form-label">
+                        {{ form.monto_maximo.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.monto_maximo }}
+                    {% if form.monto_maximo.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.monto_maximo.help_text }}</small>
+                    {% endif %}
+                    {% if form.monto_maximo.errors %}
+                        <ul class="errorlist">{{ form.monto_maximo.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                <!-- Límite Acumulado Diario -->
+                <div class="form-group">
+                    <label for="id_limite_diario" class="form-label">
+                        {{ form.limite_diario.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.limite_diario }}
+                    {% if form.limite_diario.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.limite_diario.help_text }}</small>
+                    {% endif %}
+                    {% if form.limite_diario.errors %}
+                        <ul class="errorlist">{{ form.limite_diario.errors }}</ul>
+                    {% endif %}
+                </div>
+
+                <!-- Límite Acumulado Mensual -->
+                <div class="form-group">
+                    <label for="id_limite_mensual" class="form-label">
+                        {{ form.limite_mensual.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.limite_mensual }}
+                    {% if form.limite_mensual.help_text %}
+                        <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">{{ form.limite_mensual.help_text }}</small>
+                    {% endif %}
+                    {% if form.limite_mensual.errors %}
+                        <ul class="errorlist">{{ form.limite_mensual.errors }}</ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Estado Activo -->
+            <div class="form-group" style="margin-top: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer;">
+                    {{ form.is_active }}
+                    <span style="font-weight: 600; color: var(--text-main);">{{ form.is_active.label }}</span>
+                </label>
+                {% if form.is_active.help_text %}
+                    <small style="color: var(--text-subtle); display: block; margin-top: 0.25rem;">{{ form.is_active.help_text }}</small>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color);">
+                <a href="{% url 'rates:limit_list' %}" class="btn btn-secondary">Cancelar</a>
+                <button type="submit" class="btn btn-primary">
+                    {{ submit_btn_text|default:"Guardar" }}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

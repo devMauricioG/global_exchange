@@ -16,12 +16,15 @@
                 Calcule conversiones en tiempo real con bonificación por segmento y congele su cotización con validez garantizada por 5 minutos.
             </p>
         </div>
-        <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
             <a href="{% url 'rates:dashboard' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.85rem;">
                 📊 Evolución Histórica
             </a>
             <a href="{% url 'rates:commission_list' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.85rem;">
-                ⚙️ Reglas de Comisión
+                ⚙️ Comisiones
+            </a>
+            <a href="{% url 'rates:limit_list' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.5rem 0.85rem; background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
+                🛡️ Límites Operativos
             </a>
         </div>
     </div>

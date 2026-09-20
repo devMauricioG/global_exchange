@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from customers.models import Cliente, CustomerUserAssignment
-from .models import Currency, ExchangeRate, SegmentCommission
+from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,253 @@ def get_active_customer(request: HttpRequest) -> Optional[Cliente]:
         return Cliente.objects.filter(is_active=True).first()
 
     return None
+
+
+class OperationLimitValidationService:
+    """
+    Servicio de validación y control de límites operativos por moneda y segmento (SCRUM-77 / SCRUM-64).
+
+    Permite verificar que las cotizaciones y operaciones cambiarias respeten:
+    - Monto mínimo por operación.
+    - Monto máximo por operación.
+    - Límite acumulado diario por cliente en la divisa operada.
+    - Límite acumulado mensual por cliente en la divisa operada.
+    """
+
+    DEFAULT_SEGMENT = Cliente.Segmentacion.MINORISTA
+
+    @classmethod
+    def get_limit_rule(
+        cls,
+        segment_or_customer: Union[str, Cliente, None] = None,
+        currency: Union[str, Currency, None] = None,
+    ) -> Optional[OperationLimit]:
+        """
+        Obtiene la regla activa de :class:`~rates.models.OperationLimit` correspondiente al
+        segmento y divisa especificados.
+
+        :param segment_or_customer: Código de segmento ('MIN', 'MAY', 'COR', 'VIP') o instancia de Cliente.
+        :type segment_or_customer: str or customers.models.Cliente or None
+        :param currency: Código ISO de moneda (ej: 'USD') o instancia de Currency.
+        :type currency: str or rates.models.Currency or None
+        :return: Instancia de OperationLimit activa o None si no existe parametrización.
+        :rtype: rates.models.OperationLimit or None
+        """
+        segment_code = cls.DEFAULT_SEGMENT
+        if isinstance(segment_or_customer, Cliente):
+            segment_code = segment_or_customer.segmentacion or cls.DEFAULT_SEGMENT
+        elif isinstance(segment_or_customer, str) and segment_or_customer.strip():
+            segment_code = segment_or_customer.strip().upper()
+
+        if not currency:
+            return None
+
+        currency_code = currency.code if isinstance(currency, Currency) else str(currency).upper().strip()
+
+        return (
+            OperationLimit.objects.filter(
+                segment=segment_code,
+                currency__code=currency_code,
+                currency__is_active=True,
+                is_active=True,
+            )
+            .select_related('currency')
+            .first()
+        )
+
+    @classmethod
+    def get_customer_accumulated_volume(
+        cls,
+        cliente: Optional[Cliente],
+        currency: Union[str, Currency],
+        period: str = 'daily',
+        reference_date: Optional[timezone.datetime] = None,
+    ) -> Decimal:
+        """
+        Calcula el volumen acumulado de transacciones no canceladas para un cliente
+        en una divisa dada dentro del período especificado ('daily' o 'monthly').
+
+        :param cliente: Ficha de cliente.
+        :type cliente: customers.models.Cliente or None
+        :param currency: Código ISO o instancia de Currency.
+        :type currency: str or rates.models.Currency
+        :param period: 'daily' para el día en curso o 'monthly' para el mes en curso.
+        :type period: str
+        :param reference_date: Momento de referencia (por defecto ahora).
+        :type reference_date: datetime.datetime or None
+        :return: Volumen monetario acumulado.
+        :rtype: decimal.Decimal
+        """
+        if not cliente:
+            return Decimal('0.00')
+
+        now = reference_date or timezone.now()
+        curr_code = currency.code if isinstance(currency, Currency) else str(currency).upper().strip()
+
+        if period == 'daily':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Consulta desacoplada al modelo Transaction si existe
+        try:
+            from django.apps import apps
+            if apps.is_installed('transactions'):
+                TransactionModel = apps.get_model('transactions', 'Transaction')
+                from django.db.models import Sum
+                total = TransactionModel.objects.filter(
+                    cliente=cliente,
+                    base_currency__code=curr_code,
+                    created_at__gte=start_date,
+                    created_at__lte=now,
+                ).exclude(estado__iexact='CANCELADA').aggregate(total=Sum('monto_origen'))['total']
+
+                if total is not None:
+                    return Decimal(str(total))
+        except Exception:
+            pass
+
+        return Decimal('0.00')
+
+    @classmethod
+    def validate_operation_amount(
+        cls,
+        segment_or_customer: Union[str, Cliente, None] = None,
+        currency: Union[str, Currency, None] = None,
+        amount: Union[Decimal, float, int, str] = Decimal('0.00'),
+        cliente: Optional[Cliente] = None,
+        accumulated_daily: Optional[Union[Decimal, float, int, str]] = None,
+        accumulated_monthly: Optional[Union[Decimal, float, int, str]] = None,
+        raise_exception: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Valida un monto frente a las reglas de límites operativos vigentes.
+
+        :param segment_or_customer: Código de segmento o instancia de Cliente.
+        :type segment_or_customer: str or customers.models.Cliente or None
+        :param currency: Moneda de la transacción (código ISO o instancia Currency).
+        :type currency: str or rates.models.Currency or None
+        :param amount: Monto de la operación individual.
+        :type amount: decimal.Decimal or float or int or str
+        :param cliente: Cliente ejecutor (para computar consumos acumulados).
+        :type cliente: customers.models.Cliente or None
+        :param accumulated_daily: Volumen diario ya acumulado (opcional para inyección/tests).
+        :type accumulated_daily: decimal.Decimal or float or int or str or None
+        :param accumulated_monthly: Volumen mensual ya acumulado (opcional para inyección/tests).
+        :type accumulated_monthly: decimal.Decimal or float or int or str or None
+        :param raise_exception: Si es True, lanza ValidationError si no supera la validación.
+        :type raise_exception: bool
+        :return: Diccionario completo de validación.
+        :rtype: dict
+        :raises django.core.exceptions.ValidationError: Si raise_exception=True y la validación falla.
+        """
+        try:
+            dec_amount = Decimal(str(amount))
+        except Exception as exc:
+            if raise_exception:
+                raise ValidationError({'amount': f'Monto numérico inválido: {exc}'})
+            return {
+                'is_valid': False,
+                'has_rule': False,
+                'errors': [f'Monto numérico inválido: {exc}'],
+                'warnings': [],
+                'limit_rule_id': None,
+                'segment': cls.DEFAULT_SEGMENT,
+                'currency_code': 'DIVISA',
+                'monto_minimo': Decimal('0.00'),
+                'monto_maximo': Decimal('0.00'),
+                'limite_diario': Decimal('0.00'),
+                'limite_mensual': Decimal('0.00'),
+                'accumulated_daily': Decimal('0.00'),
+                'accumulated_monthly': Decimal('0.00'),
+                'remaining_daily': None,
+                'remaining_monthly': None,
+                'amount': Decimal('0.00'),
+            }
+
+        resolved_client = (
+            cliente
+            if isinstance(cliente, Cliente)
+            else (segment_or_customer if isinstance(segment_or_customer, Cliente) else None)
+        )
+        rule = cls.get_limit_rule(segment_or_customer=segment_or_customer or resolved_client, currency=currency)
+
+        curr_code = (
+            currency.code
+            if isinstance(currency, Currency)
+            else (str(currency).upper().strip() if currency else 'DIVISA')
+        )
+        segment_code = (
+            rule.segment
+            if rule
+            else (
+                resolved_client.segmentacion
+                if resolved_client
+                else (str(segment_or_customer).upper().strip() if segment_or_customer else cls.DEFAULT_SEGMENT)
+            )
+        )
+
+        if not rule:
+            # Sin regla parametrizada: comportamiento permisivo por defecto
+            return {
+                'is_valid': True,
+                'has_rule': False,
+                'errors': [],
+                'warnings': [],
+                'limit_rule_id': None,
+                'segment': segment_code,
+                'currency_code': curr_code,
+                'monto_minimo': Decimal('0.00'),
+                'monto_maximo': Decimal('0.00'),
+                'limite_diario': Decimal('0.00'),
+                'limite_mensual': Decimal('0.00'),
+                'accumulated_daily': Decimal('0.00'),
+                'accumulated_monthly': Decimal('0.00'),
+                'remaining_daily': None,
+                'remaining_monthly': None,
+                'amount': dec_amount,
+            }
+
+        # Resolver acumulados
+        if accumulated_daily is None:
+            dec_accum_daily = cls.get_customer_accumulated_volume(resolved_client, currency, period='daily')
+        else:
+            dec_accum_daily = Decimal(str(accumulated_daily))
+
+        if accumulated_monthly is None:
+            dec_accum_monthly = cls.get_customer_accumulated_volume(resolved_client, currency, period='monthly')
+        else:
+            dec_accum_monthly = Decimal(str(accumulated_monthly))
+
+        validation = rule.validate_amount(
+            amount=dec_amount,
+            accumulated_daily=dec_accum_daily,
+            accumulated_monthly=dec_accum_monthly,
+        )
+
+        result_payload = {
+            'is_valid': validation['is_valid'],
+            'has_rule': True,
+            'limit_rule_id': rule.id,
+            'errors': validation['errors'],
+            'warnings': [],
+            'segment': segment_code,
+            'currency_code': curr_code,
+            'monto_minimo': rule.monto_minimo,
+            'monto_maximo': rule.monto_maximo,
+            'limite_diario': rule.limite_diario,
+            'limite_mensual': rule.limite_mensual,
+            'accumulated_daily': dec_accum_daily,
+            'accumulated_monthly': dec_accum_monthly,
+            'remaining_daily': validation['remaining_daily'],
+            'remaining_monthly': validation['remaining_monthly'],
+            'amount': dec_amount,
+        }
+
+        if not result_payload['is_valid'] and raise_exception:
+            raise ValidationError({'amount': result_payload['errors']})
+
+        return result_payload
 
 
 class RateCalculationService:
@@ -180,6 +427,8 @@ class RateCalculationService:
         amount: Union[Decimal, float, int, str] = Decimal('100.00'),
         operation_type: str = 'BUY',
         is_source_base: bool = True,
+        validate_limits: bool = True,
+        raise_on_limit_violation: bool = False,
     ) -> Dict[str, Any]:
         """
         Ejecuta el cálculo completo de la cotización neta para una transacción cambiaria.
@@ -219,6 +468,9 @@ class RateCalculationService:
              * ``net_target_amount = max(0, gross_target_amount - total_commission)`` (total a recibir).
              * ``final_effective_rate = net_target_amount / base_amount``.
 
+        6. **Validación de Límites Operativos (SCRUM-77):**
+           - Control de topes mínimos, máximos, diarios y mensuales según el segmento del cliente y divisa.
+
         :param exchange_rate: Instancia de la cotización oficial base.
         :type exchange_rate: rates.models.ExchangeRate
         :param segment_or_customer: Ficha de cliente o código de segmentación.
@@ -229,9 +481,13 @@ class RateCalculationService:
         :type operation_type: str
         :param is_source_base: True si el monto está en divisa base, False si está en divisa objetivo.
         :type is_source_base: bool
-        :return: Diccionario exhaustivo con todos los componentes del cálculo financiero.
+        :param validate_limits: Si es True, ejecuta la verificación de límites operativos del segmento.
+        :type validate_limits: bool
+        :param raise_on_limit_violation: Si es True, lanza ValidationError cuando se exceden los límites.
+        :type raise_on_limit_violation: bool
+        :return: Diccionario exhaustivo con todos los componentes del cálculo financiero y límites.
         :rtype: dict
-        :raises django.core.exceptions.ValidationError: Si los parámetros o cotizaciones son inválidos.
+        :raises django.core.exceptions.ValidationError: Si los parámetros o límites son violados con raise_on_limit_violation=True.
         """
         # Validación de tipo de operación
         op_type = str(operation_type).upper().strip()
@@ -333,6 +589,17 @@ class RateCalculationService:
         else:
             final_effective_rate = effective_rate
 
+        # 6. Validación de límites operativos (SCRUM-77)
+        limits_result = None
+        if validate_limits:
+            limits_result = OperationLimitValidationService.validate_operation_amount(
+                segment_or_customer=segment_or_customer,
+                currency=base_curr if is_source_base else target_curr,
+                amount=base_amount if is_source_base else gross_target_amount,
+                cliente=segment_or_customer if isinstance(segment_or_customer, Cliente) else None,
+                raise_exception=raise_on_limit_violation,
+            )
+
         return {
             'success': True,
             'exchange_rate_id': exchange_rate.id,
@@ -375,6 +642,7 @@ class RateCalculationService:
             'net_target_amount': net_target_amount,
             'final_effective_rate': final_effective_rate,
             'spread_savings': spread_savings,
+            'limits': limits_result,
         }
 
     @classmethod

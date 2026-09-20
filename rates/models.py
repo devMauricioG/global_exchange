@@ -5,6 +5,7 @@ Define las entidades principales para la parametrización financiera en Global E
 - :class:`Currency`: Catálogo de divisas internacionales admitidas.
 - :class:`ExchangeRate`: Cotizaciones de compra y venta entre pares de divisas con cálculo automático de spread.
 - :class:`SegmentCommission`: Reglas de comisiones porcentuales, cargos fijos y descuentos por segmento de cliente.
+- :class:`OperationLimit`: Parámetros y reglas de límites operativos (mínimo, máximo, diario, mensual) por divisa y segmento.
 """
 
 from decimal import Decimal
@@ -477,4 +478,265 @@ class SegmentCommission(models.Model):
         return (
             f'Comisión {segment_display} — {self.commission_percentage}% '
             f'+ {self.fixed_fee} fijo (Dto. Spread: {self.spread_discount_percentage}%)'
+        )
+
+
+class OperationLimit(models.Model):
+    """
+    Modelo de Límites Operativos por Moneda y Segmento de Cliente (SCRUM-77 / SCRUM-64).
+
+    Define los topes mínimos y máximos por transacción individual, así como los
+    umbrales acumulados diarios y mensuales para el control de riesgos operativos
+    y aseguramiento de cumplimiento normativo antilavado (PLA/FT) según la divisa
+    y la clasificación del cliente (:class:`~customers.models.Cliente.Segmentacion`).
+
+    :ivar id: Identificador numérico auto-incremental (PK).
+    :vartype id: int
+    :ivar segment: Segmento de cliente al que aplica la regla ('MIN', 'MAY', 'COR', 'VIP').
+    :vartype segment: str
+    :ivar currency: Divisa sobre la cual rigen los límites monetarios (:class:`Currency`).
+    :vartype currency: rates.models.Currency
+    :ivar monto_minimo: Monto mínimo permitido por transacción individual.
+    :vartype monto_minimo: decimal.Decimal
+    :ivar monto_maximo: Monto tope permitido por transacción individual (0.00 = ilimitado).
+    :vartype monto_maximo: decimal.Decimal
+    :ivar limite_diario: Monto máximo acumulado en un día calendario (0.00 = ilimitado).
+    :vartype limite_diario: decimal.Decimal
+    :ivar limite_mensual: Monto máximo acumulado en un mes calendario (0.00 = ilimitado).
+    :vartype limite_mensual: decimal.Decimal
+    :ivar is_active: Estado operativo de la regla de límites.
+    :vartype is_active: bool
+    :ivar created_at: Marca temporal de creación del registro.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Marca temporal de última modificación.
+    :vartype updated_at: datetime.datetime
+    """
+
+    segment = models.CharField(
+        max_length=3,
+        choices=Cliente.Segmentacion.choices,
+        db_index=True,
+        verbose_name='Segmento de Cliente',
+        help_text='Categoría o segmento comercial de clientes al cual se aplican estos límites.',
+    )
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.CASCADE,
+        related_name='operation_limits',
+        verbose_name='Moneda',
+        help_text='Divisa sobre la cual rigen los límites monetarios parametrizados.',
+    )
+    monto_minimo = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Monto Mínimo por Operación',
+        help_text='Monto mínimo requerido por transacción individual en esta divisa.',
+    )
+    monto_maximo = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Monto Máximo por Operación',
+        help_text='Monto tope permitido por transacción individual (0.00 = sin límite individual).',
+    )
+    limite_diario = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Límite Acumulado Diario',
+        help_text='Monto máximo acumulado habilitado en un día calendario (0.00 = sin límite diario).',
+    )
+    limite_mensual = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Límite Acumulado Mensual',
+        help_text='Monto máximo acumulado habilitado en un mes calendario (0.00 = sin límite mensual).',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name='Regla Activa',
+        help_text='Indica si esta política de límites se encuentra actualmente en vigencia.',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Creación',
+        help_text='Timestamp automático de inserción de la regla.',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+        help_text='Timestamp de la última modificación de los parámetros de límites.',
+    )
+
+    class Meta:
+        verbose_name = 'Límite Operativo'
+        verbose_name_plural = 'Límites Operativos'
+        ordering = ['segment', 'currency__code']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['segment', 'currency'],
+                name='unique_segment_currency_operation_limit',
+            )
+        ]
+
+    def clean(self) -> None:
+        """
+        Valida que los montos y topes acumulados mantengan consistencia lógica:
+
+        - Todos los montos deben ser mayores o iguales a 0.00.
+        - Si ``monto_maximo > 0``, debe ser mayor o igual a ``monto_minimo``.
+        - Si ``limite_diario > 0`` y ``monto_maximo > 0``, ``monto_maximo`` no puede superar ``limite_diario``.
+        - Si ``limite_mensual > 0`` y ``limite_diario > 0``, ``limite_diario`` no puede superar ``limite_mensual``.
+        - Si ``limite_mensual > 0`` y ``monto_maximo > 0``, ``monto_maximo`` no puede superar ``limite_mensual``.
+        """
+        errors = {}
+
+        if self.monto_minimo is not None and self.monto_minimo < Decimal('0.00'):
+            errors['monto_minimo'] = 'El monto mínimo no puede ser un valor negativo.'
+
+        if self.monto_maximo is not None and self.monto_maximo < Decimal('0.00'):
+            errors['monto_maximo'] = 'El monto máximo no puede ser un valor negativo.'
+
+        if self.limite_diario is not None and self.limite_diario < Decimal('0.00'):
+            errors['limite_diario'] = 'El límite diario acumulado no puede ser un valor negativo.'
+
+        if self.limite_mensual is not None and self.limite_mensual < Decimal('0.00'):
+            errors['limite_mensual'] = 'El límite mensual acumulado no puede ser un valor negativo.'
+
+        # Relaciones de jerarquía entre montos
+        if (
+            self.monto_minimo is not None
+            and self.monto_maximo is not None
+            and self.monto_maximo > Decimal('0.00')
+            and self.monto_minimo > self.monto_maximo
+        ):
+            errors['monto_minimo'] = 'El monto mínimo no puede ser superior al monto máximo por operación.'
+
+        if (
+            self.monto_maximo is not None
+            and self.limite_diario is not None
+            and self.monto_maximo > Decimal('0.00')
+            and self.limite_diario > Decimal('0.00')
+            and self.monto_maximo > self.limite_diario
+        ):
+            errors['monto_maximo'] = 'El monto máximo por operación no puede superar el límite diario acumulado.'
+
+        if (
+            self.limite_diario is not None
+            and self.limite_mensual is not None
+            and self.limite_diario > Decimal('0.00')
+            and self.limite_mensual > Decimal('0.00')
+            and self.limite_diario > self.limite_mensual
+        ):
+            errors['limite_diario'] = 'El límite diario acumulado no puede superar el límite mensual acumulado.'
+
+        if (
+            self.monto_maximo is not None
+            and self.limite_mensual is not None
+            and self.monto_maximo > Decimal('0.00')
+            and self.limite_mensual > Decimal('0.00')
+            and self.monto_maximo > self.limite_mensual
+        ):
+            errors['monto_maximo'] = 'El monto máximo por operación no puede superar el límite mensual acumulado.'
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs) -> None:
+        """Ejecuta la validación de limpieza antes de persistir en base de datos."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def validate_amount(
+        self,
+        amount: Decimal,
+        accumulated_daily: Decimal = Decimal('0.00'),
+        accumulated_monthly: Decimal = Decimal('0.00'),
+    ) -> dict:
+        """
+        Evalúa si un monto dado cumple con todas las restricciones de esta regla.
+
+        :param amount: Monto de la operación individual a validar.
+        :type amount: decimal.Decimal
+        :param accumulated_daily: Volumen ya acumulado hoy por el cliente en esta divisa.
+        :type accumulated_daily: decimal.Decimal
+        :param accumulated_monthly: Volumen ya acumulado en el mes por el cliente en esta divisa.
+        :type accumulated_monthly: decimal.Decimal
+        :return: Diccionario con bandera `is_valid`, lista de `errors` y saldos restantes.
+        :rtype: dict
+        """
+        errors = []
+        curr_code = getattr(self.currency, 'code', 'DIVISA')
+
+        if amount < self.monto_minimo:
+            errors.append(
+                f'El monto ({amount} {curr_code}) es inferior al mínimo permitido '
+                f'por operación ({self.monto_minimo} {curr_code}).'
+            )
+
+        if self.monto_maximo > Decimal('0.00') and amount > self.monto_maximo:
+            errors.append(
+                f'El monto ({amount} {curr_code}) supera el máximo permitido '
+                f'por operación ({self.monto_maximo} {curr_code}).'
+            )
+
+        if self.limite_diario > Decimal('0.00'):
+            new_daily_total = accumulated_daily + amount
+            if new_daily_total > self.limite_diario:
+                available_daily = max(Decimal('0.00'), self.limite_diario - accumulated_daily)
+                errors.append(
+                    f'Supera el límite diario acumulado ({self.limite_diario} {curr_code}). '
+                    f'Acumulado hoy: {accumulated_daily} {curr_code}. Disponible: {available_daily} {curr_code}.'
+                )
+
+        if self.limite_mensual > Decimal('0.00'):
+            new_monthly_total = accumulated_monthly + amount
+            if new_monthly_total > self.limite_mensual:
+                available_monthly = max(Decimal('0.00'), self.limite_mensual - accumulated_monthly)
+                errors.append(
+                    f'Supera el límite mensual acumulado ({self.limite_mensual} {curr_code}). '
+                    f'Acumulado en el mes: {accumulated_monthly} {curr_code}. Disponible: {available_monthly} {curr_code}.'
+                )
+
+        remaining_daily = (
+            max(Decimal('0.00'), self.limite_diario - (accumulated_daily + amount))
+            if self.limite_diario > Decimal('0.00')
+            else None
+        )
+        remaining_monthly = (
+            max(Decimal('0.00'), self.limite_mensual - (accumulated_monthly + amount))
+            if self.limite_mensual > Decimal('0.00')
+            else None
+        )
+
+        return {
+            'is_valid': len(errors) == 0,
+            'errors': errors,
+            'remaining_daily': remaining_daily,
+            'remaining_monthly': remaining_monthly,
+            'monto_minimo': self.monto_minimo,
+            'monto_maximo': self.monto_maximo,
+            'limite_diario': self.limite_diario,
+            'limite_mensual': self.limite_mensual,
+            'currency_code': curr_code,
+            'segment': self.segment,
+        }
+
+    def __str__(self) -> str:
+        """
+        Representación en cadena de texto de la regla de límites operativos.
+
+        :return: Segmento, divisa, mínimo, máximo y límites diarios/mensuales.
+        :rtype: str
+        """
+        segment_display = self.get_segment_display()
+        curr_code = getattr(self.currency, 'code', '???')
+        max_str = f'{self.monto_maximo}' if self.monto_maximo > Decimal('0.00') else 'Sin Máx'
+        daily_str = f'{self.limite_diario}' if self.limite_diario > Decimal('0.00') else 'Sin Límite'
+        monthly_str = f'{self.limite_mensual}' if self.limite_mensual > Decimal('0.00') else 'Sin Límite'
+        return (
+            f'Límites {segment_display} ({curr_code}) — Mín: {self.monto_minimo}, '
+            f'Máx: {max_str}, Diario: {daily_str}, Mensual: {monthly_str}'
         )
