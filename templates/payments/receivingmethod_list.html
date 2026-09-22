@@ -1,0 +1,343 @@
+{% extends 'base.html' %}
+
+{% block title %}Medios de Acreditación - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+        gap: 1.25rem;
+    }
+
+    .page-title-group h1 {
+        font-size: 1.85rem;
+        font-weight: 800;
+        color: #f8fafc;
+        letter-spacing: -0.03em;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .page-title-group p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        margin-top: 0.35rem;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.75rem;
+    }
+
+    .stat-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border-color);
+        border-radius: 0.875rem;
+        padding: 1.25rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .stat-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+    }
+
+    .stat-card.accent-total::before { background: linear-gradient(90deg, #38bdf8, #6366f1); }
+    .stat-card.accent-active::before { background: #10b981; }
+    .stat-card.accent-default::before { background: #f59e0b; }
+
+    .stat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    .stat-value {
+        font-size: 1.85rem;
+        font-weight: 800;
+        color: #f8fafc;
+        margin-top: 0.4rem;
+        letter-spacing: -0.02em;
+    }
+
+    .stat-subtext {
+        font-size: 0.8rem;
+        color: var(--text-subtle);
+        margin-top: 0.25rem;
+    }
+
+    .pm-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 1.25rem;
+        margin-bottom: 2rem;
+    }
+
+    .pm-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 0.25s ease;
+    }
+
+    .pm-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.4);
+        border-color: var(--primary);
+    }
+
+    .pm-card.is-default {
+        border-color: rgba(245, 158, 11, 0.5);
+        box-shadow: 0 4px 16px -2px rgba(245, 158, 11, 0.15);
+    }
+
+    .pm-card.is-inactive {
+        opacity: 0.65;
+        filter: grayscale(0.2);
+    }
+
+    .pm-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+    }
+
+    .pm-type-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 0.25rem 0.65rem;
+        border-radius: 9999px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        background-color: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .pm-badges {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+
+    .badge-default {
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.3) 100%);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        font-size: 0.7rem;
+        font-weight: 800;
+        padding: 0.2rem 0.6rem;
+        border-radius: 9999px;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .pm-entity {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #f8fafc;
+        margin-bottom: 0.25rem;
+    }
+
+    .pm-account {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 1.05rem;
+        color: var(--primary);
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.85rem;
+    }
+
+    .pm-details {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        border-top: 1px dashed var(--border-color);
+        padding-top: 0.85rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .pm-detail-row {
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .pm-detail-label { color: var(--text-subtle); }
+    .pm-detail-value { color: var(--text-main); font-weight: 500; }
+
+    .pm-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        border-top: 1px solid var(--border-color);
+        padding-top: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .pm-actions-left { display: flex; gap: 0.5rem; }
+    .pm-actions-right { display: flex; gap: 0.4rem; }
+
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: var(--bg-card);
+        border: 1px dashed var(--border-color);
+        border-radius: 1rem;
+    }
+
+    .empty-state-icon { font-size: 3.5rem; margin-bottom: 1rem; opacity: 0.8; }
+    .empty-state h3 { font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem; }
+    .empty-state p { color: var(--text-muted); max-width: 460px; margin: 0 auto 1.5rem auto; font-size: 0.95rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title-group">
+        <h1>
+            <span>🏦</span>
+            <span>Medios de Acreditación</span>
+        </h1>
+        <p>
+            {% if cliente %}
+                Cuentas destino para recibir fondos de operaciones de <strong>{{ cliente.nombre }}</strong> (RUC: {{ cliente.documento_ruc }}).
+            {% else %}
+                Gestión de cuentas destino para acreditación de fondos.
+            {% endif %}
+        </p>
+    </div>
+    <div class="page-actions">
+        <a href="{% url 'payments:receivingmethod-create' %}" class="btn btn-primary">
+            <span>➕</span>
+            <span>Nueva Cuenta de Acreditación</span>
+        </a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card accent-total">
+        <div class="stat-header">
+            <span class="stat-label">Total Registradas</span>
+            <span>🏦</span>
+        </div>
+        <div class="stat-value">{{ medios_acreditacion.count }}</div>
+        <div class="stat-subtext">Cuentas de acreditación vinculadas</div>
+    </div>
+</div>
+
+{% if medios_acreditacion %}
+    <div class="pm-grid">
+        {% for rm in medios_acreditacion %}
+            <div class="pm-card {% if rm.es_predeterminado %}is-default{% endif %} {% if not rm.activo %}is-inactive{% endif %}">
+                <div>
+                    <div class="pm-top">
+                        <span class="pm-type-badge">
+                            {% if rm.tipo_cuenta == 'BILLETERA' %}📱{% else %}🏦{% endif %}
+                            {{ rm.get_tipo_cuenta_display }}
+                        </span>
+                        <div class="pm-badges">
+                            {% if rm.es_predeterminado %}
+                                <span class="badge-default">⭐ PREDETERMINADA</span>
+                            {% endif %}
+                            {% if rm.activo %}
+                                <span class="badge badge-active">Activa</span>
+                            {% else %}
+                                <span class="badge badge-inactive">Inactiva</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="pm-entity">{{ rm.entidad_bancaria }}</div>
+                    <div class="pm-account">{{ rm.numero_cuenta }}</div>
+
+                    <div class="pm-details">
+                        <div class="pm-detail-row">
+                            <span class="pm-detail-label">Titular:</span>
+                            <span class="pm-detail-value">{{ rm.titular }}</span>
+                        </div>
+                        {% if rm.documento_titular %}
+                            <div class="pm-detail-row">
+                                <span class="pm-detail-label">Doc / RUC:</span>
+                                <span class="pm-detail-value">{{ rm.documento_titular }}</span>
+                            </div>
+                        {% endif %}
+                        <div class="pm-detail-row">
+                            <span class="pm-detail-label">Registrada:</span>
+                            <span class="pm-detail-value">{{ rm.created_at|date:"d/m/Y H:i" }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pm-actions">
+                    <div class="pm-actions-left">
+                        {% if not rm.es_predeterminado and rm.activo %}
+                            <form method="post" action="{% url 'payments:receivingmethod-set-default' rm.pk %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-secondary" title="Establecer como cuenta preferida">
+                                    ⭐ Predeterminar
+                                </button>
+                            </form>
+                        {% endif %}
+                        <form method="post" action="{% url 'payments:receivingmethod-toggle-active' rm.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-secondary" title="{% if rm.activo %}Desactivar{% else %}Activar{% endif %}">
+                                {% if rm.activo %}Inhabilitar{% else %}Habilitar{% endif %}
+                            </button>
+                        </form>
+                    </div>
+                    <div class="pm-actions-right">
+                        <a href="{% url 'payments:receivingmethod-update' rm.pk %}" class="btn btn-sm btn-secondary" title="Editar datos">
+                            ✏️ Editar
+                        </a>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">🏦</div>
+        <h3>No se encontraron cuentas de acreditación</h3>
+        <p>Aún no ha registrado ninguna cuenta destino para recibir fondos de sus operaciones. Registre una para comenzar.</p>
+        <a href="{% url 'payments:receivingmethod-create' %}" class="btn btn-primary">
+            <span>➕</span>
+            <span>Registrar Primera Cuenta</span>
+        </a>
+    </div>
+{% endif %}
+{% endblock %}

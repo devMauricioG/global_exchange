@@ -9,7 +9,7 @@ import re
 from datetime import date
 from typing import Optional
 from django import forms
-from .models import PaymentMethod, EntidadFinanciera
+from .models import PaymentMethod, EntidadFinanciera, ReceivingMethod
 
 
 class PaymentMethodForm(forms.ModelForm):
@@ -360,3 +360,51 @@ class CashBranchForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+class ReceivingMethodForm(forms.ModelForm):
+    """
+    Formulario basado en modelo para registrar y editar cuentas de
+    acreditación de fondos de un cliente.
+    """
+
+    class Meta:
+        model = ReceivingMethod
+        fields = [
+            'entidad_bancaria',
+            'tipo_cuenta',
+            'numero_cuenta',
+            'titular',
+            'documento_titular',
+            'es_predeterminado',
+            'activo',
+        ]
+        widgets = {
+            'entidad_bancaria': forms.Select(attrs={'class': 'form-select'}),
+            'tipo_cuenta': forms.Select(attrs={'class': 'form-select'}),
+            'numero_cuenta': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. 12-345678-9 o +595 981 123456'}),
+            'titular': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. Juan Pérez o Razón Social'}),
+            'documento_titular': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Ej. 4.567.890 (opcional)'}),
+            'es_predeterminado': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+            'activo': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+        labels = {
+            'entidad_bancaria': 'Entidad Bancaria o Billetera',
+            'tipo_cuenta': 'Tipo de Cuenta',
+            'numero_cuenta': 'Número de Cuenta o Teléfono',
+            'titular': 'Nombre del Titular',
+            'documento_titular': 'Documento / RUC del Titular (Opcional)',
+            'es_predeterminado': 'Marcar como cuenta predeterminada para acreditaciones',
+            'activo': 'Cuenta activa para recibir fondos',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['entidad_bancaria'].queryset = EntidadFinanciera.objects.filter(activo=True)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        es_predeterminado = cleaned_data.get('es_predeterminado')
+        activo = cleaned_data.get('activo')
+        if es_predeterminado and not activo:
+            self.add_error('es_predeterminado', 'Una cuenta inactiva no puede configurarse como predeterminada.')
+        return cleaned_data

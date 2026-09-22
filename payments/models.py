@@ -288,3 +288,124 @@ class PaymentMethod(models.Model):
                 ).exclude(pk=self.pk).update(es_predeterminado=False)
 
             super().save(*args, **kwargs)
+
+class ReceivingMethod(models.Model):
+    """
+    Modelo que representa una Cuenta de Acreditación de Fondos de un Cliente.
+
+    A diferencia de :class:`PaymentMethod` (medios utilizados para pagar),
+    este modelo registra las cuentas destino donde el cliente recibe fondos
+    producto de sus operaciones de compra/venta de divisas.
+
+    :ivar cliente: Cliente titular de la cuenta de acreditación.
+    :vartype cliente: customers.models.Cliente
+    :ivar entidad_bancaria: Entidad del catálogo parametrizado seleccionada.
+    :vartype entidad_bancaria: EntidadFinanciera
+    :ivar tipo_cuenta: Tipo de cuenta bancaria o billetera para acreditación.
+    :vartype tipo_cuenta: str
+    :ivar numero_cuenta: Número de cuenta o teléfono de billetera destino.
+    :vartype numero_cuenta: str
+    :ivar titular: Nombre del titular de la cuenta receptora.
+    :vartype titular: str
+    :ivar documento_titular: Documento del titular (opcional).
+    :vartype documento_titular: str
+    :ivar es_predeterminado: Indica si es la cuenta preferida para acreditaciones.
+    :vartype es_predeterminado: bool
+    :ivar activo: Bandera lógica de borrado (soft-delete).
+    :vartype activo: bool
+    """
+
+    class TipoCuenta(models.TextChoices):
+        AHORRO = 'AHORRO', 'Caja de Ahorro'
+        CORRIENTE = 'CORRIENTE', 'Cuenta Corriente'
+        BILLETERA = 'BILLETERA', 'Billetera Digital / Móvil'
+
+    cliente = models.ForeignKey(
+        'customers.Cliente',
+        on_delete=models.CASCADE,
+        related_name='medios_acreditacion',
+        verbose_name='Cliente',
+        help_text='Cliente titular de esta cuenta de acreditación de fondos.',
+    )
+    entidad_bancaria = models.ForeignKey(
+        'EntidadFinanciera',
+        on_delete=models.PROTECT,
+        related_name='medios_acreditacion',
+        verbose_name='Entidad Bancaria / Billetera',
+        help_text='Entidad seleccionada del catálogo parametrizado.',
+    )
+    tipo_cuenta = models.CharField(
+        max_length=20,
+        choices=TipoCuenta.choices,
+        verbose_name='Tipo de Cuenta',
+        help_text='Clasificación de la cuenta destino para acreditación.',
+    )
+    numero_cuenta = models.CharField(
+        max_length=50,
+        verbose_name='Número de Cuenta / Teléfono',
+        help_text='Número de cuenta bancaria o teléfono de billetera destino.',
+    )
+    titular = models.CharField(
+        max_length=150,
+        verbose_name='Titular de la Cuenta',
+        help_text='Nombre completo o razón social del titular de la cuenta receptora.',
+    )
+    documento_titular = models.CharField(
+        max_length=30,
+        blank=True,
+        verbose_name='Documento / RUC del Titular',
+        help_text='Cédula de identidad o RUC del titular (opcional).',
+    )
+    es_predeterminado = models.BooleanField(
+        default=False,
+        verbose_name='Predeterminado',
+        help_text='Indica si esta es la cuenta preferida para recibir acreditaciones.',
+    )
+    activo = models.BooleanField(
+        default=True,
+        verbose_name='Activo',
+        help_text='Indica si la cuenta está habilitada (borrado lógico).',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de Registro')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Última Actualización')
+
+    class Meta:
+        verbose_name = 'Medio de Acreditación'
+        verbose_name_plural = 'Medios de Acreditación'
+        ordering = ['-es_predeterminado', '-created_at']
+        indexes = [
+            models.Index(fields=['cliente', 'activo']),
+            models.Index(fields=['cliente', 'es_predeterminado']),
+        ]
+
+    def __str__(self) -> str:
+        pred = ' (Predeterminado)' if self.es_predeterminado else ''
+        return f'{self.entidad_bancaria} - {self.numero_cuenta}{pred}'
+
+    def clean(self) -> None:
+        super().clean()
+        if self.numero_cuenta:
+            self.numero_cuenta = self.numero_cuenta.strip()
+            if not self.numero_cuenta:
+                raise ValidationError({'numero_cuenta': 'El número de cuenta no puede estar vacío.'})
+        if self.titular:
+            self.titular = self.titular.strip()
+            if not self.titular:
+                raise ValidationError({'titular': 'El titular no puede estar vacío.'})
+        if self.es_predeterminado and not self.activo:
+            raise ValidationError({'es_predeterminado': 'Una cuenta inactiva no puede ser predeterminada.'})
+        if self.entidad_bancaria_id and self.tipo_cuenta:
+            if self.entidad_bancaria.tipo == 'BILLETERA' and self.tipo_cuenta != self.TipoCuenta.BILLETERA:
+                raise ValidationError({'tipo_cuenta': 'Para una billetera digital, el tipo de cuenta debe ser "Billetera Digital / Móvil".'})
+            if self.entidad_bancaria.tipo == 'BANCO' and self.tipo_cuenta == self.TipoCuenta.BILLETERA:
+                raise ValidationError({'tipo_cuenta': 'Para un banco, el tipo de cuenta debe ser Caja de Ahorro o Cuenta Corriente.'})
+
+    def save(self, *args, **kwargs) -> None:
+        self.full_clean()
+        with transaction.atomic():
+            if self.es_predeterminado and self.cliente_id:
+                ReceivingMethod.objects.filter(
+                    cliente_id=self.cliente_id,
+                    es_predeterminado=True,
+                ).exclude(pk=self.pk).update(es_predeterminado=False)
+            super().save(*args, **kwargs)

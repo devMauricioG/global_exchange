@@ -765,8 +765,15 @@
 
                     <!-- Opción Visible para usuarios autenticados: Medios de Pago -->
                     <li>
-                        <a href="{% url 'payments:paymentmethod-list' %}" class="nav-link {% if '/payments/' in request.path %}active{% endif %}">
+                        <a href="{% url 'payments:paymentmethod-list' %}" class="nav-link {% if '/payments/' in request.path and '/payments/acreditacion/' not in request.path %}active{% endif %}">
                             💳 Medios de Pago
+                        </a>
+                    </li>
+
+                    <!-- Opción Visible para usuarios autenticados: Medios de Acreditación -->
+                    <li>
+                        <a href="{% url 'payments:receivingmethod-list' %}" class="nav-link {% if '/payments/acreditacion/' in request.path %}active{% endif %}">
+                            🏦 Medios de Acreditación
                         </a>
                     </li>
 
