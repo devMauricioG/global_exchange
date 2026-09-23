@@ -295,6 +295,18 @@
                     ✨ <strong>Ahorro Estimado:</strong> El cliente ahorra aprox. <strong>{{ calculation.spread_savings|format_currency:calculation.target_currency }}</strong> gracias a la bonificación de spread de su segmento.
                 </div>
                 {% endif %}
+
+                <div style="margin-top: 1.25rem;">
+                    {% if frozen_quote and not frozen_quote.is_expired %}
+                        <a href="{% url 'transactions:create' %}?token={{ frozen_quote.token }}" class="btn btn-primary" style="width: 100%; padding: 0.85rem; font-size: 1rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                            📋 Registrar Orden de Cambio (Cotización Congelada)
+                        </a>
+                    {% else %}
+                        <a href="{% url 'transactions:create' %}?base={{ calculation.base_currency.code }}&target={{ calculation.target_currency.code }}&amount={{ calculation.base_amount }}&operation_type={{ calculation.operation_type }}&is_source_base={{ calculation.is_source_base|yesno:'true,false' }}" class="btn btn-primary" style="width: 100%; padding: 0.85rem; font-size: 1rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                            📋 Registrar Orden de Cambio
+                        </a>
+                    {% endif %}
+                </div>
             </div>
         </div>
         {% else %}

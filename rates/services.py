@@ -747,7 +747,8 @@ class QuoteFreezeService:
 
         if hasattr(request, 'session'):
             request.session['frozen_quote'] = payload
-            request.session.modified = True
+            if hasattr(request.session, 'modified'):
+                request.session.modified = True
 
         return {
             'success': True,
@@ -827,7 +828,8 @@ class QuoteFreezeService:
             return False
 
         del request.session['frozen_quote']
-        request.session.modified = True
+        if hasattr(request.session, 'modified'):
+            request.session.modified = True
         return True
 
     @classmethod
