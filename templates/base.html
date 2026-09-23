@@ -790,6 +790,12 @@
                         </a>
                     </li>
 
+                    <li>
+                        <a href="{% url 'transactions:list' %}" class="nav-link {% if '/transactions/' in request.path %}active{% endif %}">
+                            📑 Transacciones
+                        </a>
+                    </li>
+
                     <!-- Opción Visible para roles Admin y Operator: Comisiones y Límites -->
                     {% if is_operator or user|has_any_role:"admin,operator" %}
                         <li>
