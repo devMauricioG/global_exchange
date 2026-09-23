@@ -217,6 +217,7 @@ class TransactionConfirmView(LoginRequiredMixin, View):
 class TransactionDetailView(LoginRequiredMixin, DetailView):
     """
     Vista para visualizar los detalles y el comprobante de una transacción.
+    Verifica automáticamente si la cotización ha expirado antes de renderizar.
     """
     model = Transaction
     template_name = 'transactions/transaction_detail.html'
@@ -236,6 +237,31 @@ class TransactionDetailView(LoginRequiredMixin, DetailView):
             return qs.filter(cliente=cliente)
         return qs.none()
 
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset=queryset)
+        if obj and obj.estado == Transaction.Estado.PENDIENTE:
+            TransactionService.check_and_cancel_single(obj)
+        return obj
+
+    def get_context_data(self, **kwargs) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        tx = self.object
+        cliente = get_active_customer(self.request)
+
+        is_expired = TransactionService.is_transaction_expired(tx)
+        remaining_seconds = 0
+        if tx.estado == Transaction.Estado.PENDIENTE and tx.created_at:
+            from django.utils import timezone
+            elapsed = (timezone.now() - tx.created_at).total_seconds()
+            remaining_seconds = max(0, int(TransactionService.EXPIRATION_DURATION_SECONDS - elapsed))
+
+        context['is_expired'] = is_expired
+        context['remaining_seconds'] = remaining_seconds
+        context['can_cancel'] = (
+            tx.estado == Transaction.Estado.PENDIENTE and cliente and tx.cliente_id == cliente.id
+        )
+        return context
+
 
 class TransactionListView(LoginRequiredMixin, ListView):
     """
@@ -247,6 +273,9 @@ class TransactionListView(LoginRequiredMixin, ListView):
     paginate_by = 15
 
     def get_queryset(self):
+        # Ejecutar limpieza/cancelación automática de órdenes expiradas al consultar el listado
+        TransactionService.cancel_expired_transactions()
+
         qs = Transaction.objects.select_related(
             'cliente', 'base_currency', 'target_currency'
         ).order_by('-created_at')
@@ -288,6 +317,91 @@ class TransactionListView(LoginRequiredMixin, ListView):
         context['selected_tipo'] = self.request.GET.get('tipo', '')
         context['cliente'] = cliente
         return context
+
+
+class TransactionCancelView(LoginRequiredMixin, View):
+    """
+    Vista POST para la anulación manual de una transacción pendiente por parte del cliente.
+    """
+
+    def post(self, request: HttpRequest, pk: int, *args, **kwargs) -> HttpResponse:
+        cliente = get_active_customer(request)
+        if not cliente:
+            messages.error(request, 'No se pudo verificar el cliente activo para esta operación.')
+            return redirect('transactions:list')
+
+        motivo = request.POST.get('motivo', '').strip()
+
+        try:
+            tx = TransactionService.cancel_transaction_by_customer(
+                transaction_id=pk,
+                cliente=cliente,
+                usuario=request.user,
+                motivo=motivo,
+            )
+            messages.success(
+                request,
+                f"La transacción {tx.codigo_referencia} ha sido anulada exitosamente."
+            )
+            return redirect('transactions:detail', pk=tx.pk)
+
+        except ValidationError as ve:
+            for field, err_list in ve.message_dict.items() if hasattr(ve, 'message_dict') else [('__all__', ve.messages)]:
+                for err in err_list:
+                    messages.error(request, f"Error al cancelar la orden: {err}")
+        except Exception as exc:
+            logger.exception("Error inesperado al anular la transacción")
+            messages.error(request, f"No se pudo cancelar la orden: {exc}")
+
+        return redirect('transactions:detail', pk=pk)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TransactionCancelApiView(View):
+    """
+    Endpoint de API JSON para la anulación programática de transacciones pendientes.
+    """
+
+    def post(self, request: HttpRequest, pk: int, *args, **kwargs) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
+
+        cliente = get_active_customer(request)
+        if not cliente:
+            return JsonResponse({'success': False, 'error': 'No se encontró un cliente activo.'}, status=400)
+
+        try:
+            body_data = json.loads(request.body.decode('utf-8'))
+        except Exception:
+            body_data = request.POST.dict()
+
+        motivo = body_data.get('motivo', '').strip()
+
+        try:
+            tx = TransactionService.cancel_transaction_by_customer(
+                transaction_id=pk,
+                cliente=cliente,
+                usuario=request.user,
+                motivo=motivo,
+            )
+            return JsonResponse({
+                'success': True,
+                'message': 'Transacción anulada exitosamente.',
+                'transaction': {
+                    'id': tx.id,
+                    'codigo_referencia': tx.codigo_referencia,
+                    'estado': tx.estado,
+                    'observaciones': tx.observaciones,
+                    'updated_at': tx.updated_at.isoformat(),
+                }
+            })
+
+        except ValidationError as ve:
+            errors_dict = ve.message_dict if hasattr(ve, 'message_dict') else {'detail': ve.messages}
+            return JsonResponse({'success': False, 'errors': errors_dict}, status=400)
+        except Exception as exc:
+            logger.exception("Error en API de cancelación de transacción")
+            return JsonResponse({'success': False, 'error': str(exc)}, status=500)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

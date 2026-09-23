@@ -39,6 +39,26 @@
         </div>
     </div>
 
+    {% if transaction.estado == 'PENDIENTE' %}
+        <!-- Banner de Temporizador de Expiración (5 min) -->
+        <div id="expirationTimerBanner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.875rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.5rem;">⏱️</span>
+                <div>
+                    <div style="font-weight: 700; color: var(--warning);">Tiempo Restante de Cotización Congelada</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        Si la transacción no se liquida en el plazo de 5 minutos, expira y pasa a estado cancelado.
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <span id="countdownTimer" style="font-size: 1.4rem; font-weight: 800; color: var(--warning); font-family: monospace;">
+                    --:--
+                </span>
+            </div>
+        </div>
+    {% endif %}
+
     <!-- Card Principal Recibo -->
     <div class="card" style="margin-bottom: 1.5rem;">
         <!-- Header Info Cliente -->
@@ -153,11 +173,54 @@
 
         {% if transaction.observaciones %}
             <div style="background: rgba(30, 41, 59, 0.4); border-left: 3px solid var(--primary); padding: 0.875rem 1.25rem; border-radius: 0.5rem; margin-bottom: 1.5rem; font-size: 0.9rem;">
-                <strong>Observaciones:</strong> {{ transaction.observaciones }}
+                <strong>Observaciones / Trazabilidad:</strong><br>
+                <span style="white-space: pre-wrap;">{{ transaction.observaciones }}</span>
             </div>
         {% endif %}
 
-        <div style="border-top: 1px solid var(--border-color); pt: 1rem; padding-top: 1rem; font-size: 0.8rem; color: var(--text-subtle); display: flex; justify-content: space-between;">
+        {% if can_cancel %}
+            <!-- Panel de Anulación Manual -->
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <strong style="color: var(--danger); font-size: 0.95rem;">Anulación Manual de Orden</strong>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">Podés anular manualmente esta transacción mientras permanezca en estado pendiente.</p>
+                </div>
+                <button type="button" onclick="document.getElementById('cancelOrderModal').style.display='flex'" class="btn btn-danger" style="padding: 0.6rem 1.15rem; font-weight: 700;">
+                    ❌ Anular Orden
+                </button>
+            </div>
+
+            <!-- Modal de Confirmación de Anulación -->
+            <div id="cancelOrderModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(4px); z-index: 999; align-items: center; justify-content: center; padding: 1rem;">
+                <div class="card" style="max-width: 500px; width: 100%; padding: 1.5rem; border: 1px solid rgba(239, 68, 68, 0.4);">
+                    <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--danger); margin-bottom: 0.75rem;">
+                        ⚠️ Confirmar Anulación de Orden
+                    </h3>
+                    <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+                        ¿Estás seguro de que deseas anular la orden <strong>{{ transaction.codigo_referencia }}</strong>? Esta acción no se puede deshacer.
+                    </p>
+                    <form method="post" action="{% url 'transactions:cancel' pk=transaction.pk %}">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 1.25rem;">
+                            <label for="motivo_cancel" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 0.35rem;">
+                                Motivo de anulación (opcional):
+                            </label>
+                            <input type="text" name="motivo" id="motivo_cancel" class="form-input" placeholder="Ej: Cambio de opinión, error en selección de medio de pago..." />
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                            <button type="button" onclick="document.getElementById('cancelOrderModal').style.display='none'" class="btn btn-secondary">
+                                Cancelar
+                            </button>
+                            <button type="submit" class="btn btn-danger" style="font-weight: 700;">
+                                Sí, Anular Orden
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1rem; font-size: 0.8rem; color: var(--text-subtle); display: flex; justify-content: space-between;">
             <span>Operador: {{ transaction.usuario.username|default:"Sistema Automático" }}</span>
             <span>ID Interno: #{{ transaction.id }}</span>
         </div>
@@ -171,4 +234,27 @@
         }
     }
 </style>
+
+<script>
+    {% if transaction.estado == 'PENDIENTE' and remaining_seconds > 0 %}
+        let remainingSeconds = {{ remaining_seconds }};
+        const timerElement = document.getElementById('countdownTimer');
+
+        function updateTimer() {
+            if (remainingSeconds <= 0) {
+                if (timerElement) timerElement.innerText = "00:00 (Expirado)";
+                window.location.reload();
+                return;
+            }
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            const formatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            if (timerElement) timerElement.innerText = formatted;
+            remainingSeconds--;
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+    {% endif %}
+</script>
 {% endblock %}

@@ -388,3 +388,102 @@ class TransactionViewsTest(TransactionTestMixin, TestCase):
         res_json = response.json()
         self.assertTrue(res_json['success'])
         self.assertIn('codigo_referencia', res_json['transaction'])
+
+    def test_is_transaction_expired(self):
+        """is_transaction_expired detecta si pasaron más de 5 minutos desde la creación."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data(
+            token_congelamiento='QTZ-TEST1234'
+        ))
+        self.assertFalse(TransactionService.is_transaction_expired(tx))
+
+        # Simular transcurso del tiempo de 6 minutos (360s)
+        tx.created_at = timezone.now() - timezone.timedelta(seconds=360)
+        tx.save(update_fields=['created_at'])
+
+        self.assertTrue(TransactionService.is_transaction_expired(tx))
+
+    def test_cancel_expired_transactions_batch(self):
+        """cancel_expired_transactions cancela masivamente las órdenes vencidas."""
+        tx_recent = Transaction.objects.create(**self._build_valid_transaction_data())
+        tx_old = Transaction.objects.create(**self._build_valid_transaction_data(
+            token_congelamiento='QTZ-OLD9999'
+        ))
+        tx_old.created_at = timezone.now() - timezone.timedelta(seconds=400)
+        tx_old.save(update_fields=['created_at'])
+
+        count = TransactionService.cancel_expired_transactions()
+        self.assertEqual(count, 1)
+
+        tx_old.refresh_from_db()
+        tx_recent.refresh_from_db()
+
+        self.assertEqual(tx_old.estado, Transaction.Estado.CANCELADA)
+        self.assertEqual(tx_recent.estado, Transaction.Estado.PENDIENTE)
+
+    def test_cancel_transaction_by_customer_success(self):
+        """cancel_transaction_by_customer anula manualmente la orden pendiente."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data())
+        updated_tx = TransactionService.cancel_transaction_by_customer(
+            transaction_id=tx.id,
+            cliente=self.cliente,
+            usuario=self.user,
+            motivo='Anulación voluntaria',
+        )
+
+        self.assertEqual(updated_tx.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('Anulación voluntaria', updated_tx.observaciones)
+
+    def test_cancel_transaction_by_customer_idor_prevention(self):
+        """Falla al intentar cancelar una transacción perteneciente a otro cliente."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=tx.id,
+                cliente=self.cliente,
+            )
+        self.assertIn('cliente', ctx.exception.message_dict)
+
+    def test_cancel_transaction_by_customer_already_completed(self):
+        """Falla si la transacción ya está COMPLETADA."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data(
+            estado=Transaction.Estado.COMPLETADA
+        ))
+
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=tx.id,
+                cliente=self.cliente,
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+    def test_cancel_view_post_success(self):
+        """POST /transactions/<pk>/cancel/ anula la orden y redirige al detalle."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data())
+        url = reverse('transactions:cancel', kwargs={'pk': tx.pk})
+        response = self.client.post(url, {'motivo': 'Prueba cancelación web'})
+
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        self.assertEqual(tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_cancel_api_view_post_success(self):
+        """POST /transactions/api/<pk>/cancel/ anula la orden vía API JSON REST."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data())
+        url = reverse('transactions:api_cancel', kwargs={'pk': tx.pk})
+        payload = {'motivo': 'Prueba API cancel'}
+        response = self.client.post(
+            url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        res_json = response.json()
+        self.assertTrue(res_json['success'])
+        tx.refresh_from_db()
+        self.assertEqual(tx.estado, Transaction.Estado.CANCELADA)
