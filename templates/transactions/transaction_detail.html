@@ -29,7 +29,10 @@
                 Registrada el {{ transaction.created_at|date:"d/m/Y H:i:s" }}
             </p>
         </div>
-        <div style="display: flex; gap: 0.5rem;">
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
+            <a href="{% url 'transactions:receipt' pk=transaction.pk %}" target="_blank" class="btn btn-secondary">
+                🖨️ Imprimir
+            </a>
             <a href="{% url 'transactions:list' %}" class="btn btn-secondary">
                 📋 Mis Transacciones
             </a>

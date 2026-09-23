@@ -237,6 +237,13 @@ class TransactionDetailView(LoginRequiredMixin, DetailView):
         return qs.none()
 
 
+class TransactionReceiptView(TransactionDetailView):
+    """
+    Vista optimizada para impresión / exportación del comprobante de liquidación cambiaria.
+    """
+    template_name = 'transactions/receipt.html'
+
+
 class TransactionListView(LoginRequiredMixin, ListView):
     """
     Vista de listado de transacciones con filtros por estado y tipo de operación.

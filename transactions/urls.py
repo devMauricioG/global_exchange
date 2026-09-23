@@ -9,6 +9,7 @@ from transactions.views import (
     TransactionConfirmView,
     TransactionDetailView,
     TransactionListView,
+    TransactionReceiptView,
 )
 
 app_name = 'transactions'
@@ -18,5 +19,6 @@ urlpatterns = [
     path('create/', TransactionCreateView.as_view(), name='create'),
     path('confirm/', TransactionConfirmView.as_view(), name='confirm'),
     path('<int:pk>/', TransactionDetailView.as_view(), name='detail'),
+    path('<int:pk>/receipt/', TransactionReceiptView.as_view(), name='receipt'),
     path('api/create/', TransactionCreateApiView.as_view(), name='api_create'),
 ]
