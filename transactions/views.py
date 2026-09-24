@@ -20,9 +20,12 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import DetailView, ListView, TemplateView
-
+from django.db.models import Q
+from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date
 from customers.models import Cliente
 from payments.models import PaymentMethod, ReceivingMethod
+from rates.models import Currency
 from rates.services import (
     QuoteFreezeService,
     RateCalculationService,
@@ -274,6 +277,22 @@ class TransactionListView(LoginRequiredMixin, ListView):
         if tipo in dict(Transaction.TipoOperacion.choices):
             qs = qs.filter(tipo_operacion=tipo)
 
+        fecha_desde = self.request.GET.get('fecha_desde', '').strip()
+        if fecha_desde:
+            parsed_date = parse_date(fecha_desde)
+            if parsed_date:
+                qs = qs.filter(created_at__date__gte=parsed_date)
+
+        fecha_hasta = self.request.GET.get('fecha_hasta', '').strip()
+        if fecha_hasta:
+            parsed_date = parse_date(fecha_hasta)
+            if parsed_date:
+                qs = qs.filter(created_at__date__lte=parsed_date)
+
+        moneda = self.request.GET.get('moneda', '').strip()
+        if moneda:
+            qs = qs.filter(Q(base_currency__code__iexact=moneda) | Q(target_currency__code__iexact=moneda))
+
         return qs
 
     def get_context_data(self, **kwargs) -> Dict[str, Any]:
@@ -293,6 +312,10 @@ class TransactionListView(LoginRequiredMixin, ListView):
         context['cancelled_count'] = base_qs.filter(estado=Transaction.Estado.CANCELADA).count()
         context['selected_estado'] = self.request.GET.get('estado', '')
         context['selected_tipo'] = self.request.GET.get('tipo', '')
+        context['selected_fecha_desde'] = self.request.GET.get('fecha_desde', '')
+        context['selected_fecha_hasta'] = self.request.GET.get('fecha_hasta', '')
+        context['selected_moneda'] = self.request.GET.get('moneda', '')
+        context['currencies'] = Currency.objects.filter(is_active=True)
         context['cliente'] = cliente
         return context
 
