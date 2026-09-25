@@ -12,7 +12,7 @@ from django.db import IntegrityError
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .models import Cliente
+from .models import Cliente, CustomerUserAssignment
 
 User = get_user_model()
 
@@ -1092,5 +1092,94 @@ class ActiveCustomerSelectorTests(TestCase):
         self.assertIn('Empresa Beta S.R.L.', content)
         self.assertIn('80022222-2', content)
         self.assertIn(f'/customers/cambiar-activo/{self.cliente_b.id}/', content)
+
+
+class SeedDataCommandTests(TestCase):
+    """
+    Suite de pruebas unitarias para el comando de gestión seed_data (SCRUM-75 / SCRUM-62).
+    """
+
+    def test_seed_data_command_execution(self):
+        """Valida que seed_data pueble correctamente todas las entidades del sistema."""
+        import io
+        from django.core.management import call_command
+        from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
+        from rates.models import Currency, ExchangeRate, OperationLimit, SegmentCommission
+        from transactions.models import Transaction
+
+        out = io.StringIO()
+        call_command('seed_data', stdout=out)
+        output = out.getvalue()
+
+        self.assertIn('Seeding de datos completado exitosamente', output)
+
+        # 1. Usuarios y roles
+        self.assertTrue(User.objects.filter(username='admin', is_superuser=True).exists())
+        self.assertTrue(User.objects.filter(username='operador', is_staff=True).exists())
+        self.assertTrue(User.objects.filter(username='cliente_minorista').exists())
+        self.assertTrue(User.objects.filter(username='cliente_vip').exists())
+
+        # 2. Clientes y asignaciones
+        self.assertEqual(Cliente.objects.count(), 4)
+        self.assertEqual(CustomerUserAssignment.objects.count(), 4)
+
+        # 3. Monedas
+        self.assertEqual(Currency.objects.filter(code__in=['USD', 'PYG', 'EUR', 'BRL', 'ARS', 'GBP']).count(), 6)
+
+        # 4. Tasas de cambio (activas e históricas)
+        self.assertEqual(ExchangeRate.objects.filter(is_active=True).count(), 6)
+        self.assertGreaterEqual(ExchangeRate.objects.filter(is_active=False).count(), 90)
+
+        # 5. Comisiones por segmento
+        self.assertEqual(SegmentCommission.objects.count(), 4)
+
+        # 6. Entidades financieras
+        self.assertGreaterEqual(EntidadFinanciera.objects.count(), 13)
+
+        # 7. Medios de pago y acreditación
+        self.assertGreaterEqual(PaymentMethod.objects.count(), 12)
+        self.assertGreaterEqual(ReceivingMethod.objects.count(), 8)
+
+        # 8. Límites operativos
+        self.assertGreaterEqual(OperationLimit.objects.count(), 10)
+
+        # 9. Transacciones de ejemplo
+        self.assertEqual(Transaction.objects.filter(estado=Transaction.Estado.COMPLETADA).count(), 3)
+        self.assertEqual(Transaction.objects.filter(estado=Transaction.Estado.PENDIENTE).count(), 1)
+        self.assertEqual(Transaction.objects.filter(estado=Transaction.Estado.CANCELADA).count(), 1)
+
+    def test_seed_data_idempotency(self):
+        """Valida que ejecutar seed_data múltiples veces sea idempotente y no duplique registros."""
+        import io
+        from django.core.management import call_command
+        from payments.models import EntidadFinanciera
+        from rates.models import Currency, SegmentCommission
+        from transactions.models import Transaction
+
+        out1 = io.StringIO()
+        call_command('seed_data', stdout=out1)
+
+        out2 = io.StringIO()
+        call_command('seed_data', stdout=out2)
+
+        self.assertEqual(Cliente.objects.count(), 4)
+        self.assertEqual(Currency.objects.count(), 6)
+        self.assertEqual(SegmentCommission.objects.count(), 4)
+        self.assertEqual(EntidadFinanciera.objects.count(), 13)
+        self.assertEqual(Transaction.objects.count(), 5)
+
+    def test_seed_data_reset_option(self):
+        """Valida que la opción --reset limpie las entidades transaccionales antes de sembrar."""
+        import io
+        from django.core.management import call_command
+        from transactions.models import Transaction
+
+        out = io.StringIO()
+        call_command('seed_data', reset=True, stdout=out)
+        output = out.getvalue()
+
+        self.assertIn('Datos previos eliminados para reinicio', output)
+        self.assertEqual(Transaction.objects.count(), 5)
+
 
 
