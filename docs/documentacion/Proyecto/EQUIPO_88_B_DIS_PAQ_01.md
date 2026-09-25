@@ -1,6 +1,6 @@
 # Descripción detallada del diagrama de arquitectura
 
-> Última actualización: SCRUM 57 — incorpora la estructura real de los módulos `rates` y `payments`, y precisa que `comisiones` y `cotizador` pertenecen a `rates`.
+> Última actualización: Hito 5 (SCRUM-85) — incorpora el motor transaccional completo en `apps.transactions` (`TransactionService`, vistas CBV, APIs JSON, expiración a 5 minutos, comprobante de liquidación), la ampliación de `apps.payments` (`EntidadFinanciera`, `ReceivingMethod`, formularios especializados), `apps.rates` (`OperationLimit`, `OperationLimitValidationService`, `QuoteFreezeService`, `currency_filters`) y el comando `seed_data` en `apps.customers`.
 
 ## 1. Identificación general
 
@@ -8,21 +8,22 @@ El documento presenta un diagrama de arquitectura de software para el proyecto *
 
 El diagrama muestra módulos, archivos principales y relaciones de dependencia o comunicación entre ellos. La arquitectura separa responsabilidades de negocio, autenticación, integración externa y configuración global.
 
-> Nota: el PDF está compuesto por una imagen y no contiene texto seleccionable; la descripción se elaboró a partir de la información visible en el diagrama.
+> Nota: el diagrama consolida el diseño estructural del sistema en capas de presentación, dominio, servicios, persistencia e infraestructura.
 
 ## 2. Estructura general
 
-El proyecto se divide visualmente en los siguientes componentes:
+El proyecto se divide modularmente en los siguientes paquetes y aplicaciones:
 
-- `apps.electronic_docs`.
-- `apps.transactions`.
-- `apps.customers`.
-- `apps.cash_register`.
-- `apps.rates`.
-- `apps.authentication`.
-- `global_exchange_core`.
+- `apps.transactions`: Orquestación transaccional cambiaria, cotización congelada, comprobantes y ciclo de vida de operaciones.
+- `apps.rates`: Parámetros financieros, divisas, tasas de cambio, comisiones por segmento, cotizador, límites operativos y filtros de presentación.
+- `apps.payments`: Catálogo de entidades financieras, medios de pago del cliente y medios de recepción/cobro para acreditaciones.
+- `apps.customers`: Gestión de clientes, multi-representación N:M, resolución de cliente activo y comando de inicialización (`seed_data`).
+- `apps.cash_register`: Gestión de sesiones de caja, arqueo y cierre operativo.
+- `apps.electronic_docs`: Gestión de comprobantes electrónicos y conector fiscal SIFEN/DNIT.
+- `apps.authentication`: Autenticación OIDC vía Keycloak, validación JWT Bearer y control de roles RBAC.
+- `global_exchange_core`: Configuración multientorno, enrutamiento raíz y servicios transversales (Sphinx Docs).
 
-La aplicación `apps.transactions` aparece como el punto central de interacción del dominio operativo. Se relaciona con clientes, cajas registradoras y tasas de cambio, mientras que también recibe información o servicios asociados a documentos electrónicos.
+La aplicación `apps.transactions` opera como el orquestador principal del dominio financiero, coordinando clientes, tasas congeladas, límites operativos, medios de pago/cobro y sesiones de caja.
 
 ## 3. Aplicación `apps.electronic_docs`
 
@@ -31,52 +32,66 @@ Este módulo concentra la gestión de documentos electrónicos y la comunicació
 ### Componentes
 
 - `models.py (ElectronicDocument)`: define el modelo de datos utilizado para representar documentos electrónicos.
-- `sifen_client.py (API SIFEN/DNIT)`: encapsula la integración con la API de SIFEN/DNIT. Su responsabilidad probable es enviar, consultar o procesar documentos electrónicos frente al servicio tributario externo.
+- `sifen_client.py (API SIFEN/DNIT)`: encapsula la integración con la API de SIFEN/DNIT. Su responsabilidad es preparar el payload fiscal, firmar y enviar/consultar documentos electrónicos ante la administración tributaria.
 
 ### Relación principal
 
-`apps.electronic_docs` se conecta con `apps.transactions`, lo que indica que las transacciones pueden generar, asociar o requerir documentos electrónicos.
+`apps.electronic_docs` se conecta con `apps.transactions`, permitiendo que las transacciones en estado `CONFIRMADA` generen o vinculen sus comprobantes electrónicos oficiales.
 
 ## 4. Aplicación `apps.transactions`
 
-Este módulo representa el núcleo del flujo comercial o financiero de la aplicación.
+Este módulo representa el núcleo operativo y de ejecución transaccional del sistema Global Exchange.
 
 ### Componentes
 
-- `models.py (Transaction)`: define la entidad persistente que representa una transacción.
-- `views.py (Compra/Venta, Cotizador)`: contiene las vistas relacionadas con operaciones de compra, venta y cotización.
+- `models.py (Transaction)`:
+  - Entidad persistente central que registra operaciones cambiarias (`COMPRA` o `VENTA`).
+  - Mantiene claves foráneas hacia `Customer` (cliente imputado), `Currency` (origen y destino), `PaymentMethod` (medio de pago utilizado), `ReceivingMethod` (medio de cobro para acreditación) y `User` (operador/creador).
+  - Gestiona el ciclo de vida mediante estados formales: `PENDIENTE`, `CONFIRMADA`, `EXPIRADA`, `CANCELADA`.
+  - Almacena montos origen y destino con tipo `Decimal`, tasa de cambio aplicada, comisión por segmento congelada, timestamp de creación, confirmación o cancelación, motivo de anulación y `quote_expires_at` (ventana estricta de 5 minutos).
+- `services.py (TransactionService)`:
+  - Desacopla la lógica de negocio y las transiciones de estado de las vistas.
+  - Orquesta la cotización congelada mediante `QuoteFreezeService` y valida los importes contra topes en `OperationLimitValidationService`.
+  - `create_transaction_order(...)`: crea la transacción en estado `PENDIENTE` congelando la cotización a 5 minutos.
+  - `confirm_transaction(transaction, user)`: verifica que no haya expirado (`now <= quote_expires_at`) ni cambiado de estado, transiciona atómicamente a `CONFIRMADA` y sella `confirmed_at`.
+  - `cancel_transaction(transaction, user, reason)`: anula una orden pendiente registrando el operador y motivo.
+  - `check_and_expire_transaction(transaction)`: evalúa la ventana temporal y marca `EXPIRADA` si transcurrieron los 300 segundos reglamentarios.
+- `forms.py (TransactionOrderForm)`:
+  - Formulario dinámico que valida las divisas involucradas, montos contra los límites permitidos, y filtra en tiempo de renderizado los medios de pago y cobro pertenecientes exclusivamente al cliente activo.
+- `views.py (Class-Based Views)`:
+  - `TransactionListView`: listado paginado con filtros por rango de fechas, moneda y estado para el cliente activo.
+  - `TransactionCreateView`: formulario guiado para seleccionar par de divisas, monto y medios de pago/cobro.
+  - `TransactionConfirmView`: pantalla de confirmación con cuenta regresiva en tiempo real (countdown a 5 minutos), visualización del desglose financiero y botón de ejecución final.
+  - `TransactionDetailView`: ficha técnica completa de la transacción y su trazabilidad.
+  - `TransactionCancelView`: cancelación explícita por el usuario con registro de motivo.
+  - `TransactionReceiptView`: comprobante oficial descargable e imprimible con diseño profesional, sellos de tiempo y firma digital simulada.
+  - `TransactionCreateApiView` y `TransactionCancelApiView`: endpoints REST JSON para clientes móviles o integraciones automatizadas.
+- `urls.py`: mapeo de rutas `/transactions/`.
 
 ### Relaciones
 
-Desde `apps.transactions` se observan conexiones hacia:
-
-- `apps.customers`, para asociar las operaciones con clientes.
-- `apps.cash_register`, para registrar o controlar operaciones de caja.
-- `apps.rates`, para utilizar tasas o tipos de cambio.
-- `apps.electronic_docs`, para vincular transacciones con documentos electrónicos.
-
-Por su posición en el diagrama, este módulo coordina buena parte del proceso de negocio.
+- **Con `apps.customers`**: resuelve el cliente activo y valida que los medios pertenezcan a dicho cliente.
+- **Con `apps.rates`**: consume `QuoteFreezeService` para cotizar y congelar la tasa, `OperationLimitValidationService` para verificar límites operativos, y `currency_filters` para renderizado en templates.
+- **Con `apps.payments`**: valida y vincula las instancias de `PaymentMethod` y `ReceivingMethod`.
+- **Con `apps.electronic_docs`**: provee transacciones confirmadas para facturación fiscal.
 
 ## 5. Aplicación `apps.customers`
 
-Este módulo administra clientes, la multi-representación de usuarios y la contextualización del cliente activo para las operaciones del sistema.
+Este módulo administra clientes, la multi-representación de usuarios, la contextualización del cliente activo y utilitarios de datos.
 
 ### Componentes
 
 - `models.py (Customer, CustomerUserAssignment)`:
   - `Customer`: entidad que representa a la persona física o jurídica (Minorista, Mayorista, Corporativo, VIP).
-  - `CustomerUserAssignment`: entidad asociativa intermedia que materializa la relación N:M entre `User` y `Customer`. Registra `user`, `customer`, `is_primary_representative`, `assigned_at`, `is_active` y el rol corporativo, posibilitando que un usuario opere en nombre de varios clientes y que una empresa tenga múltiples representantes autorizados.
-- `middlewares.py (ActiveCustomerMiddleware)`: intercepta cada petición HTTP, evalúa el `active_customer_id` en la sesión del usuario, valida que exista una asignación activa en `CustomerUserAssignment` e inyecta la instancia `request.active_customer`. Aplica selección automática por defecto (representante principal) si no hay selección explícita.
-- `context_processors.py (active_customer_context)`: inyecta en el contexto global de las plantillas el cliente activo actual (`active_customer`) y la lista de clientes disponibles (`user_assigned_customers`) para alimentar el selector dinámico del navbar.
+  - `CustomerUserAssignment`: entidad asociativa N:M entre `User` y `Customer`. Registra `user`, `customer`, `is_primary_representative`, `assigned_at`, `is_active` y rol corporativo.
+- `middlewares.py (ActiveCustomerMiddleware)`: intercepta cada petición HTTP, evalúa el `active_customer_id` en la sesión, valida la asignación activa e inyecta `request.active_customer`.
+- `context_processors.py (active_customer_context)`: inyecta en el contexto global de las plantillas el cliente activo y la lista de representados para el selector del navbar.
 - `views.py (Customer Management & Switch Active)`:
-  - Vistas CBVs para el ciclo de vida del cliente (listado con filtros por segmento, creación, detalle, edición y baja).
-  - `CustomerSwitchActiveView`: endpoint seguro que valida permisos de asignación activa y actualiza el cliente activo en sesión, retornando `HTTP 403 Forbidden` si un usuario intenta operar un cliente no asignado.
-
-### Relaciones del paquete
-
-- **Con `apps.authentication`**: vincula identidades de usuarios autenticados con sus clientes representados a través de `CustomerUserAssignment`.
-- **Con `global_exchange_core`**: registra el middleware y el context processor en el pipeline de ejecución de Django.
-- **Con `apps.transactions`**: suministra el cliente activo bajo el cual se registran y facturan las cotizaciones y operaciones cambiarias.
+  - Vistas CBVs para ciclo de vida de clientes.
+  - `CustomerSwitchActiveView`: alternancia atómica y segura del cliente activo en sesión.
+- `management/commands/seed_data.py`:
+  - Comando administrativo para poblamiento y verificación idempotente del sistema.
+  - Carga monedas base (`USD`, `EUR`, `BRL`, `ARS`, `PYG`), catálogo de entidades financieras (`ITAU`, `BNF`, `CONTINENTAL`, `TIGO_MONEY`, etc.), tasas de cambio vigentes, comisiones por segmento, límites operativos (`OperationLimit`) y clientes de prueba con sus asignaciones.
 
 ## 6. Aplicación `apps.cash_register`
 
@@ -89,86 +104,64 @@ Este módulo gestiona la apertura, arqueo y cierre de cajas registradoras.
 
 ### Relaciones
 
-`apps.cash_register` se relaciona con `apps.transactions`, dado que las operaciones de compra y venta deben afectar una caja o quedar asociadas a ella. También se conecta con `apps.authentication`, probablemente para validar el usuario responsable de cada operación y aplicar permisos.
+`apps.cash_register` se relaciona con `apps.transactions`, dado que las operaciones presenciales afectan una caja o quedan asociadas a ella.
 
 ## 7. Aplicación `apps.rates`
 
-Gestiona parámetros financieros y simulaciones: monedas, tasas de cambio, histórico, comisiones por segmento y cotizador neto.
+Gestiona parámetros financieros, divisas, tasas de cambio, histórico, comisiones por segmento, cotizador, límites operativos y formateadores.
 
 ### Componentes
 
 | Componente | Responsabilidad |
 | --- | --- |
-| `models.py` | Define `Currency`, `ExchangeRate` y `SegmentCommission` con validaciones financieras. |
-| `services.py` | Resuelve el cliente activo, consulta la tasa vigente y calcula la cotización neta. |
-| `forms.py` | Valida datos de monedas, tasas, comisiones y parámetros del cotizador. |
-| `views.py` | Implementa CRUD, tablero, cotizador y endpoints JSON. |
+| `models.py` | Define `Currency`, `ExchangeRate`, `SegmentCommission` y `OperationLimit` (mínimos y máximos por segmento y moneda). |
+| `services.py` | Contiene `RateCalculationService` (cálculo de cotización neta), `OperationLimitValidationService` (validación de importes mínimos/máximos) y `QuoteFreezeService` (generación de cotizaciones congeladas con vencimiento a 5 minutos). |
+| `forms.py` | Valida datos de monedas, tasas, comisiones, límites y parámetros de cotización. |
+| `views.py` | Implementa CRUD, tablero, cotizador web y endpoints JSON. |
+| `templatetags/currency_filters.py` | Etiquetas y filtros para presentación estandarizada de importes (`currency_format`), tasas (`exchange_rate_format`) y porcentajes (`percentage_format`). |
 | `urls.py` | Expone rutas bajo `/rates/`. |
-| `admin.py` | Facilita la parametrización administrativa y asigna el usuario que actualiza tasas. |
-| `tests.py` | Cubre modelo, servicio, formularios, vistas y APIs. |
-
-### Submódulo conceptual: comisiones
-
-No existe como aplicación Django separada. Se implementa mediante `SegmentCommission` y las vistas `SegmentCommission*` dentro de `rates`. Depende de `customers.Cliente.Segmentacion` para obtener los segmentos autorizados.
-
-### Submódulo conceptual: cotizador
-
-Tampoco es una aplicación independiente. Usa `RateCalculationService`, la vista `RateCalculatorView` y `CalculateNetRateApiView`. Recibe datos de `ExchangeRate` y `SegmentCommission`, pero no persiste una transacción ni cambia una tasa.
+| `tests.py` | Cubre modelos, servicios, filtros y vistas. |
 
 ### Relaciones
 
-- **Con `apps.customers`**: `SegmentCommission` usa las opciones de segmentación de `Cliente`; `RateCalculationService` resuelve el cliente activo y el segmento comercial.
-- **Con `apps.transactions`**: las tasas de cambio y el resultado del cotizador son utilizados durante la cotización, compra o venta.
+- **Con `apps.customers`**: resuelve segmento comercial y asigna límites según categoría del cliente.
+- **Con `apps.transactions`**: suministra tasas congeladas y validación de límites para la creación de órdenes de compra/venta.
 
 ## 7b. Aplicación `apps.payments`
 
-Administra medios de pago de los clientes sin ejecutar la liquidación financiera. La propiedad del recurso se resuelve con el cliente activo y protege las vistas contra acceso horizontal no autorizado.
+Administra las entidades del sistema financiero, los medios de pago del cliente (débito/transferencia saliente) y los medios de recepción o cobro (crédito/transferencia entrante).
 
 ### Componentes
 
 | Componente | Responsabilidad |
 | --- | --- |
-| `models.py` | Define `PaymentMethod` y garantiza un medio predeterminado activo por cliente. |
-| `forms.py` | Valida datos obligatorios y la consistencia entre predeterminado y activo. |
-| `views.py` | Ofrece CRUD web, acciones de estado y API JSON. |
-| `urls.py` | Expone rutas bajo `/payments/`. |
-| `tests.py` | Verifica integridad, formularios, aislamiento por cliente e interfaces API. |
+| `models.py` | Define `EntidadFinanciera` (catálogo oficial con tipo, código y RUC), `PaymentMethod` (medios de pago del cliente) y `ReceivingMethod` (cuentas y billeteras de destino para cobro/acreditación). |
+| `forms.py` | Validadores especializados: `ReceivingMethodForm`, `BankTransferForm`, `CreditDebitCardForm`, `DigitalWalletForm` y `CashBranchForm`. |
+| `views.py` | Vistas CBVs para CRUD de medios de pago y de medios de recepción, cambio de estado y endpoints API JSON. |
+| `urls.py` | Expone rutas bajo `/payments/` y `/payments/receiving-methods/`. |
+| `tests.py` | Cobertura de entidades, medios de cobro, aislamiento por cliente y prevención IDOR. |
 
 ### Relaciones
 
-- **Con `apps.customers`**: `PaymentMethod` pertenece a un cliente; las vistas filtran por cliente activo en cada operación.
-- **Con `global_exchange_core`**: el paquete `config` incluye las rutas de `payments`.
-
-> **Nota:** No se permite que `payments` dependa del motor de cotización para su CRUD actual. Si una transacción futura necesita ambos paquetes, el orquestador debe ubicarse en `transactions` para evitar acoplamiento circular.
+- **Con `apps.customers`**: cada medio de pago y de cobro pertenece estrictamente a un `Customer` y se filtra por el cliente activo.
+- **Con `apps.transactions`**: provee los medios origen y destino para liquidación de la transacción.
 
 ## 8. Aplicación `apps.authentication`
 
-Este módulo centraliza la autenticación, autorización y resolución de privilegios basada en roles JWT.
+Centraliza autenticación OIDC, verificación de tokens JWT y autorización basada en roles (RBAC).
 
 ### Componentes
 
-- `middlewares.py (JWT Bearer Validation)`: intercepta solicitudes API y valida tokens JWT enviados mediante esquema Bearer.
-- `backends.py (Keycloak OIDC)`: integra el sistema con Keycloak mediante OpenID Connect, gestionando la sincronización de identidades y claims del usuario.
-- `context_processors.py (auth_roles)`: inyecta en plantillas los roles extraídos del token JWT (`is_admin`, `is_operator`, `is_auditor`, etc.).
-- `templatetags/auth_tags.py`: etiquetas personalizadas (`has_role`, `has_any_role`) para renderizado condicional de componentes en `templates/base.html`.
-
-### Relación con el núcleo global
-
-`apps.authentication` se comunica con `global_exchange_core`, proveyendo los backends de autenticación y los middlewares de seguridad.
+- `middlewares.py (JWT Bearer Validation)`: intercepta solicitudes API y valida tokens JWT.
+- `backends.py (Keycloak OIDC)`: integra el sistema con Keycloak mediante OpenID Connect.
+- `context_processors.py (auth_roles)`: inyecta en plantillas los roles de usuario (`is_admin`, `is_operator`, `is_auditor`, etc.).
+- `templatetags/auth_tags.py`: etiquetas personalizadas (`has_role`, `has_any_role`) para renderizado condicional.
 
 ## 9. Paquete `global_exchange_core`
 
-Este paquete contiene la configuración transversal del proyecto Django y servicios globales de plataforma.
+Contiene la configuración transversal del proyecto Django y servicios globales de plataforma.
 
-### Componentes
-
-- `settings.py (Configuración Multientorno)`:
-  - `base.py`: configuración común, registro de aplicaciones, middlewares y context processors.
-  - `dev.py` / `prod.py`: entornos de persistencia con PostgreSQL y Keycloak.
-  - `test.py`: entorno optimizado in-memory SQLite para ejecución rápida de tests unitarios y cobertura.
-- `urls.py (Root Routing)`: define el enrutamiento raíz conectando las rutas de autenticación, clientes, transacciones y documentación.
-- `views.py (ServeSphinxDocsView)`: vista especializada para servir de manera integrada y protegida la documentación técnica generada por Sphinx (`docs/sphinx/build/html/`), con verificación de tipos MIME y mitigación de Path Traversal.
-- `wsgi.py / asgi.py`: puntos de entrada para servidores de producción (Gunicorn / Uvicorn).
+### Diagrama de Paquetes y Dependencias UML
 
 ```mermaid
 graph TD
@@ -194,34 +187,47 @@ graph TD
         ActiveMiddleware[middlewares.py - ActiveCustomerMiddleware]
         ActiveContext[context_processors.py - active_customer]
         CustomerViews[views.py - CRUD & SwitchActive]
+        SeedCommand[management/commands/seed_data.py]
     end
 
     subgraph RatesApp [apps.rates]
-        RatesModels[models.py - Currency ExchangeRate SegmentCommission]
-        RatesServices[services.py - RateCalculationService]
-        RatesViews[views.py - CRUD Dashboard Cotizador API]
+        RatesModels[models.py - Currency, ExchangeRate, SegmentCommission, OperationLimit]
+        RatesServices[services.py - RateCalc, QuoteFreeze, LimitValidation]
+        CurrencyFilters[templatetags/currency_filters.py]
+        RatesViews[views.py - CRUD, Cotizador, Dashboard, API]
     end
 
     subgraph PaymentsApp [apps.payments]
-        PaymentsModels[models.py - PaymentMethod]
-        PaymentsViews[views.py - CRUD & API JSON]
+        FinancialEntities[models.py - EntidadFinanciera]
+        PaymentMethods[models.py - PaymentMethod]
+        ReceivingMethods[models.py - ReceivingMethod]
+        PaymentForms[forms.py - Formularios Especializados]
+        PaymentsViews[views.py - CRUD Medios Pago/Cobro & API]
     end
 
-    subgraph DomainApps [Módulos de Dominio Operativo]
-        Transactions[apps.transactions]
-        CashRegister[apps.cash_register]
-        ElectronicDocs[apps.electronic_docs]
+    subgraph TransactionsApp [apps.transactions]
+        TxModel[models.py - Transaction]
+        TxService[services.py - TransactionService]
+        TxForm[forms.py - TransactionOrderForm]
+        TxViews[views.py - List, Create, Confirm, Detail, Cancel, Receipt]
+        TxAPI[views.py - CreateApi, CancelApi]
     end
 
-    subgraph TemplatesLayer [Plantillas]
-        Templates[templates - rates y payments]
+    subgraph CashRegisterApp [apps.cash_register]
+        CashRegisterModel[models.py - CashRegister]
+        CashRegisterViews[views.py - Apertura, Arqueo, Cierre]
     end
 
-    subgraph SphinxDocs [Documentación Sphinx]
+    subgraph ElectronicDocsApp [apps.electronic_docs]
+        DocModel[models.py - ElectronicDocument]
+        SifenClient[sifen_client.py - API SIFEN/DNIT]
+    end
+
+    subgraph SphinxDocs [Documentación Técnica]
         HTMLTree[docs/sphinx/build/html/]
     end
 
-    DB[(Base de datos)]
+    DB[(Base de datos PostgreSQL)]
 
     Browser --> RootURLs
     RootURLs --> DocsView
@@ -230,91 +236,127 @@ graph TD
     RootURLs --> CustomerApp
     RootURLs --> RatesApp
     RootURLs --> PaymentsApp
-    RootURLs --> DomainApps
+    RootURLs --> TransactionsApp
+    RootURLs --> CashRegisterApp
 
     ActiveMiddleware --> AssignmentModel
     ActiveMiddleware --> CustomerModel
-    CustomerViews --> AssignmentModel
     CustomerViews --> CustomerModel
-    DomainApps --> CustomerModel
+
+    TxService --> TxModel
+    TxViews --> TxService
+    TxViews --> TxForm
+    TxAPI --> TxService
+
+    TxService --> RatesServices
+    TxService --> CustomerModel
+    TxService --> PaymentMethods
+    TxService --> ReceivingMethods
 
     RatesServices --> RatesModels
     RatesServices --> CustomerModel
-    RatesViews --> RatesServices
-    RatesViews --> Templates
-    PaymentsViews --> Templates
+
+    PaymentsViews --> PaymentMethods
+    PaymentsViews --> ReceivingMethods
+    PaymentsViews --> FinancialEntities
+    PaymentMethods --> FinancialEntities
+    ReceivingMethods --> FinancialEntities
+    PaymentMethods --> CustomerModel
+    ReceivingMethods --> CustomerModel
+
+    TxModel --> ElectronicDocsApp
+    TxModel --> CashRegisterApp
+
     RatesModels --> DB
     PaymentsModels --> DB
+    FinancialEntities --> DB
+    ReceivingMethods --> DB
     CustomerModel --> DB
-    AuthApp --> CustomerApp
-    CustomerApp --> PaymentsApp
-    CustomerApp --> RatesApp
+    TxModel --> DB
+    CashRegisterModel --> DB
+    DocModel --> DB
+
+    SeedCommand --> RatesModels
+    SeedCommand --> FinancialEntities
+    SeedCommand --> CustomerModel
+    SeedCommand --> AssignmentModel
 ```
 
 ## 10. Dependencias permitidas entre paquetes
 
 | Origen | Destino | Motivo |
 | --- | --- | --- |
-| `rates.models` | `customers.models` | `SegmentCommission` usa las opciones de segmentación de `Cliente`. |
-| `rates.services` | `customers.models` | Resuelve el cliente activo y el segmento comercial. |
-| `rates.views` | `rates.services` | Delega la matemática de cotización al servicio. |
-| `payments.models` | `customers.models` | `PaymentMethod` pertenece a un cliente. |
-| `payments.views` | `customers` | Filtra por cliente activo en cada operación. |
-| `config` | `rates`, `payments` | Incluye rutas de ambas aplicaciones. |
+| `transactions.services` | `rates.services` | Consume `QuoteFreezeService` y `OperationLimitValidationService`. |
+| `transactions.services` | `customers.models` | Asocia la transacción al cliente activo. |
+| `transactions.services` | `payments.models` | Valida y vincula `PaymentMethod` y `ReceivingMethod`. |
+| `transactions.views` | `transactions.services` | Delega toda la lógica de negocio y transiciones de estado al servicio. |
+| `rates.models` | `customers.models` | `SegmentCommission` y `OperationLimit` utilizan la segmentación de `Customer`. |
+| `rates.services` | `customers.models` | Resuelve el cliente activo y su segmento para cotizar y aplicar límites. |
+| `payments.models` | `customers.models` | `PaymentMethod` y `ReceivingMethod` pertenecen a un `Customer`. |
+| `payments.models` | `payments.models.EntidadFinanciera` | Relación foránea para banco o billetera emisora/receptora. |
+| `payments.views` | `customers` | Filtra por cliente activo previniendo vulnerabilidades IDOR. |
+| `customers.management` | `rates`, `payments`, `customers` | `seed_data` inicializa y valida el catálogo maestro de todo el sistema. |
+| `config` | Todos los módulos | Enrutamiento raíz y settings globales. |
 
 ## 11. Interfaces expuestas
 
-| Paquete | Interfaz | Propósito |
+| Paquete | Interfaz / Ruta | Propósito |
 | --- | --- | --- |
-| `rates` | `/rates/calculator/` | Cotizador web autenticado. |
+| `transactions` | `/transactions/` | Listado paginado de transacciones del cliente activo. |
+| `transactions` | `/transactions/create/` | Formulario web de solicitud de compra/venta con validaciones. |
+| `transactions` | `/transactions/<uuid:pk>/confirm/` | Pantalla resumen de confirmación con temporizador regresivo de 5 min. |
+| `transactions` | `/transactions/<uuid:pk>/` | Ficha técnica y detalle del estado de la transacción. |
+| `transactions` | `/transactions/<uuid:pk>/receipt/` | Comprobante oficial de liquidación con diseño imprimible/PDF. |
+| `transactions` | `/transactions/<uuid:pk>/cancel/` | Cancelación controlada de la transacción pendiente. |
+| `transactions` | `/transactions/api/create/` | Endpoint REST JSON para creación de órdenes de cambio. |
+| `transactions` | `/transactions/api/<uuid:pk>/cancel/` | Endpoint REST JSON para cancelación o reporte de expiración. |
+| `rates` | `/rates/calculator/` | Cotizador web interactivo con segmento del cliente activo. |
 | `rates` | `/rates/api/calculate/` | Cálculo JSON por GET o POST. |
-| `rates` | `/rates/api/commissions/` | Lista de reglas de comisión. |
-| `rates` | `/rates/api/commissions/<segment>/` | Detalle de una regla por segmento. |
-| `rates` | `/rates/dashboard/` y `/rates/api/history/` | Visualización e historial de cotizaciones. |
-| `payments` | `/payments/` | Gestión web de medios de pago. |
-| `payments` | `/payments/api/` y `/payments/api/<pk>/` | API JSON de medios de pago. |
+| `rates` | `/rates/api/commissions/` | Consulta y detalle de reglas de comisión. |
+| `rates` | `/rates/dashboard/` y `/rates/api/history/` | Tablero de monitoreo e historial de cotizaciones. |
+| `payments` | `/payments/` | Gestión web de medios de pago del cliente. |
+| `payments` | `/payments/receiving-methods/` | Gestión web de medios de cobro/recepción del cliente. |
+| `payments` | `/payments/api/` | API JSON de medios de pago. |
+| `customers` | `/customers/switch-active/` | Endpoint seguro para alternancia del cliente activo en sesión. |
 
-## 12. Flujo funcional inferido
+## 12. Flujo funcional transaccional completo
 
-El flujo general del sistema incorpora la multi-representación, la consulta técnica y la interacción entre `rates` y `payments`:
+El flujo integral del sistema Global Exchange en el Hito 5 opera de la siguiente manera:
 
-1. **Autenticación e Identidad:** El usuario inicia sesión vía Keycloak OIDC. El backend valida el token JWT y extrae los roles y el UUID (`sub`).
-2. **Resolución de Cliente Activo:**
-   - `ActiveCustomerMiddleware` verifica las asignaciones en `CustomerUserAssignment`.
-   - Si el usuario representa a varios clientes, se inyecta la lista de representados en el selector del navbar (`base.html`).
-   - El usuario puede alternar de cliente en cualquier momento mediante `CustomerSwitchActiveView`, actualizando la sesión de forma atómica.
-3. **Cotización y parametrización (`rates`):** El cotizador obtiene el segmento del cliente activo y solicita a `rates.models` la tasa vigente y la regla de comisión aplicable. `RateCalculationService` entrega un resultado informativo a la vista o API de `rates`.
-4. **Medios de pago (`payments`):** De forma independiente, el mismo cliente puede registrar o elegir un medio de pago para una futura liquidación.
-5. **Operativa Comercial Contextualizada:** Las compras, ventas y cotizaciones en `apps.transactions` se imputan automáticamente al cliente activo en la sesión.
-6. **Futuro módulo transaccional:** Un módulo `transactions` posterior podrá usar el resultado confirmado y un medio de pago elegido sin alterar los paquetes de parametrización.
-7. **Acceso a Documentación Técnica:** A través del menú superior, los usuarios autorizados o desarrolladores pueden acceder a `/docs/`, donde `ServeSphinxDocsView` sirve los documentos HTML autogenerados.
+1. **Autenticación e Identidad:** El operador o cliente inicia sesión vía Keycloak OIDC. El backend valida el token JWT y extrae los roles y el UUID (`sub`).
+2. **Resolución de Cliente Activo:** `ActiveCustomerMiddleware` verifica las asignaciones en `CustomerUserAssignment`. Si el usuario representa a múltiples clientes, puede alternar activamente mediante `CustomerSwitchActiveView`.
+3. **Parametrización y Sembrado (`seed_data`):** En entornos iniciales o despliegues, `seed_data` garantiza la existencia de divisas, bancos, tasas de cambio, comisiones y límites operativos.
+4. **Configuración de Medios de Pago y Cobro:** El cliente registra sus medios de pago (para entregar fondos) y sus medios de recepción (para recibir fondos convertidos) en `apps.payments`, validados contra el catálogo de `EntidadFinanciera`.
+5. **Solicitud de Transacción (`TransactionCreateView`):**
+   - El cliente define la operación (`COMPRA` o `VENTA`), par de monedas y monto.
+   - `OperationLimitValidationService` valida que el monto cumpla con los límites mínimos y máximos para el segmento y moneda.
+   - `QuoteFreezeService` calcula la cotización neta y congela la tasa por exactamente 300 segundos (`quote_expires_at = now + 5 min`).
+   - Se crea la instancia `Transaction` en estado `PENDIENTE`.
+6. **Confirmación con Cuenta Regresiva (`TransactionConfirmView`):**
+   - La pantalla muestra el desglose completo y un contador regresivo en JavaScript.
+   - Si el cliente confirma dentro de los 5 minutos, `TransactionService.confirm_transaction()` valida la ventana temporal y transiciona a estado `CONFIRMADA`.
+   - Si transcurren los 5 minutos sin confirmar, el sistema o la verificación reactiva transiciona la orden a estado `EXPIRADA`.
+   - El cliente también puede desistir voluntariamente mediante `TransactionCancelView`, registrando el motivo y marcando estado `CANCELADA`.
+7. **Emisión de Comprobante (`TransactionReceiptView`):** Una transacción confirmada genera un comprobante oficial de liquidación con código de operación, desglose de comisiones, tipo de cambio aplicado, sellos temporales y datos del cliente y entidad receptora.
 
 ## 13. Responsabilidades por capa
 
-| Área | Componentes Clave | Responsabilidad |
+| Capa / Módulo | Componentes Clave | Responsabilidad |
 | --- | --- | --- |
-| **Multi-Representación** | `CustomerUserAssignment`, `ActiveCustomerMiddleware` | Gestionar relaciones N:M usuario-cliente y mantener el cliente activo en sesión. |
-| **Modelos de Dominio** | `Customer`, `Transaction`, `CashRegister`, `ExchangeRate`, `Currency`, `SegmentCommission`, `PaymentMethod`, `ElectronicDocument` | Persistir entidades de negocio y reglas de consistencia de datos. |
-| **Vistas e Interfaces** | `CustomerViews`, `CustomerSwitchActiveView`, `RatesViews`, `PaymentsViews`, `base.html` | Exponer interfaces responsivas, selectores dinámicos y endpoints REST/JSON. |
-| **Servicios de Dominio** | `RateCalculationService` | Encapsular lógica de cálculo de cotización neta desacoplada de vistas. |
-| **Documentación Integrada** | `ServeSphinxDocsView`, `docs/sphinx/` | Servir la documentación técnica del código de forma segura y accesible. |
-| **Seguridad y Roles** | `Keycloak OIDC`, `auth_roles`, `JWT Bearer` | Centralizar identidades y gobernar permisos por rol en backend y frontend. |
-| **Configuración y Rutas** | `global_exchange_core` | Coordinar settings por ambiente (dev/prod/test) y resolver el árbol de URLs. |
-| **Integraciones Externas** | `sifen_client.py`, `Keycloak OIDC` | Comunicarse con servicios tributarios (SIFEN/DNIT) y servidor IAM. |
-| **Despliegue y Ejecución** | `wsgi.py`, `asgi.py`, `Docker` | Proveer puntos de entrada para servidores WSGI/ASGI y orquestación. |
+| **Orquestación Transaccional** | `Transaction`, `TransactionService`, `TransactionOrderForm` | Controlar el ciclo de vida, congelamiento temporal a 5 min y validación de reglas de negocio cambiario. |
+| **Financiera y Límites** | `Currency`, `ExchangeRate`, `SegmentCommission`, `OperationLimit`, `LimitValidationService` | Modelar monedas, tasas, diferenciales por segmento y topes de operación. |
+| **Medios de Pago y Cobro** | `EntidadFinanciera`, `PaymentMethod`, `ReceivingMethod`, Formularios de Medios | Administrar catálogo bancario y cuentas de origen y destino sin acoplamiento al motor de cambio. |
+| **Multi-Representación** | `Customer`, `CustomerUserAssignment`, `ActiveCustomerMiddleware` | Modelar personería de clientes y garantizar imputación estricta de cada operación al cliente en sesión. |
+| **Seguridad y Autorización** | `Keycloak OIDC`, `ActiveCustomerMiddleware`, defensas anti-IDOR | Prevenir accesos indebidos a transacciones o medios ajenos al cliente activo. |
+| **Documentación e Infraestructura** | `ServeSphinxDocsView`, `seed_data`, `base/dev/prod/test settings` | Despliegue reproducible, inicialización de datos y documentación técnica integrada. |
 
 ## 14. Observaciones de arquitectura
 
-- La separación en aplicaciones Django favorece la modularidad y delimita las responsabilidades del dominio.
-- `apps.transactions` actúa como coordinador de los principales procesos operativos.
-- `apps.rates` consolida monedas, tasas, comisiones y cotizador en un único paquete con separación interna (models/services/views), evitando aplicaciones Django fragmentadas.
-- `apps.payments` gestiona medios de pago de forma independiente, sin acoplamiento al motor de cotización.
-- La capa de servicios (`RateCalculationService`) desacopla la lógica de negocio de las vistas, facilitando pruebas unitarias y reutilización.
-- La autenticación está desacoplada de las aplicaciones de negocio mediante middleware y backend propios.
-- Keycloak proporciona un mecanismo centralizado de identidad, mientras que JWT permite proteger las solicitudes de la API.
-- La integración con SIFEN/DNIT está aislada en un cliente específico, lo que facilita el mantenimiento y las pruebas.
-- La presencia simultánea de WSGI y ASGI permite soportar despliegues tradicionales y escenarios compatibles con ejecución asíncrona.
+- **Desacoplamiento Estricto:** `apps.rates` y `apps.payments` no conocen ni importan a `apps.transactions`. Es `apps.transactions` quien actúa como orquestador consumiendo servicios de ambos módulos, respetando el principio de inversión de dependencias y evitando ciclos de importación.
+- **Inmutabilidad de la Cotización:** La ventana de 5 minutos protege tanto al cliente como a la entidad contra la volatilidad del mercado, garantizando que el tipo de cambio pactado en `PENDIENTE` no sufra alteraciones durante la confirmación.
+- **Trazabilidad y No Repudio:** Toda transición de estado (`CONFIRMADA`, `EXPIRADA`, `CANCELADA`) registra marcas temporales (`confirmed_at`, `quote_expires_at`), usuario responsable y motivos de anulación.
+- **Prevención IDOR Horizontal:** Todas las vistas y servicios filtran explícitamente los recursos por `request.active_customer`, impidiendo que un usuario con sesión abierta acceda a transacciones, cuentas o medios de otro cliente.
 
 ## 15. Conclusión
 
-El diagrama describe una arquitectura Django modular para una plataforma de intercambio o gestión financiera denominada **Global Exchange**. El sistema integra operaciones de compra y venta, clientes, cajas registradoras, tasas de cambio (con comisiones por segmento y cotizador neto), medios de pago y documentos electrónicos, con autenticación centralizada mediante Keycloak/OIDC y validación JWT. El paquete `global_exchange_core` articula la configuración y exposición de todas las aplicaciones.
+El diagrama describe una arquitectura Django modular, robusta y escalable para la plataforma **Global Exchange**. El sistema satisface los requerimientos del Hito 5, integrando operaciones cambiarias seguras con cotización congelada, validación de límites operativos, soporte completo para medios de pago y cobro vinculados a entidades financieras oficiales, y un ciclo de vida transaccional completamente controlado y auditable.
