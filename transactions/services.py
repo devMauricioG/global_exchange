@@ -7,6 +7,7 @@ de cotizaciones congeladas en sesión o cotizaciones en vivo, comprobando límit
 operativos y asociando los instrumentos de pago y acreditación del cliente.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 import logging
 from typing import Any, Dict, Optional, Union
@@ -14,6 +15,7 @@ from typing import Any, Dict, Optional, Union
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest
+from django.utils import timezone
 
 from customers.models import Cliente
 from payments.models import PaymentMethod, ReceivingMethod
@@ -343,4 +345,123 @@ class TransactionService:
                 f"Transacción en vivo creada exitosamente: {tx.codigo_referencia} "
                 f"para cliente {resolved_client.id}"
             )
+            return tx
+
+    EXPIRATION_DURATION_SECONDS = 300  # 5 minutos
+
+    @classmethod
+    def is_transaction_expired(cls, tx: Transaction) -> bool:
+        """
+        Determina si una transacción en estado PENDIENTE ha expirado.
+
+        Una transacción expira si se encuentra en estado PENDIENTE y han transcurrido
+        más de 5 minutos (300 segundos) desde su fecha de creación (created_at).
+
+        :param tx: Instancia de Transaction a evaluar.
+        :type tx: transactions.models.Transaction
+        :return: True si ha expirado, False en caso contrario.
+        :rtype: bool
+        """
+        if not tx or tx.estado != Transaction.Estado.PENDIENTE:
+            return False
+
+        now = timezone.now()
+        elapsed_seconds = (now - tx.created_at).total_seconds()
+        return elapsed_seconds >= cls.EXPIRATION_DURATION_SECONDS
+
+    @classmethod
+    def check_and_cancel_single(cls, tx: Transaction) -> bool:
+        """
+        Evalúa si una transacción individual ha expirado y la transiciona a CANCELADA en BD.
+
+        :param tx: Instancia de Transaction.
+        :type tx: transactions.models.Transaction
+        :return: True si la orden fue cancelada por expiración, False si sigue vigente o completada.
+        :rtype: bool
+        """
+        if cls.is_transaction_expired(tx):
+            motivo_expiracion = (
+                f"[Expiración Automática] Cotización congelada vencida "
+                f"(límite de {cls.EXPIRATION_DURATION_SECONDS // 60} minutos excedido sin confirmación de pago)."
+            )
+            tx.mark_as_cancelled(motivo=motivo_expiracion)
+            logger.info(f"Transacción {tx.codigo_referencia} cancelada automáticamente por expiración.")
+            return True
+        return False
+
+    @classmethod
+    def cancel_expired_transactions(cls) -> int:
+        """
+        Consulta y cancela de manera atómica en lote todas las transacciones PENDIENTES
+        cuya fecha de creación haya superado el tiempo límite de 5 minutos.
+
+        :return: Cantidad total de transacciones canceladas en el proceso.
+        :rtype: int
+        """
+        now = timezone.now()
+        cutoff_time = now - timedelta(seconds=cls.EXPIRATION_DURATION_SECONDS)
+
+        pending_expired_qs = Transaction.objects.filter(
+            estado=Transaction.Estado.PENDIENTE,
+            created_at__lte=cutoff_time,
+        )
+
+        count = 0
+        with transaction.atomic():
+            for tx in pending_expired_qs:
+                if cls.check_and_cancel_single(tx):
+                    count += 1
+
+        if count > 0:
+            logger.info(f"Se cancelaron automáticamente {count} transacciones expiradas por tiempo de cotización.")
+        return count
+
+    @classmethod
+    def cancel_transaction_by_customer(
+        cls,
+        transaction_id: Union[int, str],
+        cliente: Cliente,
+        usuario: Any = None,
+        motivo: str = '',
+    ) -> Transaction:
+        """
+        Ejecuta la anulación manual de una transacción pendiente por solicitud del cliente.
+
+        :param transaction_id: Identificador de la transacción.
+        :param cliente: Cliente titular autenticado (para verificación de permisos IDOR).
+        :param usuario: Usuario operador/cliente que solicita la anulación.
+        :param motivo: Motivo explicativo opcional ingresado por el usuario.
+        :return: Instancia de Transaction actualizada en estado CANCELADA.
+        :rtype: transactions.models.Transaction
+        :raises django.core.exceptions.ValidationError: Si la orden no existe, no pertenece al cliente o no está PENDIENTE.
+        """
+        try:
+            tx = Transaction.objects.select_related('cliente').get(id=int(transaction_id))
+        except (Transaction.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({'transaction': 'La transacción solicitada no fue encontrada.'})
+
+        # Control de seguridad IDOR: verificar pertenencia del cliente
+        if tx.cliente_id != cliente.id:
+            raise ValidationError({
+                'cliente': 'No tenés permisos para cancelar esta transacción ya que no pertenece a tu ficha de cliente.'
+            })
+
+        # Verificar si ya había expirado automáticamente
+        if cls.check_and_cancel_single(tx):
+            raise ValidationError({
+                'estado': 'La cotización de esta orden ha expirado (límite de 5 min) y la transacción fue cancelada automáticamente.'
+            })
+
+        if tx.estado != Transaction.Estado.PENDIENTE:
+            raise ValidationError({
+                'estado': f'La transacción se encuentra en estado "{tx.get_estado_display()}" y no puede ser anulada.'
+            })
+
+        motivo_final = motivo.strip() or "Anulación manual realizada por el cliente titular."
+        if usuario and hasattr(usuario, 'username'):
+            motivo_final = f"{motivo_final} (Solicitado por: {usuario.username})"
+
+        with transaction.atomic():
+            tx.mark_as_cancelled(motivo=motivo_final)
+            logger.info(f"Transacción {tx.codigo_referencia} anulada manualmente por cliente {cliente.id}.")
             return tx
