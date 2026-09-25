@@ -1,10 +1,10 @@
-# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.2)
+# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.3)
 
 **Proyecto:** Global Exchange – Casa de Cambio Digital e Híbrida
 
-**Estado:** Documento Consolidado (ERS v3.1 + Hito 4 SCRUM 57)
+**Estado:** Documento Consolidado (ERS v3.2 + Hito 5 SCRUM 85)
 
-**Fecha de Actualización:** 11 de Septiembre de 2026
+**Fecha de Actualización:** 24 de Septiembre de 2026
 
 ### TABLA DE CONTENIDOS
 
@@ -298,6 +298,47 @@ El núcleo central omnicanal interactúa con:
     - Las vistas y los endpoints JSON restringen los registros al cliente activo, evitando el acceso directo a recursos de otro cliente.
     - Al seleccionar un medio como predeterminado, el sistema desmarca atómicamente los anteriores del mismo cliente.
     - Al desactivar el medio predeterminado, se elimina su marca de preferencia.
+- **RF-32: Gestión de Medios de Acreditación de Fondos (ReceivingMethod)**
+  - **Descripción:** El cliente autenticado debe poder registrar, listar, editar, desactivar y seleccionar sus cuentas bancarias o billeteras de destino para la recepción de fondos convertidos.
+  - **Criterios de aceptación:**
+    - Admite cuentas bancarias (Ahorro/Corriente) y billeteras móviles vinculadas a entidades financieras autorizadas.
+    - Validación de titularidad asegurando coincidencia con la ficha del cliente activo.
+    - Exclusividad de cuenta de acreditación predeterminada por cliente.
+    - Restricción estricta contra accesos directos IDOR.
+- **RF-33: Catálogo Parametrizado de Entidades Bancarias y Financieras (EntidadFinanciera)**
+  - **Descripción:** El sistema debe proveer un catálogo normalizado y parametrizado de entidades bancarias y proveedoras de billeteras electrónicas del sistema financiero paraguayo para alimentar los selectores (dropdowns) de medios de pago y acreditación.
+  - **Criterios de aceptación:**
+    - Catálogo diferenciado por tipo (BANCO, BILLETERA) con orden de visualización y estado activo.
+    - Los formularios no admiten texto libre para la entidad, garantizando consistencia relacional.
+- **RF-34: Límites Operativos por Moneda y Segmento Comercial (OperationLimit)**
+  - **Descripción:** El Administrador de riesgos debe poder parametrizar y el sistema debe validar en tiempo real los límites financieros por divisa y segmento de cliente (Minorista, Mayorista, Corporativo, VIP).
+  - **Criterios de aceptación:**
+    - Parámetros: Monto mínimo por operación, Monto máximo por operación, Límite diario acumulado y Límite mensual acumulado.
+    - Jerarquía de consistencia: $\text{monto\_minimo} \le \text{monto\_maximo} \le \text{limite\_diario} \le \text{limite\_mensual}$.
+    - Validación preventiva en el simulador y bloqueante al formalizar transacciones de compra/venta.
+- **RF-35: Operación y Liquidación de Compra y Venta de Divisas (Transaction)**
+  - **Descripción:** El cliente autenticado con cliente activo asignado debe poder formalizar transacciones cambiarias aplicando tasas en vivo o congeladas, comisiones por segmento, medio de pago origen y medio de acreditación destino.
+  - **Criterios de aceptación:**
+    - Generación atómica con código correlativo único `TX-YYYYMMDD-XXXXX`.
+    - Registro de tasa base, comisión de segmento, tasa neta, importe origen e importe destino.
+    - Validación de que los instrumentos financieros pertenezcan al cliente titular de la orden.
+    - Estado inicial `PENDIENTE`.
+- **RF-36: Cancelación Automática por Expiración de Cotización y Anulación Manual**
+  - **Descripción:** Las órdenes pendientes con cotización congelada deben cancelarse de forma automática si transcurren más de 5 minutos (300 segundos) desde su creación sin confirmación de liquidación, permitiendo asimismo su anulación manual voluntaria.
+  - **Criterios de aceptación:**
+    - Servicio programado o reactivo que detecta órdenes vencidas y transiciona su estado a `CANCELADA`.
+    - Botón y endpoint REST para anulación manual con registro de motivo de auditoría.
+    - Bloqueo de anulación sobre transacciones ya completadas.
+- **RF-37: Comprobante Formal de Liquidación Cambiaria (Receipt)**
+  - **Descripción:** El sistema debe generar y exponer un comprobante de liquidación cambiaria formal, imprimible y descargable con todos los datos legales y financieros de la operación.
+  - **Criterios de aceptación:**
+    - Layout responsivo y preparado para impresión en `/transactions/<pk>/receipt/`.
+    - Presenta datos de Global Exchange, cliente, código único, sellos temporales, desglose de monedas, tasa aplicada y cuentas utilizadas.
+- **RF-38: Carga Inicial de Datos y Fixtures Idempotentes (seed_data)**
+  - **Descripción:** El sistema debe disponer de un comando de gestión automatizado (`python manage.py seed_data`) para poblar la base de datos con fixtures de prueba completos de todos los módulos sin intervención manual.
+  - **Criterios de aceptación:**
+    - Carga idempotente de usuarios, clientes, monedas, cotizaciones históricas, comisiones, entidades, medios de pago, límites y transacciones.
+    - Opción `--clean` / `--reset` para reinicio completo y seguro de datos.
 
 
 #### 4.3. Requerimientos No Funcionales
@@ -307,7 +348,7 @@ El núcleo central omnicanal interactúa con:
 - **RNF-SEC-03 (Protección en Tránsito y PKCE):** Comunicaciones cifradas mediante TLS 1.3 (HTTPS). Es obligatorio el uso de PKCE (_Proof Key for Code Exchange_) en el cliente frontend para proteger el flujo de autenticación.
 - **RNF-SEC-04 (Aislamiento de Datos por Cliente):** Las interfaces HTML de `rates` y todas las interfaces de `payments` requieren autenticación. Los recursos de pagos deben filtrar por cliente activo para prevenir acceso horizontal no autorizado.
 - **RNF-PERF-01 (Rendimiento de Validación JWT):** La verificación local del token JWT en el backend no debe exceder los 10 ms mediante el almacenamiento en memoria (_caching_) del conjunto de llaves JWKS.
-- **RNF-PERF-02 (Tiempos de Respuesta de Negocio):** Actualización de tasas en pantalla \$\\le 2\$ segundos; respuesta del cotizador \$\\le 3\$ segundos.
+- **RNF-PERF-02 (Tiempos de Respuesta de Negocio):** Actualización de tasas en pantalla $\le 2$ segundos; respuesta del cotizador $\le 3$ segundos.
 - **RNF-DISP-01 (Alta Disponibilidad e Integración):** Disponibilidad garantizada del 99.9% mensual. En caso de indisponibilidad de Keycloak, los servicios protegidos responderán por defecto 503 Service Unavailable (_Fail-Closed_).
 - **RNF-DAT-01 (Aritmética Financiera):** Los importes monetarios deben calcularse con `Decimal`; no se admite aritmética financiera basada en punto flotante.
 - **RNF-INT-01 (API JSON):** La API de cotización y las APIs de medios de pago deben responder JSON válido, con códigos 200, 201, 400 o 404 según corresponda.
@@ -340,3 +381,4 @@ El núcleo central omnicanal interactúa con:
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
 | 11/09/2026 | \-                 | 3.2                | Hito 4 SCRUM 57: Gestión de monedas y tasas de cambio (RF-28), comisiones por segmento (RF-29), cotizador de tasas netas (RF-30), medios de pago (RF-31), reglas de negocio RN08-RN18 y RNF complementarios (DAT-01, SEC-04, INT-01, MAN-01).                              | Equipo IS2                                                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
+| 24/09/2026 | \-                 | 3.3                | Hito 5 SCRUM-85: Módulo de Transacciones de Compra/Venta (RF-35), Cuentas de Acreditación (RF-32), Catálogo de Entidades Financieras (RF-33), Límites Operativos (RF-34), Cancelación y Expiración (RF-36), Comprobantes (RF-37) y Comando de Seeding (RF-38).        | Equipo IS2                                                       |
