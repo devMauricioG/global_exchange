@@ -41,6 +41,7 @@ from rates.services import (
     RateCalculationService,
     get_active_customer,
 )
+from rates.templatetags.currency_filters import format_currency, format_number, format_rate
 
 User = get_user_model()
 
@@ -1993,5 +1994,82 @@ class OperationLimitApiViewsTest(TestCase):
         self.assertFalse(data['success'])
         self.assertFalse(data['validation']['is_valid'])
         self.assertIn('inferior al mínimo', data['validation']['errors'][0])
+
+
+class CurrencyFiltersTemplateTagTest(TestCase):
+    """
+    Pruebas unitarias para las etiquetas y filtros de plantilla monetarios (SCRUM-83 / SCRUM-70).
+    Verifica formateo estándar paraguayo/latinoamericano: miles con punto (.) y decimales con coma (,).
+    """
+
+    def setUp(self):
+        self.pyg = Currency.objects.create(
+            code='PYG',
+            name='Guaraní Paraguayo',
+            symbol='₲',
+            decimals=0,
+        )
+        self.usd = Currency.objects.create(
+            code='USD',
+            name='Dólar Estadounidense',
+            symbol='$',
+            decimals=2,
+        )
+        self.eur = Currency.objects.create(
+            code='EUR',
+            name='Euro',
+            symbol='€',
+            decimals=2,
+        )
+
+    def test_format_currency_with_currency_model_pyg(self):
+        """PYG no utiliza decimales y antepone el símbolo ₲."""
+        result = format_currency(Decimal('7500000'), self.pyg)
+        self.assertEqual(result, '₲ 7.500.000')
+
+        result_int = format_currency(7500000, self.pyg)
+        self.assertEqual(result_int, '₲ 7.500.000')
+
+    def test_format_currency_with_currency_model_usd(self):
+        """USD utiliza 2 decimales y antepone el símbolo $."""
+        result = format_currency(Decimal('1250.50'), self.usd)
+        self.assertEqual(result, '$ 1.250,50')
+
+        result_float = format_currency(1250.5, self.usd)
+        self.assertEqual(result_float, '$ 1.250,50')
+
+    def test_format_currency_without_currency_object(self):
+        """Sin objeto Currency utiliza 2 decimales por defecto sin símbolo."""
+        result = format_currency(Decimal('1250.50'))
+        self.assertEqual(result, '1.250,50')
+
+    def test_format_currency_empty_and_none(self):
+        """Valores vacíos o None retornan cadena vacía."""
+        self.assertEqual(format_currency(None), '')
+        self.assertEqual(format_currency(''), '')
+        self.assertEqual(format_currency(None, self.usd), '')
+
+    def test_format_number_various_decimal_places(self):
+        """format_number formatea con separadores de miles (.) y decimales (,)."""
+        self.assertEqual(format_number(1250.5, 2), '1.250,50')
+        self.assertEqual(format_number(7500000, 0), '7.500.000')
+        self.assertEqual(format_number(1000000.1234, 4), '1.000.000,1234')
+        self.assertEqual(format_number(-1250.5, 2), '-1.250,50')
+        self.assertEqual(format_number(0, 2), '0,00')
+
+    def test_format_number_invalid_values(self):
+        """Valores no numéricos retornan el valor original o cadena vacía."""
+        self.assertEqual(format_number(None), '')
+        self.assertEqual(format_number(''), '')
+        self.assertEqual(format_number('invalido'), 'invalido')
+
+    def test_format_rate_precision(self):
+        """format_rate maneja tasas con 2 decimales por defecto y hasta 6 decimales."""
+        self.assertEqual(format_rate(Decimal('7450.00')), '7.450,00')
+        self.assertEqual(format_rate(Decimal('0.000134')), '0,000134')
+        self.assertEqual(format_rate(Decimal('150.0000'), 4), '150,0000')
+        self.assertEqual(format_rate(None), '')
+        self.assertEqual(format_rate(''), '')
+
 
 
