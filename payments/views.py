@@ -32,7 +32,7 @@ from django.views.generic import (
 
 from customers.models import Cliente
 from .forms import PaymentMethodFilterForm, PaymentMethodForm, ReceivingMethodForm
-from .models import PaymentMethod, ReceivingMethod
+from .models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 
 
 def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
@@ -103,10 +103,16 @@ def serialize_payment_method(pm: PaymentMethod) -> Dict[str, Any]:
         'cliente_id': pm.cliente_id,
         'tipo_medio': pm.tipo_medio,
         'tipo_medio_display': pm.get_tipo_medio_display(),
-        'entidad_bancaria': pm.entidad_bancaria,
+        'entidad_bancaria': pm.entidad_bancaria.nombre if pm.entidad_bancaria else None,
+        'entidad_bancaria_id': pm.entidad_bancaria_id,
         'numero_cuenta': pm.numero_cuenta,
         'titular': pm.titular,
         'documento_titular': pm.documento_titular,
+        'tarjeta_ultimos_digitos': pm.tarjeta_ultimos_digitos,
+        'tarjeta_mes_vencimiento': pm.tarjeta_mes_vencimiento,
+        'tarjeta_anio_vencimiento': pm.tarjeta_anio_vencimiento,
+        'tipo_cuenta_bancaria': pm.tipo_cuenta_bancaria,
+        'telefono_billetera': pm.telefono_billetera,
         'es_predeterminado': pm.es_predeterminado,
         'activo': pm.activo,
         'created_at': pm.created_at.isoformat() if pm.created_at else None,
@@ -509,6 +515,12 @@ class PaymentMethodListCreateAPIView(LoginRequiredMixin, View):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return JsonResponse({'error': 'Cuerpo de solicitud JSON inválido.'}, status=400)
 
+        entidad = payload.get('entidad_bancaria')
+        if isinstance(entidad, str) and not entidad.isdigit():
+            ent_obj = EntidadFinanciera.objects.filter(nombre__iexact=entidad.strip()).first()
+            if ent_obj:
+                payload['entidad_bancaria'] = ent_obj.id
+
         form = PaymentMethodForm(payload)
         if form.is_valid():
             pm: PaymentMethod = form.save(commit=False)
@@ -551,12 +563,27 @@ class PaymentMethodDetailAPIView(LoginRequiredMixin, View):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return JsonResponse({'error': 'JSON inválido.'}, status=400)
 
+        entidad = payload.get('entidad_bancaria')
+        if isinstance(entidad, str) and not entidad.isdigit():
+            ent_obj = EntidadFinanciera.objects.filter(nombre__iexact=entidad.strip()).first()
+            if ent_obj:
+                entidad = ent_obj.id
+            else:
+                entidad = pm.entidad_bancaria_id
+        elif entidad is None:
+            entidad = pm.entidad_bancaria_id
+
         data = {
             'tipo_medio': payload.get('tipo_medio', pm.tipo_medio),
-            'entidad_bancaria': payload.get('entidad_bancaria', pm.entidad_bancaria),
+            'entidad_bancaria': entidad,
             'numero_cuenta': payload.get('numero_cuenta', pm.numero_cuenta),
             'titular': payload.get('titular', pm.titular),
             'documento_titular': payload.get('documento_titular', pm.documento_titular),
+            'tarjeta_ultimos_digitos': payload.get('tarjeta_ultimos_digitos', pm.tarjeta_ultimos_digitos),
+            'tarjeta_mes_vencimiento': payload.get('tarjeta_mes_vencimiento', pm.tarjeta_mes_vencimiento),
+            'tarjeta_anio_vencimiento': payload.get('tarjeta_anio_vencimiento', pm.tarjeta_anio_vencimiento),
+            'tipo_cuenta_bancaria': payload.get('tipo_cuenta_bancaria', pm.tipo_cuenta_bancaria),
+            'telefono_billetera': payload.get('telefono_billetera', pm.telefono_billetera),
             'es_predeterminado': payload.get('es_predeterminado', pm.es_predeterminado),
             'activo': payload.get('activo', pm.activo),
         }
