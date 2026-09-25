@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load currency_filters %}
 
 {% block title %}Comisiones por Segmento — Global Exchange{% endblock %}
 
@@ -100,7 +101,7 @@
                         {{ commission.commission_percentage }}%
                     </td>
                     <td style="text-align: right; font-weight: 600; color: var(--text-main);">
-                        ${{ commission.fixed_fee|floatformat:2 }}
+                        {{ commission.fixed_fee|format_number:2 }}
                     </td>
                     <td style="text-align: right; font-weight: 700; color: #fbbf24;">
                         {{ commission.spread_discount_percentage }}%

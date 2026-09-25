@@ -765,8 +765,15 @@
 
                     <!-- Opción Visible para usuarios autenticados: Medios de Pago -->
                     <li>
-                        <a href="{% url 'payments:paymentmethod-list' %}" class="nav-link {% if '/payments/' in request.path %}active{% endif %}">
+                        <a href="{% url 'payments:paymentmethod-list' %}" class="nav-link {% if '/payments/' in request.path and '/payments/acreditacion/' not in request.path %}active{% endif %}">
                             💳 Medios de Pago
+                        </a>
+                    </li>
+
+                    <!-- Opción Visible para usuarios autenticados: Medios de Acreditación -->
+                    <li>
+                        <a href="{% url 'payments:receivingmethod-list' %}" class="nav-link {% if '/payments/acreditacion/' in request.path %}active{% endif %}">
+                            🏦 Medios de Acreditación
                         </a>
                     </li>
 
@@ -783,11 +790,22 @@
                         </a>
                     </li>
 
-                    <!-- Opción Visible para roles Admin y Operator: Comisiones por Segmento -->
+                    <li>
+                        <a href="{% url 'transactions:list' %}" class="nav-link {% if '/transactions/' in request.path %}active{% endif %}">
+                            📑 Transacciones
+                        </a>
+                    </li>
+
+                    <!-- Opción Visible para roles Admin y Operator: Comisiones y Límites -->
                     {% if is_operator or user|has_any_role:"admin,operator" %}
                         <li>
                             <a href="{% url 'rates:commission_list' %}" class="nav-link {% if '/rates/commissions/' in request.path %}active{% endif %}">
                                 💱 Comisiones
+                            </a>
+                        </li>
+                        <li>
+                            <a href="{% url 'rates:limit_list' %}" class="nav-link {% if '/rates/limits/' in request.path %}active{% endif %}">
+                                🛡️ Límites
                             </a>
                         </li>
                     {% endif %}

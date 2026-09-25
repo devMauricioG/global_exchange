@@ -8,7 +8,7 @@ Registra y personaliza las vistas administrativas para:
 """
 
 from django.contrib import admin
-from .models import Currency, ExchangeRate, SegmentCommission
+from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
 
 
 @admin.register(Currency)
@@ -73,3 +73,25 @@ class SegmentCommissionAdmin(admin.ModelAdmin):
     ordering = ('segment',)
     readonly_fields = ('created_at', 'updated_at')
     list_editable = ('commission_percentage', 'fixed_fee', 'spread_discount_percentage', 'is_active')
+
+
+@admin.register(OperationLimit)
+class OperationLimitAdmin(admin.ModelAdmin):
+    """
+    Panel administrativo para la parametrización de límites operativos por segmento y divisa.
+    """
+    list_display = (
+        'segment',
+        'currency',
+        'monto_minimo',
+        'monto_maximo',
+        'limite_diario',
+        'limite_mensual',
+        'is_active',
+        'updated_at',
+    )
+    list_filter = ('is_active', 'segment', 'currency')
+    search_fields = ('segment', 'currency__code', 'currency__name')
+    ordering = ('segment', 'currency__code')
+    readonly_fields = ('created_at', 'updated_at')
+    list_editable = ('monto_minimo', 'monto_maximo', 'limite_diario', 'limite_mensual', 'is_active')

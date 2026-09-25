@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comprobante de Transacción - {{ transaction.codigo_referencia }}</title>
+    <style>
+        :root {
+            --primary: #38bdf8;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --border-color: #cbd5e1;
+            --bg-color: #ffffff;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #f1f5f9;
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .receipt-container {
+            background-color: var(--bg-color);
+            width: 100%;
+            max-width: 800px;
+            padding: 3rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            position: relative;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .header-company h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.025em;
+        }
+
+        .header-company p {
+            margin: 0.25rem 0 0 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .header-details {
+            text-align: right;
+        }
+
+        .header-details h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: var(--text-muted);
+        }
+
+        .header-details .ref-code {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-top: 0.5rem;
+        }
+
+        .section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .info-block label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-block div {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .financial-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 2rem;
+        }
+
+        .financial-table th, .financial-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .financial-table th {
+            background-color: #f8fafc;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .financial-table td {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .financial-table .highlight {
+            color: var(--primary);
+            font-weight: 800;
+        }
+
+        .financial-table .success {
+            color: #16a34a;
+            font-weight: 800;
+        }
+
+        .traceability-box {
+            background-color: #f8fafc;
+            border: 1px dashed var(--border-color);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            margin-top: 3rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        
+        .traceability-box h3 {
+            margin-top: 0;
+            color: var(--text-main);
+            font-size: 1rem;
+        }
+
+        .traceability-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+        
+        .signature-area {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4rem;
+        }
+        
+        .signature-line {
+            width: 250px;
+            border-top: 1px solid var(--text-main);
+            text-align: center;
+            padding-top: 0.5rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .print-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background-color: var(--text-main);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .print-btn:hover {
+            background-color: #334155;
+        }
+
+        @media print {
+            body {
+                background-color: transparent;
+                padding: 0;
+            }
+            .receipt-container {
+                box-shadow: none;
+                padding: 0;
+                max-width: 100%;
+            }
+            .print-btn {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="receipt-container">
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+
+    <div class="header">
+        <div class="header-company">
+            <h1>GLOBAL EXCHANGE S.A.</h1>
+            <p>Casa de Cambios Autorizada por el BCP</p>
+            <p>RUC: 80012345-6 | Tel: (021) 123-4567</p>
+            <p>Av. Principal 1234, Asunción, Paraguay</p>
+        </div>
+        <div class="header-details">
+            <h2>COMPROBANTE DE LIQUIDACIÓN</h2>
+            <div class="ref-code">{{ transaction.codigo_referencia }}</div>
+            <p style="margin: 0.5rem 0 0 0; color: var(--text-muted); font-size: 0.9rem;">
+                Fecha: {{ transaction.created_at|date:"d/m/Y" }}<br>
+                Hora: {{ transaction.created_at|date:"H:i" }}
+            </p>
+        </div>
+    </div>
+
+    <div class="section-title">Datos del Cliente</div>
+    <div class="info-grid">
+        <div class="info-block">
+            <label>Titular</label>
+            <div>{{ transaction.cliente.nombre }}</div>
+        </div>
+        <div class="info-block">
+            <label>Documento / RUC</label>
+            <div>{{ transaction.cliente.documento_ruc }}</div>
+        </div>
+        <div class="info-block">
+            <label>Segmento Comercial</label>
+            <div>{{ transaction.cliente.get_segmentacion_display|default:"MINORISTA" }}</div>
+        </div>
+        <div class="info-block">
+            <label>Tipo de Operación</label>
+            <div style="color: {% if transaction.tipo_operacion == 'COMPRA' %}var(--primary){% else %}#eab308{% endif %};">
+                {{ transaction.get_tipo_operacion_display }}
+            </div>
+        </div>
+    </div>
+
+    <div class="section-title">Detalle Financiero</div>
+    <table class="financial-table">
+        <thead>
+            <tr>
+                <th>Concepto</th>
+                <th>Moneda</th>
+                <th style="text-align: right;">Importe</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Monto Entregado (Origen)</td>
+                <td>{{ transaction.moneda_origen.code }}</td>
+                <td style="text-align: right;">{{ transaction.monto_origen|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td>Monto a Liquidar (Destino)</td>
+                <td>{{ transaction.moneda_destino.code }}</td>
+                <td style="text-align: right;" class="success">{{ transaction.monto_destino|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td colspan="3" style="padding: 1.5rem 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase;">Tasa Neta Aplicada:</span>
+                        <span style="font-size: 1.25rem;" class="highlight">1 {{ transaction.base_currency.code }} = {{ transaction.tasa_neta|floatformat:4 }} {{ transaction.target_currency.code }}</span>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="section-title">Instrumentos de Pago / Acreditación</div>
+    <div class="info-grid">
+        <div class="info-block">
+            <label>Medio de Pago (Débito)</label>
+            <div style="font-size: 0.95rem;">
+                {{ transaction.medio_pago_origen.entidad_bancaria }}<br>
+                {{ transaction.medio_pago_origen.get_tipo_medio_display }}: {{ transaction.medio_pago_origen.numero_cuenta }}
+            </div>
+        </div>
+        <div class="info-block">
+            <label>Medio de Acreditación (Destino)</label>
+            <div style="font-size: 0.95rem;">
+                {{ transaction.medio_acreditacion_destino.entidad_bancaria.nombre }}<br>
+                {{ transaction.medio_acreditacion_destino.get_tipo_cuenta_display }}: {{ transaction.medio_acreditacion_destino.numero_cuenta }}
+            </div>
+        </div>
+    </div>
+
+    <div class="signature-area">
+        <div class="signature-line">
+            Firma del Cliente<br>
+            <span style="font-size: 0.75rem; font-weight: 400;">Acepto los términos y liquidación</span>
+        </div>
+        <div class="signature-line">
+            Sello y Firma del Cajero<br>
+            <span style="font-size: 0.75rem; font-weight: 400;">Global Exchange S.A.</span>
+        </div>
+    </div>
+
+    <div class="traceability-box">
+        <h3>Sellos de Trazabilidad y Auditoría</h3>
+        <div class="traceability-grid">
+            <div>
+                <strong>ID Interno:</strong> #{{ transaction.id }}<br>
+                <strong>Estado:</strong> {{ transaction.get_estado_display }}
+            </div>
+            <div>
+                <strong>Operador:</strong> {{ transaction.usuario.username|default:"Sistema Automático" }}<br>
+                <strong>Token (Reserva):</strong> {{ transaction.token_congelamiento|default:"N/A" }}
+            </div>
+        </div>
+        {% if transaction.observaciones %}
+        <div style="margin-top: 1rem;">
+            <strong>Observaciones:</strong> {{ transaction.observaciones }}
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+</body>
+</html>

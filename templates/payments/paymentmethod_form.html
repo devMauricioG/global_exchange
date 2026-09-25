@@ -140,6 +140,47 @@
         line-height: 1;
     }
 
+    .payment-method-selector {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 1rem;
+    }
+    
+    .radio-card-custom {
+        background: rgba(15, 23, 42, 0.6);
+        border: 2px solid var(--border-color);
+        border-radius: 1rem;
+        padding: 1.25rem 1rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .radio-card-custom:hover {
+        border-color: rgba(56, 189, 248, 0.5);
+        background: rgba(56, 189, 248, 0.05);
+    }
+    
+    .radio-card-custom.selected {
+        border-color: #38bdf8;
+        background: rgba(56, 189, 248, 0.15);
+        box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+    }
+    
+    .radio-icon {
+        font-size: 2rem;
+    }
+    
+    .radio-title {
+        font-weight: 700;
+        font-size: 0.85rem;
+        color: var(--text-main);
+    }
+
     .form-actions {
         display: flex;
         justify-content: flex-end;
@@ -189,74 +230,115 @@
                 </div>
             {% endif %}
 
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="id_tipo_medio">{{ form.tipo_medio.label }} *</label>
-                    {{ form.tipo_medio }}
-                    {% if form.tipo_medio.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.tipo_medio.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
-                </div>
+            <div class="form-group form-group-full" style="display: none;">
+                {{ form.tipo_medio }}
+            </div>
 
-                <div class="form-group">
+            <div class="form-group form-group-full" style="margin-bottom: 1.5rem;">
+                <label style="font-size: 1rem; margin-bottom: 1rem; display: block; font-weight: 700; color: #e2e8f0;">Seleccione el Instrumento Financiero</label>
+                <div class="payment-method-selector">
+                    <div class="radio-card-custom" data-value="TRANSFERENCIA" onclick="selectPaymentType('TRANSFERENCIA')">
+                        <div class="radio-icon">🏦</div>
+                        <div class="radio-title">Transferencia</div>
+                    </div>
+                    <div class="radio-card-custom" data-value="BILLETERA" onclick="selectPaymentType('BILLETERA')">
+                        <div class="radio-icon">📱</div>
+                        <div class="radio-title">Billetera Móvil</div>
+                    </div>
+                    <div class="radio-card-custom" data-value="TARJETA" onclick="selectPaymentType('TARJETA')">
+                        <div class="radio-icon">💳</div>
+                        <div class="radio-title">Tarjeta</div>
+                    </div>
+                    <div class="radio-card-custom" data-value="EFECTIVO" onclick="selectPaymentType('EFECTIVO')">
+                        <div class="radio-icon">💵</div>
+                        <div class="radio-title">Efectivo</div>
+                    </div>
+                    <div class="radio-card-custom" data-value="OTRO" onclick="selectPaymentType('OTRO')">
+                        <div class="radio-icon">🔄</div>
+                        <div class="radio-title">Otro</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <!-- Entidad Bancaria -->
+                <div class="form-group" id="group_entidad_bancaria">
                     <label for="id_entidad_bancaria">{{ form.entidad_bancaria.label }} *</label>
                     {{ form.entidad_bancaria }}
-                    <span class="form-help">Ej. Banco Itaú, Banco Continental, Billetera Tigo Money</span>
-                    {% if form.entidad_bancaria.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.entidad_bancaria.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                    <span class="form-help">Seleccione la entidad correspondiente</span>
+                    {% if form.entidad_bancaria.errors %}<ul class="errorlist">{% for err in form.entidad_bancaria.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
 
-                <div class="form-group">
-                    <label for="id_numero_cuenta">{{ form.numero_cuenta.label }} *</label>
+                <!-- Tipo Cuenta -->
+                <div class="form-group" id="group_tipo_cuenta">
+                    <label for="id_tipo_cuenta_bancaria">{{ form.tipo_cuenta_bancaria.label }} *</label>
+                    {{ form.tipo_cuenta_bancaria }}
+                    {% if form.tipo_cuenta_bancaria.errors %}<ul class="errorlist">{% for err in form.tipo_cuenta_bancaria.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+                </div>
+
+                <!-- Número de Cuenta / Teléfono -->
+                <div class="form-group" id="group_numero_cuenta">
+                    <label for="id_numero_cuenta" id="label_numero_cuenta">{{ form.numero_cuenta.label }} *</label>
                     {{ form.numero_cuenta }}
-                    <span class="form-help">Número de cuenta bancaria o teléfono móvil</span>
-                    {% if form.numero_cuenta.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.numero_cuenta.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                    <span class="form-help" id="help_numero_cuenta">Ingrese el identificador</span>
+                    {% if form.numero_cuenta.errors %}<ul class="errorlist">{% for err in form.numero_cuenta.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+                </div>
+                
+                <!-- Teléfono Billetera (Hidden from user, mapped via JS if needed, or directly used) -->
+                <div class="form-group" id="group_telefono_billetera" style="display: none;">
+                    <label for="id_telefono_billetera">{{ form.telefono_billetera.label }} *</label>
+                    {{ form.telefono_billetera }}
+                    {% if form.telefono_billetera.errors %}<ul class="errorlist">{% for err in form.telefono_billetera.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
 
-                <div class="form-group">
-                    <label for="id_documento_titular">{{ form.documento_titular.label }}</label>
-                    {{ form.documento_titular }}
-                    <span class="form-help">Cédula de identidad o RUC (opcional)</span>
-                    {% if form.documento_titular.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.documento_titular.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                <!-- Tarjeta Inputs -->
+                <div class="form-group" id="group_tarjeta_numero">
+                    <label>Número de Tarjeta *</label>
+                    <input type="text" id="tarjeta_mask" class="form-input" placeholder="0000 0000 0000 0000">
+                    <span class="form-help">Solo almacenamos los últimos 4 dígitos.</span>
+                    <div style="display: none;">
+                        {{ form.tarjeta_ultimos_digitos }}
+                    </div>
+                    {% if form.tarjeta_ultimos_digitos.errors %}<ul class="errorlist">{% for err in form.tarjeta_ultimos_digitos.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
 
-                <div class="form-group form-group-full">
+                <div class="form-group" id="group_tarjeta_vencimiento">
+                    <label>Vencimiento (MM/AA) *</label>
+                    <input type="text" id="vencimiento_mask" class="form-input" placeholder="MM/AA">
+                    <div style="display: none;">
+                        {{ form.tarjeta_mes_vencimiento }}
+                        {{ form.tarjeta_anio_vencimiento }}
+                    </div>
+                    {% if form.tarjeta_mes_vencimiento.errors %}<ul class="errorlist">{% for err in form.tarjeta_mes_vencimiento.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+                    {% if form.tarjeta_anio_vencimiento.errors %}<ul class="errorlist">{% for err in form.tarjeta_anio_vencimiento.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+                </div>
+
+                <!-- Titular -->
+                <div class="form-group form-group-full" id="group_titular">
                     <label for="id_titular">{{ form.titular.label }} *</label>
                     {{ form.titular }}
                     <span class="form-help">Nombre y apellido completo o denominación social</span>
-                    {% if form.titular.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.titular.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                    {% if form.titular.errors %}<ul class="errorlist">{% for err in form.titular.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
 
+                <!-- Documento -->
+                <div class="form-group form-group-full" id="group_documento">
+                    <label for="id_documento_titular">{{ form.documento_titular.label }}</label>
+                    {{ form.documento_titular }}
+                    <span class="form-help">Cédula de identidad o RUC (opcional)</span>
+                    {% if form.documento_titular.errors %}<ul class="errorlist">{% for err in form.documento_titular.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
+                </div>
+
+                <!-- Predeterminado / Activo -->
                 <div class="form-group form-group-full">
                     <div class="checkbox-card">
                         {{ form.es_predeterminado }}
                         <label for="id_es_predeterminado">
                             <span class="checkbox-title">Establecer como medio de pago predeterminado</span>
-                            <span class="checkbox-desc">Se seleccionará automáticamente en transacciones y compras de divisas. Desactivará el predeterminado previo.</span>
+                            <span class="checkbox-desc">Se seleccionará automáticamente en transacciones.</span>
                         </label>
                     </div>
-                    {% if form.es_predeterminado.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.es_predeterminado.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                    {% if form.es_predeterminado.errors %}<ul class="errorlist">{% for err in form.es_predeterminado.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
 
                 <div class="form-group form-group-full">
@@ -264,14 +346,10 @@
                         {{ form.activo }}
                         <label for="id_activo">
                             <span class="checkbox-title">Medio de pago habilitado</span>
-                            <span class="checkbox-desc">Habilita este medio de pago para ser utilizado en el cotizador y operaciones.</span>
+                            <span class="checkbox-desc">Habilita este medio para ser utilizado.</span>
                         </label>
                     </div>
-                    {% if form.activo.errors %}
-                        <ul class="errorlist">
-                            {% for err in form.activo.errors %}<li>{{ err }}</li>{% endfor %}
-                        </ul>
-                    {% endif %}
+                    {% if form.activo.errors %}<ul class="errorlist">{% for err in form.activo.errors %}<li>{{ err }}</li>{% endfor %}</ul>{% endif %}
                 </div>
             </div>
 
@@ -287,4 +365,133 @@
         </form>
     </div>
 </div>
+
+<script>
+    function selectPaymentType(tipo) {
+        document.getElementById('id_tipo_medio').value = tipo;
+        
+        document.querySelectorAll('.radio-card-custom').forEach(card => {
+            if (card.dataset.value === tipo) {
+                card.classList.add('selected');
+            } else {
+                card.classList.remove('selected');
+            }
+        });
+
+        const groups = [
+            'group_entidad_bancaria', 'group_tipo_cuenta', 'group_numero_cuenta',
+            'group_tarjeta_numero', 'group_tarjeta_vencimiento'
+        ];
+        groups.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        const numCuentaLabel = document.getElementById('label_numero_cuenta');
+        const numCuentaHelp = document.getElementById('help_numero_cuenta');
+        const numCuentaInput = document.getElementById('id_numero_cuenta');
+        const telBilleteraInput = document.getElementById('id_telefono_billetera');
+
+        if (tipo === 'TRANSFERENCIA') {
+            document.getElementById('group_entidad_bancaria').style.display = 'flex';
+            document.getElementById('group_tipo_cuenta').style.display = 'flex';
+            document.getElementById('group_numero_cuenta').style.display = 'flex';
+            numCuentaLabel.textContent = 'Número de Cuenta Bancaria *';
+            numCuentaHelp.textContent = 'Ej. 12-345678-9';
+            if (numCuentaInput.value === 'N/A' || numCuentaInput.value.includes('****')) numCuentaInput.value = '';
+        } else if (tipo === 'BILLETERA') {
+            document.getElementById('group_entidad_bancaria').style.display = 'flex';
+            document.getElementById('group_numero_cuenta').style.display = 'flex';
+            numCuentaLabel.textContent = 'Número de Teléfono Móvil *';
+            numCuentaHelp.textContent = 'Ej. 0981 123 456';
+            if (numCuentaInput.value === 'N/A' || numCuentaInput.value.includes('****')) {
+                numCuentaInput.value = '';
+                if(telBilleteraInput) telBilleteraInput.value = '';
+            }
+        } else if (tipo === 'TARJETA') {
+            document.getElementById('group_entidad_bancaria').style.display = 'flex';
+            document.getElementById('group_tarjeta_numero').style.display = 'flex';
+            document.getElementById('group_tarjeta_vencimiento').style.display = 'flex';
+            if (numCuentaInput.value === '' || !numCuentaInput.value.includes('****')) {
+                numCuentaInput.value = 'N/A'; 
+            }
+        } else if (tipo === 'EFECTIVO') {
+            numCuentaInput.value = 'N/A';
+        } else if (tipo === 'OTRO') {
+            document.getElementById('group_entidad_bancaria').style.display = 'flex';
+            document.getElementById('group_numero_cuenta').style.display = 'flex';
+            numCuentaLabel.textContent = 'Identificador / Número *';
+            numCuentaHelp.textContent = 'Referencia del instrumento';
+            if (numCuentaInput.value === 'N/A' || numCuentaInput.value.includes('****')) numCuentaInput.value = '';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const initialType = document.getElementById('id_tipo_medio').value || 'TRANSFERENCIA';
+        selectPaymentType(initialType);
+
+        const numCuentaInput = document.getElementById('id_numero_cuenta');
+        const tarjetaMaskInput = document.getElementById('tarjeta_mask');
+        const ultimosDigitosInput = document.getElementById('id_tarjeta_ultimos_digitos');
+        const vencimientoMaskInput = document.getElementById('vencimiento_mask');
+        const mesVencimientoInput = document.getElementById('id_tarjeta_mes_vencimiento');
+        const anioVencimientoInput = document.getElementById('id_tarjeta_anio_vencimiento');
+        const telefonoBilleteraInput = document.getElementById('id_telefono_billetera');
+
+        if (numCuentaInput) {
+            numCuentaInput.addEventListener('input', function(e) {
+                if (document.getElementById('id_tipo_medio').value === 'BILLETERA') {
+                    let raw = e.target.value.replace(/\D/g, '');
+                    let match = raw.match(/^(\d{0,4})(\d{0,3})(\d{0,3})$/);
+                    if (match) {
+                        e.target.value = !match[2] ? match[1] : match[1] + ' ' + match[2] + (match[3] ? ' ' + match[3] : '');
+                    }
+                    if (telefonoBilleteraInput) telefonoBilleteraInput.value = raw;
+                } else if (document.getElementById('id_tipo_medio').value === 'TRANSFERENCIA') {
+                    let v = e.target.value.replace(/[^\d-]/g, '');
+                    e.target.value = v;
+                }
+            });
+        }
+
+        if (tarjetaMaskInput) {
+            tarjetaMaskInput.addEventListener('input', function (e) {
+                let v = e.target.value.replace(/\D/g, '');
+                let formatted = v.match(/.{1,4}/g);
+                e.target.value = formatted ? formatted.join(' ') : '';
+                
+                if (v.length >= 4) {
+                    if(ultimosDigitosInput) ultimosDigitosInput.value = v.slice(-4);
+                } else {
+                    if(ultimosDigitosInput) ultimosDigitosInput.value = '';
+                }
+                
+                if (v.length > 0) {
+                    if(numCuentaInput) numCuentaInput.value = '**** **** **** ' + v.slice(-4);
+                } else {
+                    if(numCuentaInput) numCuentaInput.value = 'N/A';
+                }
+            });
+        }
+
+        if (vencimientoMaskInput) {
+            vencimientoMaskInput.addEventListener('input', function (e) {
+                let v = e.target.value.replace(/\D/g, '');
+                if (v.length > 2) {
+                    v = v.substring(0,2) + '/' + v.substring(2,4);
+                }
+                e.target.value = v;
+
+                if (v.length === 5) {
+                    let parts = v.split('/');
+                    if(mesVencimientoInput) mesVencimientoInput.value = parseInt(parts[0], 10) || '';
+                    if(anioVencimientoInput) anioVencimientoInput.value = parseInt('20' + parts[1], 10) || '';
+                } else {
+                    if(mesVencimientoInput) mesVencimientoInput.value = '';
+                    if(anioVencimientoInput) anioVencimientoInput.value = '';
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}
