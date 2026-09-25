@@ -1,32 +1,36 @@
 """
-Suite de pruebas unitarias para la aplicación de transacciones cambiarias (transactions).
+Suite de pruebas unitarias e integración para la aplicación de transacciones cambiarias (transactions).
 
-Cubre la creación del modelo :class:`Transaction`, validaciones personalizadas del
-método ``clean()``, autogeneración de ``codigo_referencia``, transiciones de estado
-(``mark_as_completed``, ``mark_as_cancelled``), propiedades derivadas, representación
-en cadena, configuración del administrador Django, servicios de negocio (:class:`TransactionService`)
-y vistas web / API de confirmación y listado de órdenes.
+Cubre exhaustivamente:
+- Integridad y validaciones del modelo :class:`~transactions.models.Transaction` (código correlativo, clean(), restricciones de divisas y montos, transiciones de estado).
+- Formulario de orden :class:`~transactions.forms.TransactionOrderForm` (filtrado por cliente activo y validaciones).
+- Servicios transaccionales :class:`~transactions.services.TransactionService` (cotización en vivo, cotización congelada, integración con límites y comisiones, detección y cancelación por expiración temporal de 5 minutos, anulación manual y prevención IDOR).
+- Vistas Web CBVs (:class:`~transactions.views.TransactionCreateView`, :class:`~transactions.views.TransactionConfirmView`, :class:`~transactions.views.TransactionDetailView`, :class:`~transactions.views.TransactionListView`, :class:`~transactions.views.TransactionReceiptView`, :class:`~transactions.views.TransactionCancelView`).
+- Endpoints REST API JSON (:class:`~transactions.views.TransactionCreateApiView`, :class:`~transactions.views.TransactionCancelApiView`).
+- Panel de administración :class:`~transactions.admin.TransactionAdmin`.
 """
 
 from decimal import Decimal
+import io
 import json
-from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from customers.models import Cliente
+from customers.models import Cliente, CustomerUserAssignment
 from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
-from rates.models import Currency, ExchangeRate, OperationLimit
+from rates.models import Currency, ExchangeRate, OperationLimit, SegmentCommission
 from rates.services import QuoteFreezeService, RateCalculationService
 from transactions.admin import TransactionAdmin
 from transactions.forms import TransactionOrderForm
 from transactions.models import Transaction
 from transactions.services import TransactionService
+
+User = get_user_model()
 
 
 class TransactionTestMixin:
@@ -48,34 +52,51 @@ class TransactionTestMixin:
             code='EUR', name='Euro', symbol='€', decimals=2, is_active=True
         )
 
-        # Cliente
+        # Cliente 1 (Minorista)
         cls.cliente = Cliente.objects.create(
             nombre='Juan Pérez',
             documento_ruc='1234567-8',
             correo='juan.perez@test.com',
             segmentacion=Cliente.Segmentacion.MINORISTA,
         )
-        # Segundo cliente para validaciones de pertenencia
+        cls.user = User.objects.create_user(
+            username='juanperez',
+            email='juan.perez@test.com',
+            password='Password123!',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=cls.cliente,
+            user=cls.user,
+            is_primary_representative=True,
+            is_active=True,
+        )
+
+        # Cliente 2 (Mayorista) para validaciones de pertenencia e IDOR
         cls.otro_cliente = Cliente.objects.create(
             nombre='María López',
             documento_ruc='8765432-1',
             correo='maria.lopez@test.com',
             segmentacion=Cliente.Segmentacion.MAYORISTA,
         )
-
-        # User autenticado vinculado
-        cls.user = User.objects.create_user(
-            username='juanperez',
-            email='juan.perez@test.com',
+        cls.otro_user = User.objects.create_user(
+            username='marialopez',
+            email='maria.lopez@test.com',
             password='Password123!',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=cls.otro_cliente,
+            user=cls.otro_user,
+            is_primary_representative=True,
+            is_active=True,
         )
 
         # Entidad financiera
-        cls.banco = EntidadFinanciera.objects.create(
-            nombre='Banco Test', tipo='BANCO',
+        cls.banco, _ = EntidadFinanciera.objects.get_or_create(
+            nombre='Banco Test Transacciones',
+            defaults={'tipo': EntidadFinanciera.TipoEntidad.BANCO, 'activo': True},
         )
 
-        # Medios de pago y acreditación cliente
+        # Medios de pago y acreditación cliente 1
         cls.medio_pago = PaymentMethod.objects.create(
             cliente=cls.cliente,
             tipo_medio=PaymentMethod.TipoMedio.TRANSFERENCIA,
@@ -83,7 +104,7 @@ class TransactionTestMixin:
             numero_cuenta='12345678',
             titular='Juan Pérez',
             documento_titular='1234567-8',
-            tipo_cuenta_bancaria='AHORRO',
+            tipo_cuenta_bancaria=PaymentMethod.TipoCuentaBancaria.AHORRO,
             es_predeterminado=True,
             activo=True,
         )
@@ -98,7 +119,7 @@ class TransactionTestMixin:
             activo=True,
         )
 
-        # Medios de pago y acreditación otro cliente
+        # Medios de pago y acreditación cliente 2
         cls.otro_medio_pago = PaymentMethod.objects.create(
             cliente=cls.otro_cliente,
             tipo_medio=PaymentMethod.TipoMedio.TRANSFERENCIA,
@@ -106,7 +127,7 @@ class TransactionTestMixin:
             numero_cuenta='99999999',
             titular='María López',
             documento_titular='8765432-1',
-            tipo_cuenta_bancaria='CORRIENTE',
+            tipo_cuenta_bancaria=PaymentMethod.TipoCuentaBancaria.CORRIENTE,
             activo=True,
         )
         cls.otro_medio_acreditacion = ReceivingMethod.objects.create(
@@ -119,7 +140,7 @@ class TransactionTestMixin:
             activo=True,
         )
 
-        # Exchange Rate oficial activa
+        # Tasa de cambio oficial activa USD/PYG
         cls.exchange_rate = ExchangeRate.objects.create(
             base_currency=cls.usd,
             target_currency=cls.pyg,
@@ -150,16 +171,21 @@ class TransactionTestMixin:
 
 
 class TransactionModelTest(TransactionTestMixin, TestCase):
-    """Pruebas del modelo Transaction."""
+    """Pruebas del modelo Transaction y validaciones clean()."""
 
     def test_creacion_transaccion_exitosa(self):
-        """Verifica la persistencia de una transacción válida."""
+        """Verifica la persistencia de una transacción válida y autogeneración de código."""
         data = self._build_valid_transaction_data()
         tx = Transaction.objects.create(**data)
 
         self.assertIsNotNone(tx.pk)
         self.assertTrue(tx.codigo_referencia.startswith('TX-'))
         self.assertEqual(tx.estado, Transaction.Estado.PENDIENTE)
+        self.assertTrue(tx.is_pending)
+        self.assertFalse(tx.is_completed)
+        self.assertFalse(tx.is_cancelled)
+        self.assertIn(tx.codigo_referencia, str(tx))
+        self.assertIn('Juan Pérez', str(tx))
 
     def test_clean_monedas_iguales_lanza_error(self):
         """clean() debe fallar si base_currency es igual a target_currency."""
@@ -179,6 +205,33 @@ class TransactionModelTest(TransactionTestMixin, TestCase):
             tx.clean()
         self.assertIn('monto_origen', ctx.exception.message_dict)
 
+    def test_clean_monto_destino_no_positivo_lanza_error(self):
+        """monto_destino <= 0 debe lanzar ValidationError."""
+        data = self._build_valid_transaction_data(monto_destino=Decimal('-10.00'))
+        tx = Transaction(**data)
+
+        with self.assertRaises(ValidationError) as ctx:
+            tx.clean()
+        self.assertIn('monto_destino', ctx.exception.message_dict)
+
+    def test_clean_tasa_base_no_positiva_lanza_error(self):
+        """tasa_base <= 0 debe lanzar ValidationError."""
+        data = self._build_valid_transaction_data(tasa_base=Decimal('0.00'))
+        tx = Transaction(**data)
+
+        with self.assertRaises(ValidationError) as ctx:
+            tx.clean()
+        self.assertIn('tasa_base', ctx.exception.message_dict)
+
+    def test_clean_tasa_neta_no_positiva_lanza_error(self):
+        """tasa_neta <= 0 debe lanzar ValidationError."""
+        data = self._build_valid_transaction_data(tasa_neta=Decimal('-5.00'))
+        tx = Transaction(**data)
+
+        with self.assertRaises(ValidationError) as ctx:
+            tx.clean()
+        self.assertIn('tasa_neta', ctx.exception.message_dict)
+
     def test_clean_medio_pago_ajeno_lanza_error(self):
         """medio_pago de otro cliente debe lanzar ValidationError."""
         data = self._build_valid_transaction_data(medio_pago_origen=self.otro_medio_pago)
@@ -187,6 +240,15 @@ class TransactionModelTest(TransactionTestMixin, TestCase):
         with self.assertRaises(ValidationError) as ctx:
             tx.clean()
         self.assertIn('medio_pago_origen', ctx.exception.message_dict)
+
+    def test_clean_medio_acreditacion_ajeno_lanza_error(self):
+        """medio_acreditacion de otro cliente debe lanzar ValidationError."""
+        data = self._build_valid_transaction_data(medio_acreditacion_destino=self.otro_medio_acreditacion)
+        tx = Transaction(**data)
+
+        with self.assertRaises(ValidationError) as ctx:
+            tx.clean()
+        self.assertIn('medio_acreditacion_destino', ctx.exception.message_dict)
 
     def test_mark_as_completed(self):
         """mark_as_completed cambia el estado a COMPLETADA."""
@@ -206,7 +268,64 @@ class TransactionModelTest(TransactionTestMixin, TestCase):
         tx.refresh_from_db()
 
         self.assertEqual(tx.estado, Transaction.Estado.CANCELADA)
+        self.assertTrue(tx.is_cancelled)
         self.assertIn('Expiró plazo de pago', tx.observaciones)
+
+    def test_moneda_properties(self):
+        """Propiedades moneda_origen y moneda_destino según tipo_operacion."""
+        tx_compra = Transaction.objects.create(**self._build_valid_transaction_data(
+            tipo_operacion=Transaction.TipoOperacion.COMPRA,
+        ))
+        self.assertEqual(tx_compra.moneda_origen, self.pyg)
+        self.assertEqual(tx_compra.moneda_destino, self.usd)
+
+        tx_venta = Transaction.objects.create(**self._build_valid_transaction_data(
+            tipo_operacion=Transaction.TipoOperacion.VENTA,
+            monto_origen=Decimal('100.00'),
+            monto_destino=Decimal('750000.00'),
+        ))
+        self.assertEqual(tx_venta.moneda_origen, self.usd)
+        self.assertEqual(tx_venta.moneda_destino, self.pyg)
+
+
+class TransactionOrderFormTest(TransactionTestMixin, TestCase):
+    """Pruebas del formulario TransactionOrderForm."""
+
+    def test_form_filters_querysets_by_cliente(self):
+        """El formulario filtra los medios de pago y acreditación del cliente especificado."""
+        form = TransactionOrderForm(cliente=self.cliente)
+        pago_ids = list(form.fields['medio_pago_origen'].queryset.values_list('id', flat=True))
+        acred_ids = list(form.fields['medio_acreditacion_destino'].queryset.values_list('id', flat=True))
+
+        self.assertIn(self.medio_pago.id, pago_ids)
+        self.assertNotIn(self.otro_medio_pago.id, pago_ids)
+        self.assertIn(self.medio_acreditacion.id, acred_ids)
+        self.assertNotIn(self.otro_medio_acreditacion.id, acred_ids)
+
+    def test_form_valid_with_live_parameters(self):
+        """Formulario válido con parámetros de cotización en vivo."""
+        data = {
+            'base_currency_code': 'USD',
+            'target_currency_code': 'PYG',
+            'amount': '100.00',
+            'operation_type': 'BUY',
+            'is_source_base': True,
+            'medio_pago_origen': self.medio_pago.id,
+            'medio_acreditacion_destino': self.medio_acreditacion.id,
+            'observaciones': 'Nota de prueba',
+        }
+        form = TransactionOrderForm(data=data, cliente=self.cliente)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_invalid_missing_token_and_live_params(self):
+        """Formulario inválido si no provee ni token ni datos completos de cotización."""
+        data = {
+            'medio_pago_origen': self.medio_pago.id,
+            'medio_acreditacion_destino': self.medio_acreditacion.id,
+        }
+        form = TransactionOrderForm(data=data, cliente=self.cliente)
+        self.assertFalse(form.is_valid())
+        self.assertIn('__all__', form.errors)
 
 
 class TransactionServiceTest(TransactionTestMixin, TestCase):
@@ -239,6 +358,62 @@ class TransactionServiceTest(TransactionTestMixin, TestCase):
         self.assertEqual(tx.cliente, self.cliente)
         self.assertEqual(tx.monto_destino, Decimal('100.00'))
         self.assertEqual(tx.monto_origen, Decimal('760000.00'))
+
+    def test_create_order_from_live_quote_sell_success(self):
+        """Creación exitosa de transacción de VENTA (SELL)."""
+        request = self.factory.get('/')
+        request.user = self.user
+        request.active_customer = self.cliente
+
+        tx = TransactionService.create_order_from_live_quote(
+            request=request,
+            base_currency_code='USD',
+            target_currency_code='PYG',
+            amount=Decimal('100.00'),
+            operation_type='SELL',
+            is_source_base=True,
+            medio_pago_id=self.medio_pago.id,
+            medio_acreditacion_id=self.medio_acreditacion.id,
+            cliente=self.cliente,
+            usuario=self.user,
+        )
+
+        self.assertIsNotNone(tx.id)
+        self.assertEqual(tx.tipo_operacion, Transaction.TipoOperacion.VENTA)
+        self.assertEqual(tx.monto_origen, Decimal('100.00'))
+        self.assertEqual(tx.monto_destino, Decimal('750000.00'))
+
+    def test_create_order_from_live_quote_violates_operation_limit(self):
+        """Lanza ValidationError si el monto no respeta los límites operativos configurados."""
+        OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('500.00'),
+            limite_diario=Decimal('1000.00'),
+            limite_mensual=Decimal('5000.00'),
+            is_active=True,
+        )
+
+        request = self.factory.get('/')
+        request.user = self.user
+        request.active_customer = self.cliente
+
+        # Monto 10 USD está por debajo del mínimo de 50 USD
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.create_order_from_live_quote(
+                request=request,
+                base_currency_code='USD',
+                target_currency_code='PYG',
+                amount=Decimal('10.00'),
+                operation_type='BUY',
+                is_source_base=True,
+                medio_pago_id=self.medio_pago.id,
+                medio_acreditacion_id=self.medio_acreditacion.id,
+                cliente=self.cliente,
+                usuario=self.user,
+            )
+        self.assertIn('amount', ctx.exception.message_dict)
 
     def test_create_order_from_frozen_quote_success(self):
         """Creación exitosa usando cotización congelada en sesión."""
@@ -309,85 +484,25 @@ class TransactionServiceTest(TransactionTestMixin, TestCase):
             )
         self.assertIn('medio_pago_origen', ctx.exception.message_dict)
 
+    def test_create_order_medio_acreditacion_ajeno_lanza_error(self):
+        """Falla si el medio de acreditación pertenece a otro cliente."""
+        request = self.factory.get('/')
+        request.user = self.user
+        request.active_customer = self.cliente
 
-class TransactionViewsTest(TransactionTestMixin, TestCase):
-    """Pruebas de integración para las Vistas Web y API de Transacciones."""
-
-    def setUp(self):
-        self.client.force_login(self.user)
-
-    def test_transaction_create_view_get(self):
-        """GET /transactions/create/ renderiza el formulario de confirmación."""
-        url = reverse('transactions:create') + '?base=USD&target=PYG&amount=100&operation_type=BUY'
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'transactions/transaction_create.html')
-        self.assertIn('form', response.context)
-        self.assertIn('quote_data', response.context)
-
-    def test_transaction_confirm_view_post_success(self):
-        """POST /transactions/confirm/ registra la orden y redirige al detalle."""
-        url = reverse('transactions:confirm')
-        data = {
-            'base_currency_code': 'USD',
-            'target_currency_code': 'PYG',
-            'amount': '100.00',
-            'operation_type': 'BUY',
-            'is_source_base': 'true',
-            'medio_pago_origen': self.medio_pago.id,
-            'medio_acreditacion_destino': self.medio_acreditacion.id,
-            'observaciones': 'Prueba POST confirmación',
-        }
-        response = self.client.post(url, data)
-
-        self.assertEqual(response.status_code, 302)
-        tx = Transaction.objects.latest('id')
-        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': tx.pk}))
-        self.assertEqual(tx.observaciones, 'Prueba POST confirmación')
-
-    def test_transaction_detail_view(self):
-        """GET /transactions/<pk>/ visualiza el detalle de la transacción."""
-        tx = Transaction.objects.create(**self._build_valid_transaction_data())
-        url = reverse('transactions:detail', kwargs={'pk': tx.pk})
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'transactions/transaction_detail.html')
-        self.assertEqual(response.context['transaction'].id, tx.id)
-
-    def test_transaction_list_view(self):
-        """GET /transactions/ lista las operaciones filtrables."""
-        tx = Transaction.objects.create(**self._build_valid_transaction_data())
-        url = reverse('transactions:list')
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'transactions/transaction_list.html')
-        self.assertEqual(len(response.context['transactions']), 1)
-
-    def test_transaction_api_create_view_success(self):
-        """POST /transactions/api/create/ genera la orden vía JSON REST API."""
-        url = reverse('transactions:api_create')
-        payload = {
-            'base_currency_code': 'USD',
-            'target_currency_code': 'PYG',
-            'amount': 150.00,
-            'operation_type': 'BUY',
-            'is_source_base': True,
-            'medio_pago_id': self.medio_pago.id,
-            'medio_acreditacion_id': self.medio_acreditacion.id,
-        }
-        response = self.client.post(
-            url,
-            data=json.dumps(payload),
-            content_type='application/json',
-        )
-
-        self.assertEqual(response.status_code, 200)
-        res_json = response.json()
-        self.assertTrue(res_json['success'])
-        self.assertIn('codigo_referencia', res_json['transaction'])
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.create_order_from_live_quote(
+                request=request,
+                base_currency_code='USD',
+                target_currency_code='PYG',
+                amount=Decimal('100.00'),
+                operation_type='BUY',
+                is_source_base=True,
+                medio_pago_id=self.medio_pago.id,
+                medio_acreditacion_id=self.otro_medio_acreditacion.id,
+                cliente=self.cliente,
+            )
+        self.assertIn('medio_acreditacion_destino', ctx.exception.message_dict)
 
     def test_is_transaction_expired(self):
         """is_transaction_expired detecta si pasaron más de 5 minutos desde la creación."""
@@ -461,6 +576,122 @@ class TransactionViewsTest(TransactionTestMixin, TestCase):
             )
         self.assertIn('estado', ctx.exception.message_dict)
 
+
+class TransactionViewsTest(TransactionTestMixin, TestCase):
+    """Pruebas de integración para las Vistas Web y API de Transacciones."""
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_transaction_create_view_get(self):
+        """GET /transactions/create/ renderiza el formulario de confirmación."""
+        url = reverse('transactions:create') + '?base=USD&target=PYG&amount=100&operation_type=BUY'
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/transaction_create.html')
+        self.assertIn('form', response.context)
+        self.assertIn('quote_data', response.context)
+
+    def test_transaction_confirm_view_post_success(self):
+        """POST /transactions/confirm/ registra la orden y redirige al detalle."""
+        url = reverse('transactions:confirm')
+        data = {
+            'base_currency_code': 'USD',
+            'target_currency_code': 'PYG',
+            'amount': '100.00',
+            'operation_type': 'BUY',
+            'is_source_base': 'true',
+            'medio_pago_origen': self.medio_pago.id,
+            'medio_acreditacion_destino': self.medio_acreditacion.id,
+            'observaciones': 'Prueba POST confirmación',
+        }
+        response = self.client.post(url, data)
+
+        self.assertEqual(response.status_code, 302)
+        tx = Transaction.objects.latest('id')
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': tx.pk}))
+        self.assertEqual(tx.observaciones, 'Prueba POST confirmación')
+
+    def test_transaction_detail_view(self):
+        """GET /transactions/<pk>/ visualiza el detalle de la transacción."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data())
+        url = reverse('transactions:detail', kwargs={'pk': tx.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/transaction_detail.html')
+        self.assertEqual(response.context['transaction'].id, tx.id)
+        self.assertIn('remaining_seconds', response.context)
+
+    def test_transaction_detail_view_idor_prevention(self):
+        """user1 no puede ver los detalles de una transacción del cliente 2 (retorna 404)."""
+        tx2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:detail', kwargs={'pk': tx2.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_transaction_receipt_view(self):
+        """GET /transactions/<pk>/receipt/ renderiza el comprobante formal de liquidación."""
+        tx = Transaction.objects.create(**self._build_valid_transaction_data())
+        url = reverse('transactions:receipt', kwargs={'pk': tx.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/receipt.html')
+        self.assertEqual(response.context['transaction'].id, tx.id)
+        self.assertContains(response, tx.codigo_referencia)
+
+    def test_transaction_receipt_view_idor_prevention(self):
+        """user1 no puede acceder al comprobante de transacción del cliente 2."""
+        tx2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:receipt', kwargs={'pk': tx2.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_transaction_list_view_and_filtering(self):
+        """GET /transactions/ lista operaciones del cliente y aplica filtros por estado."""
+        tx1 = Transaction.objects.create(**self._build_valid_transaction_data(
+            estado=Transaction.Estado.PENDIENTE
+        ))
+        tx2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            estado=Transaction.Estado.COMPLETADA
+        ))
+        url = reverse('transactions:list') + '?estado=PENDIENTE'
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/transaction_list.html')
+        transactions_list = response.context['transactions']
+        self.assertIn(tx1, transactions_list)
+        self.assertNotIn(tx2, transactions_list)
+
+    def test_transaction_list_view_idor_isolation(self):
+        """Aislamiento de datos: user1 jamás ve las transacciones del cliente 2 en el listado."""
+        tx_user1 = Transaction.objects.create(**self._build_valid_transaction_data())
+        tx_user2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:list')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        transactions_list = list(response.context['transactions'])
+        self.assertIn(tx_user1, transactions_list)
+        self.assertNotIn(tx_user2, transactions_list)
+
     def test_cancel_view_post_success(self):
         """POST /transactions/<pk>/cancel/ anula la orden y redirige al detalle."""
         tx = Transaction.objects.create(**self._build_valid_transaction_data())
@@ -470,6 +701,55 @@ class TransactionViewsTest(TransactionTestMixin, TestCase):
         self.assertEqual(response.status_code, 302)
         tx.refresh_from_db()
         self.assertEqual(tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_cancel_view_idor_prevention(self):
+        """user1 no puede cancelar una orden perteneciente a cliente 2 (redirige con mensaje de error)."""
+        tx2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:cancel', kwargs={'pk': tx2.pk})
+        response = self.client.post(url, {'motivo': 'Intento no autorizado'})
+
+        self.assertEqual(response.status_code, 302)
+        tx2.refresh_from_db()
+        self.assertEqual(tx2.estado, Transaction.Estado.PENDIENTE)
+
+    def test_transaction_api_create_view_success(self):
+        """POST /transactions/api/create/ genera la orden vía JSON REST API."""
+        url = reverse('transactions:api_create')
+        payload = {
+            'base_currency_code': 'USD',
+            'target_currency_code': 'PYG',
+            'amount': 150.00,
+            'operation_type': 'BUY',
+            'is_source_base': True,
+            'medio_pago_id': self.medio_pago.id,
+            'medio_acreditacion_id': self.medio_acreditacion.id,
+        }
+        response = self.client.post(
+            url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        res_json = response.json()
+        self.assertTrue(res_json['success'])
+        self.assertIn('codigo_referencia', res_json['transaction'])
+
+    def test_transaction_api_create_view_invalid_json(self):
+        """POST /transactions/api/create/ responde error 400 ante cuerpo JSON corrupto."""
+        url = reverse('transactions:api_create')
+        response = self.client.post(
+            url,
+            data='cuerpo_invalido_no_json',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        res_json = response.json()
+        self.assertFalse(res_json['success'])
 
     def test_cancel_api_view_post_success(self):
         """POST /transactions/api/<pk>/cancel/ anula la orden vía API JSON REST."""
@@ -487,3 +767,39 @@ class TransactionViewsTest(TransactionTestMixin, TestCase):
         self.assertTrue(res_json['success'])
         tx.refresh_from_db()
         self.assertEqual(tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_cancel_api_view_idor_prevention(self):
+        """POST /transactions/api/<pk>/cancel/ rechaza anulación de transacción de otro cliente."""
+        tx2 = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:api_cancel', kwargs={'pk': tx2.pk})
+        payload = {'motivo': 'Intento IDOR'}
+        response = self.client.post(
+            url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        res_json = response.json()
+        self.assertFalse(res_json['success'])
+        tx2.refresh_from_db()
+        self.assertEqual(tx2.estado, Transaction.Estado.PENDIENTE)
+
+
+class TransactionAdminTest(TransactionTestMixin, TestCase):
+    """Pruebas para el modelo admin de transacciones."""
+
+    def test_transaction_admin_configuration(self):
+        """Verifica la correcta parametrización de campos en TransactionAdmin."""
+        admin_site = AdminSite()
+        tx_admin = TransactionAdmin(Transaction, admin_site)
+
+        self.assertIn('codigo_referencia', tx_admin.list_display)
+        self.assertIn('estado', tx_admin.list_display)
+        self.assertIn('estado', tx_admin.list_filter)
+        self.assertIn('codigo_referencia', tx_admin.search_fields)
+        self.assertIn('codigo_referencia', tx_admin.readonly_fields)
