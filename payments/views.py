@@ -2,9 +2,8 @@
 Módulo de vistas y controladores para la gestión segura de Medios de Pago (payments).
 
 Implementa la arquitectura dual:
-1. **Vistas Basadas en Clases (CBVs)** para interfaz web de usuario con protección de sesión,
-   prevención de Insecure Direct Object References (IDOR) circunscrita a la ficha de cliente del usuario autenticado,
-   validación de estados predeterminados y filtrado interactivo.
+
+1. **Vistas Basadas en Clases (CBVs)** para interfaz web de usuario con protección de sesión, prevención de Insecure Direct Object References (IDOR) circunscrita a la ficha de cliente del usuario autenticado, validación de estados predeterminados y filtrado interactivo.
 2. **Endpoints API REST (JSON)** para consultas programáticas y operaciones seguras.
 """
 

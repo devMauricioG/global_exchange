@@ -2,11 +2,11 @@
 Módulo de pruebas automatizadas (PyUnit / Django TestCase) para la aplicación payments (SCRUM-83 / SCRUM-68).
 
 Cubre exhaustivamente:
+
 - Integridad, ordenamiento y catálogo del modelo :class:`~payments.models.EntidadFinanciera`.
 - Integridad y validaciones del modelo :class:`~payments.models.PaymentMethod` (Transferencias, Billeteras, Tarjetas, Efectivo).
 - Reglas de negocio de exclusividad de medio predeterminado por cliente.
-- Formularios dedicados :class:`~payments.forms.CreditDebitCardForm`, :class:`~payments.forms.BankTransferForm`,
-  :class:`~payments.forms.DigitalWalletForm`, :class:`~payments.forms.CashBranchForm` y :class:`~payments.forms.ReceivingMethodForm`.
+- Formularios dedicados :class:`~payments.forms.CreditDebitCardForm`, :class:`~payments.forms.BankTransferForm`, :class:`~payments.forms.DigitalWalletForm`, :class:`~payments.forms.CashBranchForm` y :class:`~payments.forms.ReceivingMethodForm`.
 - Integridad y reglas del modelo :class:`~payments.models.ReceivingMethod` (cuentas de acreditación de fondos).
 - Vistas CBV web (aislamiento de datos, prevención de IDOR y control de acceso).
 - Endpoints de API REST (GET, POST, PUT, PATCH, DELETE).

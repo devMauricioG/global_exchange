@@ -2,11 +2,11 @@
 Módulo de servicios y motor de cálculo financiero para Tasas de Cambio y Comisiones (rates).
 
 Provee las clases y funciones de negocio especializadas para:
+
 1. Resolución dinámica del cliente activo y su segmento comercial (:class:`~customers.models.Cliente.Segmentacion`).
 2. Consulta de reglas de comisión y políticas de precios por segmento (:class:`~rates.models.SegmentCommission`).
 3. Obtención y validación de tasas de cambio vigentes (:class:`~rates.models.ExchangeRate`).
-4. Motor matemático de cálculo de tasas netas, márgenes de spread bonificados, comisiones
-   porcentuales/fijas y liquidaciones de cotización.
+4. Motor matemático de cálculo de tasas netas, márgenes de spread bonificados, comisiones porcentuales/fijas y liquidaciones de cotización.
 """
 
 from datetime import timedelta
@@ -434,7 +434,7 @@ class RateCalculationService:
         Ejecuta el cálculo completo de la cotización neta para una transacción cambiaria.
 
         Fórmulas financieras aplicadas:
-        --------------------------------
+
         1. **Tasa Base Oficial:**
            - Si la operación es ``BUY`` (el cliente compra divisa base): la casa vende a ``exchange_rate.sell_rate``.
            - Si la operación es ``SELL`` (el cliente vende divisa base): la casa compra a ``exchange_rate.buy_rate``.
@@ -443,17 +443,11 @@ class RateCalculationService:
            - Margen de spread base: ``spread = sell_rate - buy_rate``.
            - Spread efectivo bonificado: ``effective_spread = spread * (1 - spread_discount_percentage / 100)``.
            - Ahorro de spread por unidad: ``spread_benefit = spread - effective_spread``.
-           - Tasa efectiva preferencial (*effective_rate*):
-             * En ``BUY``: ``sell_rate - (spread_benefit / 2)`` (el cliente paga menos por cada unidad de divisa base).
-             * En ``SELL``: ``buy_rate + (spread_benefit / 2)`` (el cliente recibe más por cada unidad de divisa base).
+           - Tasa efectiva preferencial (*effective_rate*): en BUY ``sell_rate - (spread_benefit / 2)``, en SELL ``buy_rate + (spread_benefit / 2)``.
 
         3. **Conversión Bruta de Montos:**
-           - Si ``is_source_base == True`` (monto expresado en divisa base, ej: 1.000 USD):
-             * ``base_amount = amount``
-             * ``gross_target_amount = amount * effective_rate``
-           - Si ``is_source_base == False`` (monto expresado en divisa contraparte, ej: 7.500.000 PYG):
-             * ``gross_target_amount = amount``
-             * ``base_amount = amount / effective_rate``
+           - Si ``is_source_base == True``: ``base_amount = amount`` y ``gross_target_amount = amount * effective_rate``.
+           - Si ``is_source_base == False``: ``gross_target_amount = amount`` y ``base_amount = amount / effective_rate``.
 
         4. **Comisiones y Cargos Administrativos:**
            - Comisión porcentual: ``(gross_target_amount * commission_percentage) / 100``.
@@ -461,12 +455,8 @@ class RateCalculationService:
            - Comisión total: ``total_commission = commission_percentage_amount + fixed_fee``.
 
         5. **Monto Neto Final y Tasa Neta Efectiva:**
-           - En ``BUY`` (cliente entrega moneda objetivo para recibir divisa base):
-             * ``net_target_amount = gross_target_amount + total_commission`` (total a pagar).
-             * ``final_effective_rate = net_target_amount / base_amount``.
-           - En ``SELL`` (cliente entrega divisa base para recibir moneda objetivo):
-             * ``net_target_amount = max(0, gross_target_amount - total_commission)`` (total a recibir).
-             * ``final_effective_rate = net_target_amount / base_amount``.
+           - En ``BUY``: ``net_target_amount = gross_target_amount + total_commission``, ``final_effective_rate = net_target_amount / base_amount``.
+           - En ``SELL``: ``net_target_amount = max(0, gross_target_amount - total_commission)``, ``final_effective_rate = net_target_amount / base_amount``.
 
         6. **Validación de Límites Operativos (SCRUM-77):**
            - Control de topes mínimos, máximos, diarios y mensuales según el segmento del cliente y divisa.
