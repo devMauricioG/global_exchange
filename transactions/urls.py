@@ -11,6 +11,7 @@ from transactions.views import (
     TransactionConfirmView,
     TransactionDetailView,
     TransactionListView,
+    TransactionReceiptView,
 )
 
 app_name = 'transactions'
@@ -21,6 +22,7 @@ urlpatterns = [
     path('confirm/', TransactionConfirmView.as_view(), name='confirm'),
     path('<int:pk>/', TransactionDetailView.as_view(), name='detail'),
     path('<int:pk>/cancel/', TransactionCancelView.as_view(), name='cancel'),
+    path('<int:pk>/receipt/', TransactionReceiptView.as_view(), name='receipt'),
     path('api/create/', TransactionCreateApiView.as_view(), name='api_create'),
     path('api/<int:pk>/cancel/', TransactionCancelApiView.as_view(), name='api_cancel'),
 ]

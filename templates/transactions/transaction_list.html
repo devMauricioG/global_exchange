@@ -65,10 +65,29 @@
                 </select>
             </div>
 
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="filter_moneda" style="font-size: 0.875rem; color: var(--text-muted); font-weight: 600;">Moneda:</label>
+                <select name="moneda" id="filter_moneda" class="form-select" style="width: auto; padding: 0.4rem 0.75rem; font-size: 0.875rem;">
+                    <option value="">-- Todas --</option>
+                    {% for curr in currencies %}
+                        <option value="{{ curr.code }}" {% if selected_moneda == curr.code %}selected{% endif %}>{{ curr.code }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="filter_fecha_desde" style="font-size: 0.875rem; color: var(--text-muted); font-weight: 600;">Desde:</label>
+                <input type="date" name="fecha_desde" id="filter_fecha_desde" class="form-input" value="{{ selected_fecha_desde }}" style="padding: 0.4rem 0.75rem; font-size: 0.875rem; width: auto;">
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="filter_fecha_hasta" style="font-size: 0.875rem; color: var(--text-muted); font-weight: 600;">Hasta:</label>
+                <input type="date" name="fecha_hasta" id="filter_fecha_hasta" class="form-input" value="{{ selected_fecha_hasta }}" style="padding: 0.4rem 0.75rem; font-size: 0.875rem; width: auto;">
+            </div>
+
             <button type="submit" class="btn btn-secondary" style="padding: 0.4rem 0.875rem; font-size: 0.875rem;">
                 🔍 Filtrar
             </button>
-            {% if selected_estado or selected_tipo %}
+            {% if selected_estado or selected_tipo or selected_moneda or selected_fecha_desde or selected_fecha_hasta %}
                 <a href="{% url 'transactions:list' %}" class="btn btn-secondary" style="padding: 0.4rem 0.875rem; font-size: 0.875rem;">
                     Limpiar
                 </a>
@@ -137,7 +156,18 @@
                                 <td style="padding: 0.875rem 1rem; color: var(--text-muted); font-size: 0.825rem;">
                                     {{ tx.created_at|date:"d/m/Y H:i" }}
                                 </td>
-                                <td style="padding: 0.875rem 1.25rem; text-align: right; white-space: nowrap;">
+                                <td style="padding: 0.875rem 1.25rem; text-align: right; display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center;">
+                                    <button type="button" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;"
+                                        onclick="openTrazabilidadModal(
+                                            '{{ tx.codigo_referencia }}',
+                                            '{{ tx.created_at|date:'d/m/Y H:i:s' }}',
+                                            '{{ tx.updated_at|date:'d/m/Y H:i:s' }}',
+                                            '{{ tx.usuario.username|default:'Sistema Automático' }}',
+                                            '{{ tx.token_congelamiento|default:'N/A' }}',
+                                            '{{ tx.observaciones|escapejs|default:'Ninguna' }}'
+                                        )">
+                                        📜 Trazabilidad
+                                    </button>
                                     <a href="{% url 'transactions:detail' pk=tx.pk %}" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.8rem;">
                                         Ver Recibo
                                     </a>
@@ -160,13 +190,13 @@
             {% if is_paginated %}
                 <div style="padding: 1rem; display: flex; justify-content: center; gap: 0.5rem; border-top: 1px solid var(--border-color);">
                     {% if page_obj.has_previous %}
-                        <a href="?page={{ page_obj.previous_page_number }}&estado={{ selected_estado }}&tipo={{ selected_tipo }}" class="btn btn-secondary" style="padding: 0.35rem 0.75rem;">← Anterior</a>
+                        <a href="?page={{ page_obj.previous_page_number }}&estado={{ selected_estado }}&tipo={{ selected_tipo }}&moneda={{ selected_moneda }}&fecha_desde={{ selected_fecha_desde }}&fecha_hasta={{ selected_fecha_hasta }}" class="btn btn-secondary" style="padding: 0.35rem 0.75rem;">← Anterior</a>
                     {% endif %}
                     <span style="align-self: center; font-size: 0.875rem; color: var(--text-muted);">
                         Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
                     </span>
                     {% if page_obj.has_next %}
-                        <a href="?page={{ page_obj.next_page_number }}&estado={{ selected_estado }}&tipo={{ selected_tipo }}" class="btn btn-secondary" style="padding: 0.35rem 0.75rem;">Siguiente →</a>
+                        <a href="?page={{ page_obj.next_page_number }}&estado={{ selected_estado }}&tipo={{ selected_tipo }}&moneda={{ selected_moneda }}&fecha_desde={{ selected_fecha_desde }}&fecha_hasta={{ selected_fecha_hasta }}" class="btn btn-secondary" style="padding: 0.35rem 0.75rem;">Siguiente →</a>
                     {% endif %}
                 </div>
             {% endif %}
@@ -190,4 +220,70 @@
         }
     }
 </style>
+    <!-- Modal de Trazabilidad -->
+    <div id="trazabilidadModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+        <div class="card" style="width: 100%; max-width: 500px; margin: 1rem; padding: 1.5rem; position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+                <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);">🔍 Trazabilidad Operativa</h3>
+                <button onclick="closeTrazabilidadModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer;">&times;</button>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Código de Referencia</label>
+                    <div id="modal-ref" style="font-weight: 600; color: var(--text-main);"></div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div>
+                        <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Fecha de Creación</label>
+                        <div id="modal-created" style="color: var(--text-main);"></div>
+                    </div>
+                    <div>
+                        <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Última Modificación</label>
+                        <div id="modal-updated" style="color: var(--text-main);"></div>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Operador / Usuario</label>
+                    <div id="modal-user" style="color: var(--text-main);"></div>
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Token Congelamiento</label>
+                    <div id="modal-token" style="font-family: monospace; color: var(--primary);"></div>
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Observaciones</label>
+                    <div id="modal-obs" style="background: rgba(15,23,42,0.5); padding: 0.75rem; border-radius: 0.5rem; font-size: 0.9rem; color: var(--text-muted); margin-top: 0.25rem;"></div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 1.5rem; text-align: right;">
+                <button class="btn btn-secondary" onclick="closeTrazabilidadModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openTrazabilidadModal(ref, created, updated, user, token, obs) {
+            document.getElementById('modal-ref').textContent = ref;
+            document.getElementById('modal-created').textContent = created;
+            document.getElementById('modal-updated').textContent = updated;
+            document.getElementById('modal-user').textContent = user;
+            document.getElementById('modal-token').textContent = token;
+            document.getElementById('modal-obs').textContent = obs || 'Ninguna';
+            
+            const modal = document.getElementById('trazabilidadModal');
+            modal.style.display = 'flex';
+        }
+
+        function closeTrazabilidadModal() {
+            document.getElementById('trazabilidadModal').style.display = 'none';
+        }
+        
+        document.getElementById('trazabilidadModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTrazabilidadModal();
+            }
+        });
+    </script>
 {% endblock %}
