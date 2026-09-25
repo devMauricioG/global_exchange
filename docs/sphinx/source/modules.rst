@@ -8,4 +8,5 @@ global_exchange
    customers
    payments
    rates
+   transactions
    config
