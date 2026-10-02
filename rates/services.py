@@ -608,6 +608,18 @@ class RateCalculationService:
             'operation_type': op_type,
             'operation_label': 'Compra de Divisas' if op_type == 'BUY' else 'Venta de Divisas',
             'is_source_base': is_source_base,
+            # Preserve the value entered by the user.  It is needed when an
+            # order is created from a live quote: ``base_amount`` is a derived
+            # value whenever the input was expressed in the target currency.
+            'input_amount': dec_amount,
+            # Keep this JSON-serializable because the same calculation powers
+            # the web UI, frozen quotes and the REST endpoint.
+            'input_currency': {
+                'code': (base_curr if is_source_base else target_curr).code,
+                'name': (base_curr if is_source_base else target_curr).name,
+                'symbol': (base_curr if is_source_base else target_curr).symbol,
+                'decimal_places': base_decimals if is_source_base else target_decimals,
+            },
             'segment': {
                 'code': segment_code,
                 'name': segment_display,

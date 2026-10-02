@@ -49,7 +49,7 @@ class TransactionCreateView(LoginRequiredMixin, View):
         cliente = get_active_customer(request)
         if not cliente:
             messages.error(request, 'No tenés una ficha de cliente activa vinculada para operar.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         token = request.GET.get('token', '').strip()
         base_code = request.GET.get('base', 'USD').strip().upper()
@@ -86,7 +86,7 @@ class TransactionCreateView(LoginRequiredMixin, View):
 
         if not quote_data:
             messages.error(request, error_msg or 'No se pudo cargar los datos de la cotización.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         # Buscar medios de pago predeterminados para inicializar el formulario
         default_payment = PaymentMethod.objects.filter(cliente=cliente, activo=True, es_predeterminado=True).first()
@@ -130,7 +130,7 @@ class TransactionConfirmView(LoginRequiredMixin, View):
         cliente = get_active_customer(request)
         if not cliente:
             messages.error(request, 'No se pudo verificar el cliente activo para esta transacción.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         form = TransactionOrderForm(request.POST, cliente=cliente)
         token = request.POST.get('token_congelamiento', '').strip()

@@ -329,9 +329,22 @@ class ExchangeRate(models.Model):
         :return: Par de monedas, tasa de compra, venta y spread.
         :rtype: str
         """
-        base = getattr(self.base_currency, 'code', '???')
-        target = getattr(self.target_currency, 'code', '???')
-        return f'{base}/{target} — Compra: {self.buy_rate} | Venta: {self.sell_rate} (Spread: {self.spread})'
+        base_currency = self.base_currency
+        target_currency = self.target_currency
+        base = getattr(base_currency, 'code', '???')
+        target = getattr(target_currency, 'code', '???')
+        decimals = getattr(target_currency, 'decimal_places', 2)
+        quantize = Decimal('1').scaleb(-decimals)
+
+        def format_rate(value: Decimal) -> str:
+            """Render rates with the precision configured for the quoted currency."""
+            normalized = value.quantize(quantize)
+            return f'{normalized:.{decimals}f}'
+
+        return (
+            f'{base}/{target} — Compra: {format_rate(self.buy_rate)} | '
+            f'Venta: {format_rate(self.sell_rate)} (Spread: {format_rate(self.spread)})'
+        )
 
 
 class SegmentCommission(models.Model):

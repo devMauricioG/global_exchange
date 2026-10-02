@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load currency_filters %}
 
 {% block title %}Confirmar Orden de Cambio — Global Exchange{% endblock %}
 
@@ -54,14 +55,14 @@
 
                     <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
                         <span style="color: var(--text-muted);">Tasa Base Oficial:</span>
-                        <span>{{ quote_data.official_rate|floatformat:4 }} {{ quote_data.target_currency.code }}</span>
+                        <span>{{ quote_data.official_rate|format_rate:quote_data.target_currency.decimal_places }} {{ quote_data.target_currency.code }}</span>
                     </div>
 
                     <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
                         <span style="color: var(--text-muted);">Comisión de Segmento:</span>
                         <span style="color: var(--warning);">
                             {% if quote_data.total_commission %}
-                                {{ quote_data.total_commission|floatformat:2 }} {{ quote_data.target_currency.code }}
+                                {{ quote_data.total_commission|format_currency:quote_data.target_currency }} {{ quote_data.target_currency.code }}
                             {% else %}
                                 0.00 {{ quote_data.target_currency.code }}
                             {% endif %}
@@ -70,7 +71,7 @@
 
                     <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
                         <span style="color: var(--text-muted);">Tasa Neta Aplicada:</span>
-                        <strong style="color: var(--primary); font-size: 1.05rem;">{{ quote_data.final_effective_rate|floatformat:4 }} {{ quote_data.target_currency.code }}</strong>
+                        <strong style="color: var(--primary); font-size: 1.05rem;">{{ quote_data.final_effective_rate|format_rate:quote_data.target_currency.decimal_places }} {{ quote_data.target_currency.code }}</strong>
                     </div>
 
                     <!-- Highlight de Montos -->
@@ -81,9 +82,9 @@
                             </span>
                             <span style="font-weight: 700; color: var(--text-main); font-size: 1rem;">
                                 {% if quote_data.operation_type == 'SELL' %}
-                                    {{ quote_data.base_amount|floatformat:2 }} {{ quote_data.base_currency.code }}
+                                    {{ quote_data.base_amount|format_currency:quote_data.base_currency }} {{ quote_data.base_currency.code }}
                                 {% else %}
-                                    {{ quote_data.net_target_amount|floatformat:2 }} {{ quote_data.target_currency.code }}
+                                    {{ quote_data.net_target_amount|format_currency:quote_data.target_currency }} {{ quote_data.target_currency.code }}
                                 {% endif %}
                             </span>
                         </div>
@@ -93,9 +94,9 @@
                             </span>
                             <span style="font-weight: 800; color: var(--success); font-size: 1.15rem;">
                                 {% if quote_data.operation_type == 'SELL' %}
-                                    {{ quote_data.net_target_amount|floatformat:2 }} {{ quote_data.target_currency.code }}
+                                    {{ quote_data.net_target_amount|format_currency:quote_data.target_currency }} {{ quote_data.target_currency.code }}
                                 {% else %}
-                                    {{ quote_data.base_amount|floatformat:2 }} {{ quote_data.base_currency.code }}
+                                    {{ quote_data.base_amount|format_currency:quote_data.base_currency }} {{ quote_data.base_currency.code }}
                                 {% endif %}
                             </span>
                         </div>

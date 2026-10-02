@@ -229,8 +229,8 @@ class ExchangeRateModelTest(TestCase):
             sell_rate=Decimal('7500.000000'),
         )
         self.assertIn('USD/PYG', str(rate))
-        self.assertIn('Compra: 7400.000000', str(rate))
-        self.assertIn('Venta: 7500.000000', str(rate))
+        self.assertIn('Compra: 7400', str(rate))
+        self.assertIn('Venta: 7500', str(rate))
 
 
 class SegmentCommissionModelTest(TestCase):

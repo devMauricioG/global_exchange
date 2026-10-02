@@ -66,13 +66,35 @@ class ExchangeRateForm(forms.ModelForm):
             'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
         labels = {
-            'base_currency': 'Moneda Base (Origen)',
-            'target_currency': 'Moneda Destino (Cotizada)',
-            'buy_rate': 'Tasa de Compra',
-            'sell_rate': 'Tasa de Venta',
+            'base_currency': 'Moneda Base (1 unidad)',
+            'target_currency': 'Moneda Cotizada (precio expresado en esta moneda)',
+            'buy_rate': 'Tasa de Compra (por 1 unidad de la moneda base)',
+            'sell_rate': 'Tasa de Venta (por 1 unidad de la moneda base)',
             'valid_to': 'Vigente Hasta (Opcional)',
             'is_active': 'Activa',
         }
+
+    def clean(self):
+        """Keep the quote aligned with the precision of its quoted currency."""
+        cleaned_data = super().clean()
+        base = cleaned_data.get('base_currency')
+        target = cleaned_data.get('target_currency')
+        if base and target and base == target:
+            self.add_error('target_currency', 'La moneda cotizada debe ser diferente de la moneda base.')
+        if target:
+            allowed_decimals = target.decimal_places
+            quantize = Decimal('1').scaleb(-allowed_decimals)
+            for field_name in ('buy_rate', 'sell_rate'):
+                value = cleaned_data.get(field_name)
+                if value is not None and value != value.quantize(quantize):
+                    self.add_error(
+                        field_name,
+                        f'La tasa para {target.code} admite como máximo {allowed_decimals} decimales.',
+                    )
+                elif value is not None:
+                    # Normalize harmless trailing zeroes from old 6-decimal records.
+                    cleaned_data[field_name] = value.quantize(quantize)
+        return cleaned_data
 
 
 class CurrencyFilterForm(forms.Form):

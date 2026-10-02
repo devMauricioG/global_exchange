@@ -101,8 +101,12 @@ def format_currency(value, currency=None):
         return ''
 
     if currency is not None:
-        decimals = getattr(currency, 'decimals', getattr(currency, 'decimal_places', 2))
-        symbol = getattr(currency, 'symbol', '')
+        if isinstance(currency, dict):
+            decimals = currency.get('decimals', currency.get('decimal_places', 2))
+            symbol = currency.get('symbol', '')
+        else:
+            decimals = getattr(currency, 'decimals', getattr(currency, 'decimal_places', 2))
+            symbol = getattr(currency, 'symbol', '')
         formatted = _format_number(value, decimals)
         if symbol:
             return f'{symbol} {formatted}'
