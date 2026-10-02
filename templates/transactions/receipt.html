@@ -1,3 +1,4 @@
+{% load currency_filters %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -276,7 +277,7 @@
                 <td colspan="3" style="padding: 1.5rem 1rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase;">Tasa Neta Aplicada:</span>
-                        <span style="font-size: 1.25rem;" class="highlight">1 {{ transaction.base_currency.code }} = {{ transaction.tasa_neta|floatformat:4 }} {{ transaction.target_currency.code }}</span>
+                        <span style="font-size: 1.25rem;" class="highlight">1 {{ transaction.base_currency.code }} = {{ transaction.tasa_neta|format_rate:transaction.target_currency.decimal_places }} {{ transaction.target_currency.code }}</span>
                     </div>
                 </td>
             </tr>
