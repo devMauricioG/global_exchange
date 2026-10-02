@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% load currency_filters %}
+
+{% block title %}Transacción {{ transaction.codigo_referencia }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 850px; margin: 0 auto;">
+    <!-- Breadcrumb Header -->
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.25rem;">
+                <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main);">
+                    🧾 Comprobante: {{ transaction.codigo_referencia }}
+                </h1>
+                {% if transaction.estado == 'PENDIENTE' %}
+                    <span class="badge" style="background-color: var(--warning-bg); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.4);">
+                        ⏳ PENDIENTE DE PAGO
+                    </span>
+                {% elif transaction.estado == 'COMPLETADA' %}
+                    <span class="badge badge-active">
+                        ✅ COMPLETADA / LIQUIDADA
+                    </span>
+                {% else %}
+                    <span class="badge" style="background-color: var(--danger-bg); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.4);">
+                        ❌ CANCELADA
+                    </span>
+                {% endif %}
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">
+                Registrada el {{ transaction.created_at|date:"d/m/Y H:i:s" }}
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
+            <a href="{% url 'transactions:receipt' pk=transaction.pk %}" target="_blank" class="btn btn-secondary">
+                🖨️ Imprimir
+            </a>
+            <a href="{% url 'transactions:list' %}" class="btn btn-secondary">
+                📋 Mis Transacciones
+            </a>
+            <a href="{% url 'rates:rate_calculator' %}" class="btn btn-primary">
+                🧮 Nueva Cotización
+            </a>
+        </div>
+    </div>
+
+    {% if transaction.estado == 'PENDIENTE' %}
+        <!-- Banner de Temporizador de Expiración (5 min) -->
+        <div id="expirationTimerBanner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.875rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.5rem;">⏱️</span>
+                <div>
+                    <div style="font-weight: 700; color: var(--warning);">Tiempo Restante de Cotización Congelada</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        Si la transacción no se liquida en el plazo de 5 minutos, expira y pasa a estado cancelado.
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <span id="countdownTimer" style="font-size: 1.4rem; font-weight: 800; color: var(--warning); font-family: monospace;">
+                    --:--
+                </span>
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Card Principal Recibo -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <!-- Header Info Cliente -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">Cliente Titular</div>
+                <div style="font-size: 1.2rem; font-weight: 800; color: var(--text-main);">{{ transaction.cliente.nombre }}</div>
+                <div style="font-size: 0.875rem; color: var(--text-muted);">RUC / Doc: {{ transaction.cliente.documento_ruc }}</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">Segmento Comercial</div>
+                <span class="badge badge-min" style="margin-top: 0.25rem;">
+                    {{ transaction.cliente.get_segmentacion_display|default:"MINORISTA" }}
+                </span>
+            </div>
+        </div>
+
+        <!-- Desglose de la Operación -->
+        <div class="card-header">
+            <h2 class="card-title" style="font-size: 1.15rem;">💰 Desglose Financiero</h2>
+            <span class="badge {% if transaction.tipo_operacion == 'COMPRA' %}badge-min{% else %}badge-may{% endif %}">
+                {{ transaction.get_tipo_operacion_display }}
+            </span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;" class="detail-grid">
+            <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1.25rem;">
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.25rem;">Monto Entregado (Origen)</div>
+                <div style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">
+                    {{ transaction.monto_origen|floatformat:2 }} {{ transaction.moneda_origen.code }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-subtle); margin-top: 0.35rem;">
+                    Moneda: {{ transaction.moneda_origen.name }}
+                </div>
+            </div>
+
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0.75rem; padding: 1.25rem;">
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.25rem;">Monto a Liquidar (Destino)</div>
+                <div style="font-size: 1.5rem; font-weight: 800; color: var(--success);">
+                    {{ transaction.monto_destino|floatformat:2 }} {{ transaction.moneda_destino.code }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-subtle); margin-top: 0.35rem;">
+                    Moneda: {{ transaction.moneda_destino.name }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de Parámetros de Cotización -->
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.925rem;">
+            <tbody>
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 0; color: var(--text-muted);">Tasa Base Oficial:</td>
+                    <td style="padding: 0.75rem 0; text-align: right; font-weight: 600; color: var(--text-main);">
+                        1 {{ transaction.base_currency.code }} = {{ transaction.tasa_base|format_rate:transaction.target_currency.decimal_places }} {{ transaction.target_currency.code }}
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 0; color: var(--text-muted);">Comisión de Segmento Aplicada:</td>
+                    <td style="padding: 0.75rem 0; text-align: right; font-weight: 600; color: var(--warning);">
+                        {{ transaction.comision_segmento|floatformat:2 }} {{ transaction.target_currency.code }}
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 0; color: var(--text-muted);">Tasa Neta Aplicada:</td>
+                    <td style="padding: 0.75rem 0; text-align: right; font-weight: 800; color: var(--primary); font-size: 1.05rem;">
+                        1 {{ transaction.base_currency.code }} = {{ transaction.tasa_neta|format_rate:transaction.target_currency.decimal_places }} {{ transaction.target_currency.code }}
+                    </td>
+                </tr>
+                {% if transaction.token_congelamiento %}
+                    <tr style="border-bottom: 1px solid var(--border-color);">
+                        <td style="padding: 0.75rem 0; color: var(--text-muted);">Token de Cotización Congelada:</td>
+                        <td style="padding: 0.75rem 0; text-align: right;">
+                            <code>{{ transaction.token_congelamiento }}</code>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <!-- Medios de Pago e Instrumentos -->
+        <div class="card-header">
+            <h2 class="card-title" style="font-size: 1.15rem;">💳 Instrumentos Financieros Seleccionados</h2>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;" class="detail-grid">
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">
+                    Medio de Pago Origen (Débito)
+                </div>
+                <div style="font-weight: 700; color: var(--text-main);">{{ transaction.medio_pago_origen.entidad_bancaria }}</div>
+                <div style="font-size: 0.875rem; color: var(--text-muted);">
+                    {{ transaction.medio_pago_origen.get_tipo_medio_display }}: {{ transaction.medio_pago_origen.numero_cuenta }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-subtle);">
+                    Titular: {{ transaction.medio_pago_origen.titular }}
+                </div>
+            </div>
+
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 0.5rem;">
+                    Cuenta Destino (Acreditación)
+                </div>
+                <div style="font-weight: 700; color: var(--text-main);">{{ transaction.medio_acreditacion_destino.entidad_bancaria.nombre }}</div>
+                <div style="font-size: 0.875rem; color: var(--text-muted);">
+                    {{ transaction.medio_acreditacion_destino.get_tipo_cuenta_display }}: {{ transaction.medio_acreditacion_destino.numero_cuenta }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-subtle);">
+                    Titular: {{ transaction.medio_acreditacion_destino.titular }}
+                </div>
+            </div>
+        </div>
+
+        {% if transaction.observaciones %}
+            <div style="background: rgba(30, 41, 59, 0.4); border-left: 3px solid var(--primary); padding: 0.875rem 1.25rem; border-radius: 0.5rem; margin-bottom: 1.5rem; font-size: 0.9rem;">
+                <strong>Observaciones / Trazabilidad:</strong><br>
+                <span style="white-space: pre-wrap;">{{ transaction.observaciones }}</span>
+            </div>
+        {% endif %}
+
+        {% if can_cancel %}
+            <!-- Panel de Anulación Manual -->
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <strong style="color: var(--danger); font-size: 0.95rem;">Anulación Manual de Orden</strong>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">Podés anular manualmente esta transacción mientras permanezca en estado pendiente.</p>
+                </div>
+                <button type="button" onclick="document.getElementById('cancelOrderModal').style.display='flex'" class="btn btn-danger" style="padding: 0.6rem 1.15rem; font-weight: 700;">
+                    ❌ Anular Orden
+                </button>
+            </div>
+
+            <!-- Modal de Confirmación de Anulación -->
+            <div id="cancelOrderModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(4px); z-index: 999; align-items: center; justify-content: center; padding: 1rem;">
+                <div class="card" style="max-width: 500px; width: 100%; padding: 1.5rem; border: 1px solid rgba(239, 68, 68, 0.4);">
+                    <h3 style="font-size: 1.25rem; font-weight: 700; color: var(--danger); margin-bottom: 0.75rem;">
+                        ⚠️ Confirmar Anulación de Orden
+                    </h3>
+                    <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+                        ¿Estás seguro de que deseas anular la orden <strong>{{ transaction.codigo_referencia }}</strong>? Esta acción no se puede deshacer.
+                    </p>
+                    <form method="post" action="{% url 'transactions:cancel' pk=transaction.pk %}">
+                        {% csrf_token %}
+                        <div style="margin-bottom: 1.25rem;">
+                            <label for="motivo_cancel" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 0.35rem;">
+                                Motivo de anulación (opcional):
+                            </label>
+                            <input type="text" name="motivo" id="motivo_cancel" class="form-input" placeholder="Ej: Cambio de opinión, error en selección de medio de pago..." />
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                            <button type="button" onclick="document.getElementById('cancelOrderModal').style.display='none'" class="btn btn-secondary">
+                                Cancelar
+                            </button>
+                            <button type="submit" class="btn btn-danger" style="font-weight: 700;">
+                                Sí, Anular Orden
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1rem; font-size: 0.8rem; color: var(--text-subtle); display: flex; justify-content: space-between;">
+            <span>Operador: {{ transaction.usuario.username|default:"Sistema Automático" }}</span>
+            <span>ID Interno: #{{ transaction.id }}</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    @media (max-width: 640px) {
+        .detail-grid {
+            grid-template-columns: 1fr !important;
+        }
+    }
+</style>
+
+<script>
+    {% if transaction.estado == 'PENDIENTE' and remaining_seconds > 0 %}
+        let remainingSeconds = {{ remaining_seconds }};
+        const timerElement = document.getElementById('countdownTimer');
+
+        function updateTimer() {
+            if (remainingSeconds <= 0) {
+                if (timerElement) timerElement.innerText = "00:00 (Expirado)";
+                window.location.reload();
+                return;
+            }
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            const formatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            if (timerElement) timerElement.innerText = formatted;
+            remainingSeconds--;
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+    {% endif %}
+</script>
+{% endblock %}

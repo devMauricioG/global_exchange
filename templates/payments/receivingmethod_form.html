@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ action }} Cuenta de Acreditación - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-container {
+        max-width: 720px;
+        margin: 0 auto;
+    }
+
+    .form-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 1.25rem;
+        padding: 2.25rem;
+        box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.5);
+    }
+
+    .form-header {
+        margin-bottom: 2rem;
+        padding-bottom: 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .form-header-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%);
+        border: 1px solid rgba(56, 189, 248, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+    }
+
+    .form-title-group h1 {
+        font-size: 1.6rem;
+        font-weight: 800;
+        color: #f8fafc;
+        letter-spacing: -0.025em;
+    }
+
+    .form-title-group p {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        margin-top: 0.25rem;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+    }
+
+    @media (max-width: 640px) {
+        .form-grid { grid-template-columns: 1fr; }
+    }
+
+    .form-group-full { grid-column: 1 / -1; }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+        font-size: 0.875rem;
+        font-weight: 700;
+        color: #e2e8f0;
+    }
+
+    .form-help {
+        font-size: 0.8rem;
+        color: var(--text-subtle);
+        margin-top: 0.25rem;
+    }
+
+    .checkbox-card {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        cursor: pointer;
+    }
+
+    .checkbox-card label {
+        margin: 0;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .checkbox-title {
+        font-weight: 700;
+        color: var(--text-main);
+        font-size: 0.925rem;
+    }
+
+    .checkbox-desc {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-weight: 400;
+    }
+
+    .info-box {
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.75rem;
+        font-size: 0.85rem;
+        color: #bae6fd;
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+
+    .info-box-icon { font-size: 1.25rem; line-height: 1; }
+
+    .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <div class="form-card">
+        <div class="form-header">
+            <div class="form-header-icon">
+                {% if is_create %}➕{% else %}✏️{% endif %}
+            </div>
+            <div class="form-title-group">
+                <h1>{{ action }} Cuenta de Acreditación</h1>
+                <p>
+                    {% if cliente %}
+                        Asociada a la cuenta de: <strong>{{ cliente.nombre }}</strong> ({{ cliente.documento_ruc }})
+                    {% else %}
+                        Complete los datos de la cuenta destino para recibir fondos
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <div class="info-box-icon">🏦</div>
+            <div>
+                <strong>Cuenta de Acreditación:</strong> Es la cuenta donde recibirá los fondos producto de sus operaciones de compra o venta de divisas. Asegúrese de que el titular coincida con su identidad o razón social autorizada.
+            </div>
+        </div>
+
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger" style="margin-bottom: 1.5rem;">
+                    {% for error in form.non_field_errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="id_entidad_bancaria">{{ form.entidad_bancaria.label }} *</label>
+                    {{ form.entidad_bancaria }}
+                    {% if form.entidad_bancaria.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.entidad_bancaria.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="id_tipo_cuenta">{{ form.tipo_cuenta.label }} *</label>
+                    {{ form.tipo_cuenta }}
+                    {% if form.tipo_cuenta.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.tipo_cuenta.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="id_numero_cuenta">{{ form.numero_cuenta.label }} *</label>
+                    {{ form.numero_cuenta }}
+                    <span class="form-help">Número de cuenta bancaria o teléfono de billetera</span>
+                    {% if form.numero_cuenta.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.numero_cuenta.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="id_documento_titular">{{ form.documento_titular.label }}</label>
+                    {{ form.documento_titular }}
+                    <span class="form-help">Cédula de identidad o RUC (opcional)</span>
+                    {% if form.documento_titular.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.documento_titular.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group form-group-full">
+                    <label for="id_titular">{{ form.titular.label }} *</label>
+                    {{ form.titular }}
+                    <span class="form-help">Nombre y apellido completo o denominación social</span>
+                    {% if form.titular.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.titular.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group form-group-full">
+                    <div class="checkbox-card">
+                        {{ form.es_predeterminado }}
+                        <label for="id_es_predeterminado">
+                            <span class="checkbox-title">Establecer como cuenta predeterminada</span>
+                            <span class="checkbox-desc">Se utilizará automáticamente para acreditar los fondos de sus operaciones. Desactivará la predeterminada previa.</span>
+                        </label>
+                    </div>
+                    {% if form.es_predeterminado.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.es_predeterminado.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+
+                <div class="form-group form-group-full">
+                    <div class="checkbox-card">
+                        {{ form.activo }}
+                        <label for="id_activo">
+                            <span class="checkbox-title">Cuenta habilitada</span>
+                            <span class="checkbox-desc">Habilita esta cuenta para recibir acreditaciones de fondos.</span>
+                        </label>
+                    </div>
+                    {% if form.activo.errors %}
+                        <ul class="errorlist">
+                            {% for err in form.activo.errors %}<li>{{ err }}</li>{% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <a href="{% url 'payments:receivingmethod-list' %}" class="btn btn-secondary">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary">
+                    <span>💾</span>
+                    <span>Guardar Cuenta</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

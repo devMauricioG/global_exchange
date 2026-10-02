@@ -41,12 +41,19 @@ from .forms import (
     CurrencyForm,
     ExchangeRateFilterForm,
     ExchangeRateForm,
+    OperationLimitFilterForm,
+    OperationLimitForm,
     RateCalculatorForm,
     SegmentCommissionFilterForm,
     SegmentCommissionForm,
 )
-from .models import Currency, ExchangeRate, SegmentCommission
-from .services import QuoteFreezeService, RateCalculationService, get_active_customer
+from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
+from .services import (
+    OperationLimitValidationService,
+    QuoteFreezeService,
+    RateCalculationService,
+    get_active_customer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -908,4 +915,280 @@ class UnfreezeQuoteApiView(View):
             },
             status=200,
         )
+
+
+# ==============================================================================
+# VISTAS CBVs: GESTIÓN DE LÍMITES OPERATIVOS (SCRUM-77)
+# ==============================================================================
+
+def _serialize_operation_limit(limit: OperationLimit) -> Dict[str, Any]:
+    """
+    Serializa una regla de :class:`~rates.models.OperationLimit` a un diccionario JSON estándar.
+    """
+    return {
+        'id': limit.id,
+        'segment': limit.segment,
+        'segment_display': limit.get_segment_display(),
+        'currency': {
+            'id': limit.currency_id,
+            'code': limit.currency.code,
+            'name': limit.currency.name,
+            'symbol': limit.currency.symbol,
+            'decimal_places': limit.currency.decimal_places,
+        } if limit.currency else None,
+        'monto_minimo': float(limit.monto_minimo),
+        'monto_maximo': float(limit.monto_maximo),
+        'limite_diario': float(limit.limite_diario),
+        'limite_mensual': float(limit.limite_mensual),
+        'is_active': limit.is_active,
+        'created_at': limit.created_at.isoformat() if limit.created_at else None,
+        'updated_at': limit.updated_at.isoformat() if limit.updated_at else None,
+    }
+
+
+class OperationLimitListView(LoginRequiredMixin, ListView):
+    """
+    Vista de listado administrativo para las reglas de límites operativos por segmento y divisa.
+    """
+
+    model = OperationLimit
+    template_name = 'rates/limit_list.html'
+    context_object_name = 'limits'
+    ordering = ['segment', 'currency__code']
+
+    def get_queryset(self) -> QuerySet[OperationLimit]:
+        qs = super().get_queryset().select_related('currency')
+        segment = self.request.GET.get('segment')
+        currency_id = self.request.GET.get('currency')
+        is_active = self.request.GET.get('is_active')
+
+        if segment:
+            qs = qs.filter(segment=segment)
+        if currency_id:
+            qs = qs.filter(currency_id=currency_id)
+        if is_active == 'true':
+            qs = qs.filter(is_active=True)
+        elif is_active == 'false':
+            qs = qs.filter(is_active=False)
+
+        return qs
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        all_limits = OperationLimit.objects.all()
+
+        context['total_limits'] = all_limits.count()
+        context['active_limits'] = all_limits.filter(is_active=True).count()
+        context['inactive_limits'] = all_limits.filter(is_active=False).count()
+        context['filter_form'] = OperationLimitFilterForm(self.request.GET or None)
+        context['active_customer'] = get_active_customer(self.request)
+        context['available_segments_count'] = len(Cliente.Segmentacion.choices)
+        context['currencies'] = Currency.objects.filter(is_active=True)
+        return context
+
+
+class OperationLimitCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+    """
+    Vista para parametrizar una nueva regla de límites operativos por segmento y divisa.
+    """
+
+    model = OperationLimit
+    form_class = OperationLimitForm
+    template_name = 'rates/limit_form.html'
+    success_url = reverse_lazy('rates:limit_list')
+    success_message = 'Límite operativo configurado exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['page_title'] = 'Nuevo Límite Operativo'
+        context['submit_btn_text'] = 'Guardar Límites'
+        return context
+
+
+class OperationLimitUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+    """
+    Vista para modificar una regla de límites operativos existente.
+    """
+
+    model = OperationLimit
+    form_class = OperationLimitForm
+    template_name = 'rates/limit_form.html'
+    success_url = reverse_lazy('rates:limit_list')
+    success_message = 'Límite operativo actualizado exitosamente.'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['page_title'] = f'Editar Límites — {self.object.get_segment_display()} ({self.object.currency.code})'
+        context['submit_btn_text'] = 'Actualizar Límites'
+        return context
+
+
+class OperationLimitDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+    """
+    Vista de confirmación para dar de baja o eliminar una regla de límites operativos.
+    """
+
+    model = OperationLimit
+    template_name = 'rates/limit_confirm_delete.html'
+    success_url = reverse_lazy('rates:limit_list')
+    context_object_name = 'limit'
+
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        obj = self.get_object()
+        limit_desc = f"{obj.get_segment_display()} ({obj.currency.code})"
+        messages.success(request, f'La regla de límite operativo para {limit_desc} fue eliminada correctamente.')
+        return super().delete(request, *args, **kwargs)
+
+
+class OperationLimitDetailView(LoginRequiredMixin, DetailView):
+    """
+    Vista analítica de detalle para una regla de límites con simulaciones de transacciones.
+    """
+
+    model = OperationLimit
+    template_name = 'rates/limit_detail.html'
+    context_object_name = 'limit'
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        limit = self.object
+
+        sample_amounts = [
+            limit.monto_minimo,
+            limit.monto_minimo * Decimal('2') if limit.monto_minimo > 0 else Decimal('100.00'),
+            limit.monto_maximo if limit.monto_maximo > 0 else Decimal('1000.00'),
+            (limit.monto_maximo * Decimal('1.2')) if limit.monto_maximo > 0 else Decimal('5000.00'),
+        ]
+
+        simulations = []
+        for amt in sample_amounts:
+            val = limit.validate_amount(amt)
+            simulations.append({
+                'amount': amt,
+                'is_valid': val['is_valid'],
+                'errors': val['errors'],
+            })
+
+        context['simulations'] = simulations
+        return context
+
+
+# ==============================================================================
+# ENDPOINTS API REST: LÍMITES OPERATIVOS (SCRUM-77)
+# ==============================================================================
+
+class OperationLimitListApiView(View):
+    """
+    Endpoint API REST para listar y consultar reglas de límites operativos.
+    """
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        qs = OperationLimit.objects.select_related('currency').order_by('segment', 'currency__code')
+        segment = request.GET.get('segment')
+        currency_code = request.GET.get('currency')
+        is_active = request.GET.get('is_active')
+
+        if segment:
+            qs = qs.filter(segment=segment.upper().strip())
+        if currency_code:
+            qs = qs.filter(currency__code=currency_code.upper().strip())
+        if is_active == 'true':
+            qs = qs.filter(is_active=True)
+        elif is_active == 'false':
+            qs = qs.filter(is_active=False)
+
+        data = [_serialize_operation_limit(l) for l in qs]
+        return JsonResponse({'success': True, 'count': len(data), 'results': data}, status=200)
+
+
+class OperationLimitDetailApiView(View):
+    """
+    Endpoint API REST para consultar la regla de límite operativo de un par (segmento, divisa).
+    """
+
+    def get(self, request: HttpRequest, segment: str, currency_code: str) -> JsonResponse:
+        seg_code = str(segment).upper().strip()
+        curr_code = str(currency_code).upper().strip()
+
+        limit = OperationLimit.objects.filter(
+            segment=seg_code,
+            currency__code=curr_code,
+        ).select_related('currency').first()
+
+        if not limit:
+            return JsonResponse(
+                {
+                    'success': False,
+                    'error': f'No existe regla de límite configurada para el segmento {seg_code} y divisa {curr_code}.',
+                },
+                status=404,
+            )
+
+        return JsonResponse({'success': True, 'limit': _serialize_operation_limit(limit)}, status=200)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ValidateOperationLimitApiView(View):
+    """
+    Endpoint API REST para validar un monto en tiempo real contra los límites operativos.
+    """
+
+    def _extract_params(self, request: HttpRequest) -> Dict[str, Any]:
+        params = {}
+        if request.method == 'POST':
+            if request.content_type == 'application/json' and request.body:
+                try:
+                    params = json.loads(request.body.decode('utf-8'))
+                except json.JSONDecodeError:
+                    pass
+            if not params:
+                params = request.POST.dict()
+        else:
+            params = request.GET.dict()
+        return params
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        return self._process_validation(request)
+
+    def post(self, request: HttpRequest) -> JsonResponse:
+        return self._process_validation(request)
+
+    def _process_validation(self, request: HttpRequest) -> JsonResponse:
+        params = self._extract_params(request)
+
+        segment = params.get('segment')
+        cliente_id = params.get('cliente_id')
+        currency_code = params.get('currency') or params.get('currency_code')
+        amount_raw = params.get('amount', '0.00')
+        accum_daily = params.get('accumulated_daily')
+        accum_monthly = params.get('accumulated_monthly')
+
+        active_customer = get_active_customer(request)
+        cliente = None
+        if cliente_id:
+            cliente = Cliente.objects.filter(id=cliente_id, is_active=True).first()
+        elif active_customer:
+            cliente = active_customer
+
+        segment_target = segment or (cliente.segmentacion if cliente else None)
+
+        if not currency_code:
+            return JsonResponse(
+                {'success': False, 'error': 'Debe especificar el código de divisa (currency).'},
+                status=400,
+            )
+
+        validation = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=segment_target,
+            currency=currency_code,
+            amount=amount_raw,
+            cliente=cliente,
+            accumulated_daily=accum_daily,
+            accumulated_monthly=accum_monthly,
+            raise_exception=False,
+        )
+
+        status_code = 200 if validation['is_valid'] else 422
+        json_friendly = json.loads(json.dumps(validation, default=float))
+        return JsonResponse({'success': validation['is_valid'], 'validation': json_friendly}, status=status_code)
 

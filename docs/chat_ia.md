@@ -165,4 +165,23 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Amplié la suite de pruebas automatizadas en `rates/tests.py` con 71 pruebas unitarias y de integración, alcanzando un **97% de cobertura de código** en `rates` y un total de **167 tests exitosos en todo el proyecto**.
 - Redacté el walkthrough técnico completo en `docs/documentacion/Proyecto/SCRUM-53.md`.
 
+---
+
+## Mauricio González & Pablo Elizeche — 24/09/2026 — Antigravity IDE (Gemini & Claude)
+
+**Contexto:** Sprint 3 (Hito 5) — Orquestación Transaccional, Medios de Pago/Cobro, Límites Operativos, Seeding Idempotente, Suites de Pruebas Unitarias e Integración, y Documentación Formal UML/Sphinx (SCRUM-70 al SCRUM-86).
+
+**Resumen:**
+- **Filtros de Divisas (SCRUM-70):** Implementé la biblioteca `rates.templatetags.currency_filters` con formateadores `currency_format`, `exchange_rate_format` y `percentage_format`, aplicando separación de miles con puntos y decimales con comas según la precisión de cada moneda (PYG sin decimales, USD/EUR con 2 decimales).
+- **Entidades y Formularios de Pago (SCRUM-71, 72, 73, 74):** Creé el catálogo parametrizado `EntidadFinanciera` y extendí `PaymentMethod` con formularios especializados (`CreditDebitCardForm`, `BankTransferForm`, `DigitalWalletForm`, `CashBranchForm`) con validación de Luhn, vencimiento futuro, teléfonos móviles y cuentas bancarias, integrando selección dinámica en plantillas.
+- **Medios de Acreditación (SCRUM-76):** Desarrollé la entidad `ReceivingMethod` para registrar cuentas y destinos donde el cliente recibe fondos convertidos, incorporando gestión de predeterminado atómico, borrado lógico y protección estricta anti-IDOR.
+- **Límites Operativos (SCRUM-77):** Definí el modelo `OperationLimit` (mínimo, máximo, límite diario y mensual) y el servicio `OperationLimitValidationService` para control y bloqueo preventivo de operaciones fuera de topes parametrizados por segmento y moneda.
+- **Seeding Automatizado e Idempotente (SCRUM-75):** Diseñé el comando administrativo `python manage.py seed_data` en `apps.customers`, poblando la base de datos con usuarios de prueba, asignaciones de representación multi-usuario, catálogo de divisas, historial de tasas de 30 días, reglas de comisiones, bancos, billeteras, medios de cobro, límites operativos y transacciones de muestra sin generar duplicados en ejecuciones sucesivas.
+- **Módulo Transaccional Cambiario (SCRUM-78, 79, 81):** Desarrollé la aplicación `apps.transactions` con el modelo `Transaction`, el orquestador atómico `TransactionService`, vistas CBVs (`TransactionListView`, `CreateView`, `ConfirmView`, `DetailView`) y endpoints REST JSON para órdenes de compra y venta imputadas al cliente activo.
+- **Cotización Congelada y Cancelación (SCRUM-80):** Implementé `QuoteFreezeService` con ventana estricta de 5 minutos (`quote_expires_at`), detección reactiva de expiración (`check_and_expire_transaction`) que transiciona a `EXPIRADA`, anulación voluntaria por el cliente (`TransactionCancelView`) y cuenta regresiva sincronizada en JavaScript.
+- **Comprobante de Liquidación (SCRUM-82):** Construí la vista y plantilla `TransactionReceiptView` (`receipt.html`) con diseño formal imprimible y exportable conteniendo todos los desgloses de cambio, comisiones, cuentas de origen/destino y sellos de tiempo.
+- **Suites de Pruebas Unitarias e Integración (SCRUM-83, 84):** Desarrollé 71 pruebas automatizadas para pagos y límites en `payments/tests.py` y `rates/tests.py`, y 51 pruebas integrales para transacciones en `transactions/tests.py`, alcanzando un total de **289 pruebas exitosas con 100% de aprobación (OK)** en todo el proyecto.
+- **Documentación de Diseño y Casos de Prueba (SCRUM-85):** Actualicé los artefactos formales del proyecto: ERS v3.3 (`EQUIPO_08_A_ERS.md` con RF-32 a RF-38 y RN-19 a RN-26), Diagrama de Clases UML (`DIS_CLA_01`), Diagrama de Paquetes UML (`DIS_PAQ_01`) y Matriz de Casos de Prueba (`DIS_CPR_01` con Módulos 8 a 15, CPR-ENT a CPR-SED).
+- **Docstrings Sphinx y Cierre de Release (SCRUM-86):** Estandaricé los docstrings Sphinx/Google style en todos los módulos de Sprint 3, incorporé el paquete `transactions` al árbol de documentación en `docs/sphinx/source/transactions.rst` y `modules.rst`, recompilé el sitio HTML en `docs/sphinx/build/html/` con 0 errores y 0 advertencias, y registré la bitácora para el etiquetado del release Hito 5.
+
 

@@ -1,6 +1,6 @@
 # Detalle del Diagrama de Clases — EQUIPO 88 B DIS CLA 01
 
-> Última actualización: SCRUM 57 — incorpora las clases `Currency`, `SegmentCommission`, `PaymentMethod` y el servicio `RateCalculationService`. Expande `ExchangeRate` con par de monedas, vigencia y operador responsable.
+> Última actualización: Hito 5 (SCRUM-85) — incorpora las clases del módulo de transacciones (`Transaction`, `TransactionService`), cuentas de acreditación (`ReceivingMethod`), catálogo de entidades financieras (`EntidadFinanciera`), límites operativos (`OperationLimit`, `OperationLimitValidationService`), congelamiento de cotizaciones (`QuoteFreezeService`) y comando de seeding.
 
 ## 1. Descripción general
 
@@ -1317,22 +1317,304 @@ Transaction 1 ─── 0..1 ElectronicDocument
 
 ---
 
-# 23. Resumen final
+# 24. Clase `EntidadFinanciera`
 
-El diagrama define un modelo centrado en **clientes y transacciones**, con usuarios que pueden actuar como cajeros y que también pueden ser asignados a clientes. La actualización del SCRUM 57 incorpora las entidades de parametrización financiera (`Currency`, `ExchangeRate` expandido, `SegmentCommission`), medios de pago (`PaymentMethod`) y el servicio de cálculo del cotizador (`RateCalculationService`).
+Catálogo parametrizado de entidades bancarias y billeteras electrónicas habilitadas en el sistema financiero.
 
-En términos de responsabilidades:
+## Atributos
 
-- **`User`** → identidad y roles.
-- **`Customer`** → información del cliente y segmentación.
-- **`CustomerUserAssignment`** → relación/asignación usuario-cliente.
-- **`CashRegister`** → gestión de cajas.
-- **`Transaction`** → operaciones realizadas.
-- **`Currency`** → catálogo de divisas operativas.
-- **`ExchangeRate`** → tasas de cambio con par de monedas, vigencia y operador responsable.
-- **`SegmentCommission`** → condiciones comerciales por segmento de cliente.
-- **`PaymentMethod`** → instrumentos de pago por cliente.
-- **`RateCalculationService`** → lógica de cotización neta (no persistente).
-- **`ElectronicDocument`** → documentación electrónica asociada a transacciones.
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | `BigInt` | Identificador único de la entidad |
+| `nombre` | `String` | Nombre oficial (ej. "Banco Itaú", "Tigo Money") |
+| `tipo` | `String` | Tipo de entidad: `BANCO` o `BILLETERA` |
+| `activo` | `Boolean` | Estado de habilitación operativa |
+| `orden` | `Integer` | Prioridad de visualización en selectores |
+| `created_at` | `DateTime` | Marca temporal de creación |
+| `updated_at` | `DateTime` | Marca temporal de actualización |
 
-> **Alcance:** este documento se basa en los elementos visibles del PDF e incorpora las clases y relaciones del SCRUM 57 para los módulos `rates` y `payments`.
+---
+
+# 25. Clase `ReceivingMethod`
+
+Representa las cuentas de acreditación registradas por un cliente para recibir fondos liquidados tras una operación cambiaria.
+
+## Atributos
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | `BigInt` | Identificador de la cuenta receptora |
+| `cliente_id` | `BigInt` | Clave foránea al cliente titular (`Cliente`) |
+| `entidad_bancaria_id` | `BigInt` | Clave foránea a la entidad financiera (`EntidadFinanciera`) |
+| `tipo_cuenta` | `String` | Clasificación: `AHORRO`, `CORRIENTE`, `BILLETERA` |
+| `numero_cuenta` | `String` | Número de cuenta o número de teléfono celular |
+| `titular` | `String` | Nombre o razón social del titular de la cuenta |
+| `documento_titular` | `String` | Cédula o RUC del titular |
+| `es_predeterminado` | `Boolean` | Indicador de cuenta por defecto para recepción |
+| `activo` | `Boolean` | Estado activo/inactivo |
+
+## Métodos
+
+```text
+save(*args, **kwargs) : None
+clean() : None
+```
+
+Asegura la coherencia entre el tipo de entidad financiera y el tipo de cuenta, así como la exclusividad del medio predeterminado por cliente.
+
+---
+
+# 26. Clase `OperationLimit`
+
+Establece las políticas de riesgo financiero, límites transaccionales y acumulados por divisa y segmento comercial.
+
+## Atributos
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | `BigInt` | Identificador de la regla de límite |
+| `segment` | `String` | Segmento de cliente (`MIN`, `MAY`, `COR`, `VIP`) |
+| `currency_id` | `BigInt` | Clave foránea a la divisa parametrizada (`Currency`) |
+| `monto_minimo` | `Decimal` | Monto mínimo permitido por transacción |
+| `monto_maximo` | `Decimal` | Monto máximo permitido por transacción |
+| `limite_diario` | `Decimal` | Límite acumulado diario permitido |
+| `limite_mensual` | `Decimal` | Límite acumulado mensual permitido |
+| `is_active` | `Boolean` | Estado de vigencia de la política de límite |
+
+---
+
+# 27. Clase `Transaction` (Modelo Operativo de Compra y Venta)
+
+Entidad central de formalización y liquidación cambiaria omnicanal (SCRUM-78 / SCRUM-65).
+
+## Atributos
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `id` | `BigInt` | Identificador secuencial de la orden |
+| `codigo_referencia` | `String` | Código único correlativo público (ej. `TX-20260924-A1B2C3`) |
+| `cliente_id` | `BigInt` | Clave foránea al cliente que ejecuta la operación |
+| `tipo_operacion` | `String` | Clasificación cambiaria: `COMPRA` o `VENTA` |
+| `base_currency_id` | `BigInt` | Divisa base del par (`Currency`) |
+| `target_currency_id` | `BigInt` | Divisa cotizada o de contraparte (`Currency`) |
+| `exchange_rate_id` | `BigInt` | Tasa de mercado de referencia utilizada |
+| `tasa_base` | `Decimal` | Cotización oficial registrada al momento del cálculo |
+| `comision_segmento` | `Decimal` | Monto de comisión aplicada según segmento |
+| `tasa_neta` | `Decimal` | Tasa efectiva final tras spread y cargos |
+| `monto_origen` | `Decimal` | Importe total entregado por el cliente en moneda origen |
+| `monto_destino` | `Decimal` | Importe neto a recibir en moneda destino |
+| `medio_pago_origen_id` | `BigInt` | Clave foránea al medio de pago utilizado (`PaymentMethod`) |
+| `medio_acreditacion_destino_id` | `BigInt` | Clave foránea a la cuenta receptora (`ReceivingMethod`) |
+| `estado` | `String` | `PENDIENTE`, `COMPLETADA` o `CANCELADA` |
+| `token_congelamiento` | `String` | Token de cotización congelada temporal (5 minutos) |
+| `usuario_id` | `Integer` | Operador que asistió o registró la operación |
+| `observaciones` | `Text` | Motivos de cancelación o notas de auditoría |
+| `created_at` | `DateTime` | Timestamp de emisión de la orden |
+| `updated_at` | `DateTime` | Timestamp de última transición de estado |
+
+## Métodos
+
+```text
+generate_unique_reference_code() : String
+mark_as_completed(user=None, save=True) : None
+mark_as_cancelled(motivo="", save=True) : None
+clean() : None
+save(*args, **kwargs) : None
+```
+
+## Propiedades
+
+```text
+moneda_origen : Currency
+moneda_destino : Currency
+is_pending : Boolean
+is_completed : Boolean
+is_cancelled : Boolean
+```
+
+---
+
+# 28. Servicios de Dominio Transaccional y Financiero
+
+La arquitectura de Global Exchange aplica el patrón *Service Layer* para desacoplar reglas de negocio complejas:
+
+## `TransactionService`
+
+```text
+TransactionService
+ ├── create_order_from_live_quote(request, base_currency_code, target_currency_code, amount, operation_type, is_source_base, medio_pago_id, medio_acreditacion_id, cliente, usuario, observaciones) : Transaction
+ ├── create_order_from_frozen_quote(request, token, medio_pago_id, medio_acreditacion_id, cliente, usuario, observaciones) : Transaction
+ ├── cancel_transaction_by_customer(transaction_id, cliente, usuario, motivo) : Transaction
+ ├── cancel_expired_transactions() : Integer
+ ├── check_and_cancel_single(transaction) : Boolean
+ └── is_transaction_expired(transaction) : Boolean
+```
+
+## `OperationLimitValidationService`
+
+```text
+OperationLimitValidationService
+ ├── validate_amount(segment, currency, amount) : Dict[is_valid, errors, limit]
+ ├── validate_limits_for_operation(segment, currency, amount, current_daily_total, current_monthly_total) : Dict
+ └── get_limit_for(segment, currency) : OperationLimit
+```
+
+## `QuoteFreezeService`
+
+```text
+QuoteFreezeService
+ ├── freeze_quote(request, quote_data) : Dict
+ ├── get_frozen_quote(request, token) : Dict
+ ├── is_frozen_quote_valid(frozen_data) : Boolean
+ └── invalidate_frozen_quote(request, token) : None
+```
+
+---
+
+# 29. Diagrama de Clases UML Consolidado (Mermaid)
+
+```mermaid
+classDiagram
+    direction TB
+
+    class User {
+        +UUID keycloak_id
+        +String username
+        +String email
+        +String first_name
+        +String last_name
+        +Boolean is_active
+        +get_realm_roles() List
+    }
+
+    class Customer {
+        +BigInt id
+        +String tax_id_ruc
+        +String name
+        +String customer_type
+        +String category
+        +Boolean is_active
+    }
+
+    class CustomerUserAssignment {
+        +BigInt id
+        +Boolean is_primary_representative
+        +DateTime assigned_at
+        +Boolean is_active
+        +String role
+    }
+
+    class EntidadFinanciera {
+        +BigInt id
+        +String nombre
+        +String tipo
+        +Boolean activo
+        +Integer orden
+    }
+
+    class PaymentMethod {
+        +BigInt id
+        +String tipo_medio
+        +String numero_cuenta
+        +String titular
+        +String documento_titular
+        +String tarjeta_ultimos_digitos
+        +Integer tarjeta_mes_vencimiento
+        +Integer tarjeta_anio_vencimiento
+        +String tipo_cuenta_bancaria
+        +String telefono_billetera
+        +Boolean es_predeterminado
+        +Boolean activo
+    }
+
+    class ReceivingMethod {
+        +BigInt id
+        +String tipo_cuenta
+        +String numero_cuenta
+        +String titular
+        +String documento_titular
+        +Boolean es_predeterminado
+        +Boolean activo
+    }
+
+    class Currency {
+        +BigInt id
+        +String code
+        +String name
+        +String symbol
+        +Integer decimals
+        +Boolean is_active
+    }
+
+    class ExchangeRate {
+        +BigInt id
+        +Decimal buy_rate
+        +Decimal sell_rate
+        +Decimal spread
+        +DateTime valid_from
+        +DateTime valid_to
+        +Boolean is_active
+    }
+
+    class SegmentCommission {
+        +BigInt id
+        +String segment
+        +Decimal commission_percentage
+        +Decimal fixed_fee
+        +Decimal spread_discount_percentage
+        +Boolean is_active
+    }
+
+    class OperationLimit {
+        +BigInt id
+        +String segment
+        +Decimal monto_minimo
+        +Decimal monto_maximo
+        +Decimal limite_diario
+        +Decimal limite_mensual
+        +Boolean is_active
+    }
+
+    class Transaction {
+        +BigInt id
+        +String codigo_referencia
+        +String tipo_operacion
+        +Decimal tasa_base
+        +Decimal comision_segmento
+        +Decimal tasa_neta
+        +Decimal monto_origen
+        +Decimal monto_destino
+        +String estado
+        +String token_congelamiento
+        +Text observaciones
+        +DateTime created_at
+        +mark_as_completed(user)
+        +mark_as_cancelled(motivo)
+    }
+
+    User "1" <-- "0..*" CustomerUserAssignment : asignado a
+    Customer "1" <-- "0..*" CustomerUserAssignment : representa
+    Customer "1" *-- "0..*" PaymentMethod : posee
+    Customer "1" *-- "0..*" ReceivingMethod : acredita en
+    EntidadFinanciera "1" <-- "0..*" PaymentMethod : emisora
+    EntidadFinanciera "1" <-- "0..*" ReceivingMethod : receptora
+    Currency "1" <-- "0..*" ExchangeRate : base_currency
+    Currency "1" <-- "0..*" ExchangeRate : target_currency
+    Currency "1" <-- "0..*" OperationLimit : aplica a
+    Customer "1" <-- "0..*" Transaction : titular
+    Currency "1" <-- "0..*" Transaction : base_currency
+    Currency "1" <-- "0..*" Transaction : target_currency
+    ExchangeRate "0..1" <-- "0..*" Transaction : referencia
+    PaymentMethod "1" <-- "0..*" Transaction : medio_pago_origen
+    ReceivingMethod "1" <-- "0..*" Transaction : medio_acreditacion_destino
+    User "0..1" <-- "0..*" Transaction : asistido por
+```
+
+---
+
+# 30. Resumen final y Trazabilidad Hito 5
+
+El diseño estructural consolidado formaliza la arquitectura completa para el **Hito 5 (Sprint 3)**, vinculando los tres módulos principales:
+1. **Gestión de Clientes e Identidad (`customers`, `authentication`)**: Multi-representación y resolución segura de cliente activo en sesión.
+2. **Motor Financiero y Políticas de Riesgo (`rates`)**: Divisas, cotizaciones, comisiones segmentadas, cotizador de tasas netas y control de límites operativos (`OperationLimit`).
+3. **Medios de Liquidación y Transacciones (`payments`, `transactions`)**: Dropdowns de entidades bancarias, formularios dedicados por instrumento (tarjetas con algoritmo de Luhn, billeteras móviles, transferencias), cuentas destino de acreditación (`ReceivingMethod`), formalización de órdenes de compra/venta (`Transaction`), mitigación de expiración de cotizaciones y anulación manual auditada.

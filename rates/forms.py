@@ -18,7 +18,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 
 from customers.models import Cliente
-from .models import Currency, ExchangeRate, SegmentCommission
+from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
 
 
 # ==============================================================================
@@ -66,13 +66,35 @@ class ExchangeRateForm(forms.ModelForm):
             'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
         }
         labels = {
-            'base_currency': 'Moneda Base (Origen)',
-            'target_currency': 'Moneda Destino (Cotizada)',
-            'buy_rate': 'Tasa de Compra',
-            'sell_rate': 'Tasa de Venta',
+            'base_currency': 'Moneda Base (1 unidad)',
+            'target_currency': 'Moneda Cotizada (precio expresado en esta moneda)',
+            'buy_rate': 'Tasa de Compra (por 1 unidad de la moneda base)',
+            'sell_rate': 'Tasa de Venta (por 1 unidad de la moneda base)',
             'valid_to': 'Vigente Hasta (Opcional)',
             'is_active': 'Activa',
         }
+
+    def clean(self):
+        """Keep the quote aligned with the precision of its quoted currency."""
+        cleaned_data = super().clean()
+        base = cleaned_data.get('base_currency')
+        target = cleaned_data.get('target_currency')
+        if base and target and base == target:
+            self.add_error('target_currency', 'La moneda cotizada debe ser diferente de la moneda base.')
+        if target:
+            allowed_decimals = target.decimal_places
+            quantize = Decimal('1').scaleb(-allowed_decimals)
+            for field_name in ('buy_rate', 'sell_rate'):
+                value = cleaned_data.get(field_name)
+                if value is not None and value != value.quantize(quantize):
+                    self.add_error(
+                        field_name,
+                        f'La tasa para {target.code} admite como máximo {allowed_decimals} decimales.',
+                    )
+                elif value is not None:
+                    # Normalize harmless trailing zeroes from old 6-decimal records.
+                    cleaned_data[field_name] = value.quantize(quantize)
+        return cleaned_data
 
 
 class CurrencyFilterForm(forms.Form):
@@ -293,4 +315,111 @@ class RateCalculatorForm(forms.Form):
         initial=True,
         widget=forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'calc_is_source_base'}),
         label='El monto ingresado corresponde a la Moneda Base (ej: USD)',
+    )
+
+
+# ==============================================================================
+# FORMULARIOS PARA LÍMITES OPERATIVOS (SCRUM-77)
+# ==============================================================================
+
+class OperationLimitForm(forms.ModelForm):
+    """
+    Formulario para la creación y edición de reglas de límites operativos por divisa y segmento.
+    """
+
+    class Meta:
+        model = OperationLimit
+        fields = [
+            'segment',
+            'currency',
+            'monto_minimo',
+            'monto_maximo',
+            'limite_diario',
+            'limite_mensual',
+            'is_active',
+        ]
+        widgets = {
+            'segment': forms.Select(attrs={'class': 'form-select', 'id': 'id_segment'}),
+            'currency': forms.Select(attrs={'class': 'form-select', 'id': 'id_currency'}),
+            'monto_minimo': forms.NumberInput(
+                attrs={
+                    'class': 'form-input',
+                    'id': 'id_monto_minimo',
+                    'step': '0.01',
+                    'min': '0.00',
+                    'placeholder': 'Ej: 10.00',
+                }
+            ),
+            'monto_maximo': forms.NumberInput(
+                attrs={
+                    'class': 'form-input',
+                    'id': 'id_monto_maximo',
+                    'step': '0.01',
+                    'min': '0.00',
+                    'placeholder': 'Ej: 5000.00 (0 = sin máx)',
+                }
+            ),
+            'limite_diario': forms.NumberInput(
+                attrs={
+                    'class': 'form-input',
+                    'id': 'id_limite_diario',
+                    'step': '0.01',
+                    'min': '0.00',
+                    'placeholder': 'Ej: 10000.00 (0 = sin límite)',
+                }
+            ),
+            'limite_mensual': forms.NumberInput(
+                attrs={
+                    'class': 'form-input',
+                    'id': 'id_limite_mensual',
+                    'step': '0.01',
+                    'min': '0.00',
+                    'placeholder': 'Ej: 50000.00 (0 = sin límite)',
+                }
+            ),
+            'is_active': forms.CheckboxInput(attrs={'class': 'form-checkbox', 'id': 'id_is_active'}),
+        }
+        labels = {
+            'segment': 'Segmento de Cliente',
+            'currency': 'Moneda',
+            'monto_minimo': 'Monto Mínimo por Operación',
+            'monto_maximo': 'Monto Máximo por Operación',
+            'limite_diario': 'Límite Acumulado Diario',
+            'limite_mensual': 'Límite Acumulado Mensual',
+            'is_active': 'Regla Activa y Vigente',
+        }
+        help_texts = {
+            'segment': 'Categoría comercial del cliente a la cual se aplican estos límites.',
+            'currency': 'Divisa en la cual se fijan los montos parametrizados.',
+            'monto_minimo': 'Monto mínimo requerido para poder emitir una cotización u orden.',
+            'monto_maximo': 'Monto máximo individual por transacción (0.00 para permitir sin tope individual).',
+            'limite_diario': 'Monto acumulado máximo permitido en 24 horas (0.00 para sin límite diario).',
+            'limite_mensual': 'Monto acumulado máximo permitido en el mes calendario (0.00 para sin límite mensual).',
+            'is_active': 'Desmarcar para deshabilitar temporalmente esta política de control de riesgos.',
+        }
+
+
+class OperationLimitFilterForm(forms.Form):
+    """
+    Formulario de filtrado para el listado de límites operativos.
+    """
+
+    segment = forms.ChoiceField(
+        choices=[('', 'Todos los Segmentos')] + list(Cliente.Segmentacion.choices),
+        required=False,
+        widget=forms.Select(attrs={'class': 'filter-select', 'id': 'filter_segment'}),
+        label='Segmento',
+    )
+    currency = forms.ModelChoiceField(
+        queryset=Currency.objects.all(),
+        required=False,
+        label='Moneda',
+        empty_label='Todas las monedas',
+        widget=forms.Select(attrs={'class': 'filter-select', 'id': 'filter_currency'}),
+    )
+    is_active = forms.ChoiceField(
+        choices=[('', 'Todos los Estados'), ('true', 'Sólo Activos'), ('false', 'Inactivos')],
+        required=False,
+        widget=forms.Select(attrs={'class': 'filter-select', 'id': 'filter_is_active'}),
+        label='Estado',
     )

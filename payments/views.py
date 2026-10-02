@@ -2,9 +2,8 @@
 Módulo de vistas y controladores para la gestión segura de Medios de Pago (payments).
 
 Implementa la arquitectura dual:
-1. **Vistas Basadas en Clases (CBVs)** para interfaz web de usuario con protección de sesión,
-   prevención de Insecure Direct Object References (IDOR) circunscrita a la ficha de cliente del usuario autenticado,
-   validación de estados predeterminados y filtrado interactivo.
+
+1. **Vistas Basadas en Clases (CBVs)** para interfaz web de usuario con protección de sesión, prevención de Insecure Direct Object References (IDOR) circunscrita a la ficha de cliente del usuario autenticado, validación de estados predeterminados y filtrado interactivo.
 2. **Endpoints API REST (JSON)** para consultas programáticas y operaciones seguras.
 """
 
@@ -31,8 +30,8 @@ from django.views.generic import (
 )
 
 from customers.models import Cliente
-from .forms import PaymentMethodFilterForm, PaymentMethodForm
-from .models import PaymentMethod
+from .forms import PaymentMethodFilterForm, PaymentMethodForm, ReceivingMethodForm
+from .models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 
 
 def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
@@ -103,10 +102,16 @@ def serialize_payment_method(pm: PaymentMethod) -> Dict[str, Any]:
         'cliente_id': pm.cliente_id,
         'tipo_medio': pm.tipo_medio,
         'tipo_medio_display': pm.get_tipo_medio_display(),
-        'entidad_bancaria': pm.entidad_bancaria,
+        'entidad_bancaria': pm.entidad_bancaria.nombre if pm.entidad_bancaria else None,
+        'entidad_bancaria_id': pm.entidad_bancaria_id,
         'numero_cuenta': pm.numero_cuenta,
         'titular': pm.titular,
         'documento_titular': pm.documento_titular,
+        'tarjeta_ultimos_digitos': pm.tarjeta_ultimos_digitos,
+        'tarjeta_mes_vencimiento': pm.tarjeta_mes_vencimiento,
+        'tarjeta_anio_vencimiento': pm.tarjeta_anio_vencimiento,
+        'tipo_cuenta_bancaria': pm.tipo_cuenta_bancaria,
+        'telefono_billetera': pm.telefono_billetera,
         'es_predeterminado': pm.es_predeterminado,
         'activo': pm.activo,
         'created_at': pm.created_at.isoformat() if pm.created_at else None,
@@ -342,6 +347,136 @@ class PaymentMethodToggleActiveView(LoginRequiredMixin, View):
         )
         return redirect('payments:paymentmethod-list')
 
+class ReceivingMethodListView(LoginRequiredMixin, ListView):
+    """
+    Vista web para el listado de cuentas de acreditación de fondos del cliente activo.
+    """
+    model = ReceivingMethod
+    template_name = 'payments/receivingmethod_list.html'
+    context_object_name = 'medios_acreditacion'
+    paginate_by = 12
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.cliente = get_current_cliente(request)
+        if not self.cliente and not (request.user.is_staff or request.user.is_superuser):
+            messages.warning(request, 'Para gestionar cuentas de acreditación, debe contar con una ficha de cliente activa.')
+            return redirect('home')
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self) -> QuerySet[ReceivingMethod]:
+        if not self.cliente:
+            return ReceivingMethod.objects.none()
+        return ReceivingMethod.objects.filter(cliente=self.cliente).order_by('-es_predeterminado', '-created_at')
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        return context
+
+
+class ReceivingMethodCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+    """
+    Vista web para registrar una nueva cuenta de acreditación de fondos.
+    """
+    model = ReceivingMethod
+    form_class = ReceivingMethodForm
+    template_name = 'payments/receivingmethod_form.html'
+    success_url = reverse_lazy('payments:receivingmethod-list')
+    success_message = 'La cuenta de acreditación fue registrada con éxito.'
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.cliente = get_current_cliente(request)
+        if not self.cliente:
+            messages.error(request, 'No se localizó una ficha de cliente activa para asociar la nueva cuenta.')
+            return redirect('payments:receivingmethod-list')
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form: ReceivingMethodForm) -> HttpResponse:
+        form.instance.cliente = self.cliente
+        if not ReceivingMethod.objects.filter(cliente=self.cliente).exists():
+            form.instance.es_predeterminado = True
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        context['action'] = 'Registrar'
+        context['is_create'] = True
+        return context
+
+
+class ReceivingMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+    """
+    Vista web para editar una cuenta de acreditación existente.
+    """
+    model = ReceivingMethod
+    form_class = ReceivingMethodForm
+    template_name = 'payments/receivingmethod_form.html'
+    success_url = reverse_lazy('payments:receivingmethod-list')
+    success_message = 'La cuenta de acreditación fue actualizada satisfactoriamente.'
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.cliente = get_current_cliente(request)
+        if not self.cliente:
+            raise PermissionDenied('No tiene un cliente asociado para editar esta cuenta.')
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self) -> QuerySet[ReceivingMethod]:
+        if self.request.user.is_superuser:
+            return ReceivingMethod.objects.all()
+        return ReceivingMethod.objects.filter(cliente=self.cliente)
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        context['action'] = 'Actualizar'
+        context['is_create'] = False
+        return context
+
+
+class ReceivingMethodToggleActiveView(LoginRequiredMixin, View):
+    """
+    Acción POST para el borrado lógico (activar/desactivar) de una cuenta de acreditación.
+    """
+    def post(self, request: HttpRequest, pk: int, *args: Any, **kwargs: Any) -> HttpResponse:
+        cliente = get_current_cliente(request)
+        if not cliente:
+            raise PermissionDenied('Acceso no autorizado.')
+
+        qs = ReceivingMethod.objects.all() if request.user.is_superuser else ReceivingMethod.objects.filter(cliente=cliente)
+        rm = get_object_or_404(qs, pk=pk)
+
+        nuevo_estado = not rm.activo
+        rm.activo = nuevo_estado
+        if not nuevo_estado and rm.es_predeterminado:
+            rm.es_predeterminado = False
+        rm.save()
+
+        estado_texto = 'habilitada' if nuevo_estado else 'inhabilitada'
+        messages.info(request, f'La cuenta de acreditación fue {estado_texto} correctamente.')
+        return redirect('payments:receivingmethod-list')
+
+
+class ReceivingMethodSetDefaultView(LoginRequiredMixin, View):
+    """
+    Acción POST para marcar una cuenta como predeterminada para acreditaciones.
+    """
+    def post(self, request: HttpRequest, pk: int, *args: Any, **kwargs: Any) -> HttpResponse:
+        cliente = get_current_cliente(request)
+        if not cliente:
+            raise PermissionDenied('Acceso no autorizado.')
+
+        qs = ReceivingMethod.objects.all() if request.user.is_superuser else ReceivingMethod.objects.filter(cliente=cliente)
+        rm = get_object_or_404(qs, pk=pk)
+
+        rm.activo = True
+        rm.es_predeterminado = True
+        rm.save()
+
+        messages.success(request, f'"{rm}" ha sido establecida como su cuenta de acreditación predeterminada.')
+        return redirect('payments:receivingmethod-list')
+
+
 
 # ==============================================================================
 # ENDPOINTS API REST (JSON)
@@ -378,6 +513,12 @@ class PaymentMethodListCreateAPIView(LoginRequiredMixin, View):
             payload = json.loads(request.body.decode('utf-8'))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return JsonResponse({'error': 'Cuerpo de solicitud JSON inválido.'}, status=400)
+
+        entidad = payload.get('entidad_bancaria')
+        if isinstance(entidad, str) and not entidad.isdigit():
+            ent_obj = EntidadFinanciera.objects.filter(nombre__iexact=entidad.strip()).first()
+            if ent_obj:
+                payload['entidad_bancaria'] = ent_obj.id
 
         form = PaymentMethodForm(payload)
         if form.is_valid():
@@ -421,12 +562,27 @@ class PaymentMethodDetailAPIView(LoginRequiredMixin, View):
         except (json.JSONDecodeError, UnicodeDecodeError):
             return JsonResponse({'error': 'JSON inválido.'}, status=400)
 
+        entidad = payload.get('entidad_bancaria')
+        if isinstance(entidad, str) and not entidad.isdigit():
+            ent_obj = EntidadFinanciera.objects.filter(nombre__iexact=entidad.strip()).first()
+            if ent_obj:
+                entidad = ent_obj.id
+            else:
+                entidad = pm.entidad_bancaria_id
+        elif entidad is None:
+            entidad = pm.entidad_bancaria_id
+
         data = {
             'tipo_medio': payload.get('tipo_medio', pm.tipo_medio),
-            'entidad_bancaria': payload.get('entidad_bancaria', pm.entidad_bancaria),
+            'entidad_bancaria': entidad,
             'numero_cuenta': payload.get('numero_cuenta', pm.numero_cuenta),
             'titular': payload.get('titular', pm.titular),
             'documento_titular': payload.get('documento_titular', pm.documento_titular),
+            'tarjeta_ultimos_digitos': payload.get('tarjeta_ultimos_digitos', pm.tarjeta_ultimos_digitos),
+            'tarjeta_mes_vencimiento': payload.get('tarjeta_mes_vencimiento', pm.tarjeta_mes_vencimiento),
+            'tarjeta_anio_vencimiento': payload.get('tarjeta_anio_vencimiento', pm.tarjeta_anio_vencimiento),
+            'tipo_cuenta_bancaria': payload.get('tipo_cuenta_bancaria', pm.tipo_cuenta_bancaria),
+            'telefono_billetera': payload.get('telefono_billetera', pm.telefono_billetera),
             'es_predeterminado': payload.get('es_predeterminado', pm.es_predeterminado),
             'activo': payload.get('activo', pm.activo),
         }

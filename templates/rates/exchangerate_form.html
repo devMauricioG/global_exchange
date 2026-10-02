@@ -83,6 +83,10 @@
 
                 <div class="form-section">
                     <div class="form-section-title">Par de Divisas</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: -0.5rem 0 1rem;">
+                        La cotización siempre se carga como <strong>1 moneda base = N monedas cotizadas</strong>.
+                        Ejemplo: para cargar aproximadamente ₲ 5.860 por EUR, seleccione <strong>EUR / PYG</strong>, no PYG / EUR.
+                    </p>
                     <div class="form-grid-2">
                         <div class="form-group">
                             <label class="form-label">{{ form.base_currency.label }} *</label>
@@ -151,6 +155,23 @@
 </div>
 <script>
     document.getElementById('{{ form.is_active.id_for_label }}').classList.remove('form-checkbox');
+    const targetCurrency = document.getElementById('{{ form.target_currency.id_for_label }}');
+    const rateInputs = [
+        document.getElementById('{{ form.buy_rate.id_for_label }}'),
+        document.getElementById('{{ form.sell_rate.id_for_label }}'),
+    ];
+    const targetDecimals = {
+        {% for currency in form.target_currency.field.queryset %}
+        '{{ currency.pk }}': {{ currency.decimal_places }},{% endfor %}
+    };
+    function updateRatePrecision() {
+        const decimals = targetDecimals[targetCurrency.value];
+        if (decimals === undefined) return;
+        const step = decimals === 0 ? '1' : `0.${'0'.repeat(decimals - 1)}1`;
+        rateInputs.forEach(input => input.step = step);
+    }
+    targetCurrency.addEventListener('change', updateRatePrecision);
+    updateRatePrecision();
     document.getElementById('rateForm').addEventListener('submit', function() {
         document.getElementById('submitBtn').textContent = '⏳ Guardando...';
     });

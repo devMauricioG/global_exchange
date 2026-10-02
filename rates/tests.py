@@ -26,10 +26,22 @@ from django.urls import reverse
 from django.utils import timezone
 
 from customers.models import Cliente, CustomerUserAssignment
-from rates.admin import CurrencyAdmin, ExchangeRateAdmin, SegmentCommissionAdmin
-from rates.forms import RateCalculatorForm, SegmentCommissionFilterForm, SegmentCommissionForm
-from rates.models import Currency, ExchangeRate, SegmentCommission
-from rates.services import QuoteFreezeService, RateCalculationService, get_active_customer
+from rates.admin import CurrencyAdmin, ExchangeRateAdmin, OperationLimitAdmin, SegmentCommissionAdmin
+from rates.forms import (
+    OperationLimitFilterForm,
+    OperationLimitForm,
+    RateCalculatorForm,
+    SegmentCommissionFilterForm,
+    SegmentCommissionForm,
+)
+from rates.models import Currency, ExchangeRate, OperationLimit, SegmentCommission
+from rates.services import (
+    OperationLimitValidationService,
+    QuoteFreezeService,
+    RateCalculationService,
+    get_active_customer,
+)
+from rates.templatetags.currency_filters import format_currency, format_number, format_rate
 
 User = get_user_model()
 
@@ -217,8 +229,8 @@ class ExchangeRateModelTest(TestCase):
             sell_rate=Decimal('7500.000000'),
         )
         self.assertIn('USD/PYG', str(rate))
-        self.assertIn('Compra: 7400.000000', str(rate))
-        self.assertIn('Venta: 7500.000000', str(rate))
+        self.assertIn('Compra: 7400', str(rate))
+        self.assertIn('Venta: 7500', str(rate))
 
 
 class SegmentCommissionModelTest(TestCase):
@@ -1501,4 +1513,563 @@ class RateCalculatorInteractiveViewTests(TestCase):
         self.assertContains(response, token)
         self.assertContains(response, 'Cotización Congelada')
         self.assertContains(response, 'countdownDisplay')
+
+
+# ==============================================================================
+# PRUEBAS PARA LÍMITES OPERATIVOS (SCRUM-77)
+# ==============================================================================
+
+class OperationLimitModelTest(TestCase):
+    """
+    Pruebas unitarias para el modelo OperationLimit (Límites por Segmento y Moneda).
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+
+    def test_operation_limit_creation_and_defaults(self):
+        limit = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('5000.00'),
+            limite_diario=Decimal('10000.00'),
+            limite_mensual=Decimal('50000.00'),
+            is_active=True,
+        )
+        self.assertEqual(limit.segment, 'MIN')
+        self.assertEqual(limit.currency, self.usd)
+        self.assertEqual(limit.monto_minimo, Decimal('50.00'))
+        self.assertEqual(limit.monto_maximo, Decimal('5000.00'))
+        self.assertEqual(limit.limite_diario, Decimal('10000.00'))
+        self.assertEqual(limit.limite_mensual, Decimal('50000.00'))
+        self.assertTrue(limit.is_active)
+        self.assertIsNotNone(limit.created_at)
+        self.assertIsNotNone(limit.updated_at)
+        self.assertIn('Minorista', str(limit))
+        self.assertIn('USD', str(limit))
+
+    def test_operation_limit_str_representation(self):
+        limit = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.VIP,
+            currency=self.usd,
+            monto_minimo=Decimal('100.00'),
+            monto_maximo=Decimal('100000.00'),
+            limite_diario=Decimal('200000.00'),
+            limite_mensual=Decimal('1000000.00'),
+        )
+        self.assertIn('VIP', str(limit))
+        self.assertIn('USD', str(limit))
+        self.assertIn('100.00', str(limit))
+        self.assertIn('100000.00', str(limit))
+
+    def test_operation_limit_uniqueness_segment_currency(self):
+        OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.CORPORATIVO,
+            currency=self.usd,
+            monto_minimo=Decimal('100.00'),
+        )
+        with self.assertRaises((IntegrityError, ValidationError)):
+            with transaction.atomic():
+                OperationLimit.objects.create(
+                    segment=Cliente.Segmentacion.CORPORATIVO,
+                    currency=self.usd,
+                    monto_minimo=Decimal('200.00'),
+                )
+
+    def test_operation_limit_negative_amounts_validation(self):
+        invalid_limit = OperationLimit(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('-10.00'),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            invalid_limit.save()
+        self.assertIn('monto_minimo', ctx.exception.message_dict)
+
+    def test_operation_limit_monto_minimo_exceeds_monto_maximo(self):
+        invalid_limit = OperationLimit(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('500.00'),
+            monto_maximo=Decimal('200.00'),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            invalid_limit.save()
+        self.assertIn('monto_minimo', ctx.exception.message_dict)
+
+    def test_operation_limit_monto_maximo_exceeds_limite_diario(self):
+        invalid_limit = OperationLimit(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('6000.00'),
+            limite_diario=Decimal('5000.00'),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            invalid_limit.save()
+        self.assertIn('monto_maximo', ctx.exception.message_dict)
+
+    def test_operation_limit_limite_diario_exceeds_limite_mensual(self):
+        invalid_limit = OperationLimit(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('2000.00'),
+            limite_diario=Decimal('15000.00'),
+            limite_mensual=Decimal('10000.00'),
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            invalid_limit.save()
+        self.assertIn('limite_diario', ctx.exception.message_dict)
+
+    def test_operation_limit_model_validate_amount(self):
+        limit = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('1000.00'),
+            limite_diario=Decimal('2000.00'),
+            limite_mensual=Decimal('10000.00'),
+        )
+        # 1. Monto válido
+        res_ok = limit.validate_amount(Decimal('100.00'))
+        self.assertTrue(res_ok['is_valid'])
+        self.assertEqual(len(res_ok['errors']), 0)
+        self.assertEqual(res_ok['remaining_daily'], Decimal('1900.00'))
+        self.assertEqual(res_ok['remaining_monthly'], Decimal('9900.00'))
+
+        # 2. Monto bajo el mínimo
+        res_low = limit.validate_amount(Decimal('20.00'))
+        self.assertFalse(res_low['is_valid'])
+        self.assertIn('inferior al mínimo', res_low['errors'][0])
+
+        # 3. Monto sobre el máximo
+        res_high = limit.validate_amount(Decimal('1500.00'))
+        self.assertFalse(res_high['is_valid'])
+        self.assertIn('supera el máximo', res_high['errors'][0])
+
+        # 4. Supera límite diario con acumulado
+        res_daily = limit.validate_amount(Decimal('600.00'), accumulated_daily=Decimal('1600.00'))
+        self.assertFalse(res_daily['is_valid'])
+        self.assertTrue(any('límite diario' in e for e in res_daily['errors']))
+
+        # 5. Supera límite mensual con acumulado
+        res_monthly = limit.validate_amount(Decimal('600.00'), accumulated_monthly=Decimal('9800.00'))
+        self.assertFalse(res_monthly['is_valid'])
+        self.assertTrue(any('límite mensual' in e for e in res_monthly['errors']))
+
+
+class OperationLimitValidationServiceTest(TestCase):
+    """
+    Pruebas unitarias para el servicio OperationLimitValidationService.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+
+        self.cliente_min = Cliente.objects.create(
+            nombre='Juan Pérez',
+            documento_ruc='1234567-8',
+            correo='juan@example.com',
+            segmentacion=Cliente.Segmentacion.MINORISTA,
+        )
+        self.cliente_vip = Cliente.objects.create(
+            nombre='Empresa VIP',
+            documento_ruc='80001234-5',
+            correo='vip@empresa.com',
+            segmentacion=Cliente.Segmentacion.VIP,
+        )
+
+        self.limit_min_usd = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('3000.00'),
+            limite_diario=Decimal('6000.00'),
+            limite_mensual=Decimal('30000.00'),
+            is_active=True,
+        )
+
+        self.rate = ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400.00'),
+            sell_rate=Decimal('7500.00'),
+            is_active=True,
+        )
+
+    def test_get_limit_rule_by_customer(self):
+        rule = OperationLimitValidationService.get_limit_rule(self.cliente_min, self.usd)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.id, self.limit_min_usd.id)
+
+    def test_get_limit_rule_by_segment_string(self):
+        rule = OperationLimitValidationService.get_limit_rule('MIN', 'USD')
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.id, self.limit_min_usd.id)
+
+    def test_get_limit_rule_non_existent(self):
+        rule = OperationLimitValidationService.get_limit_rule(self.cliente_vip, self.usd)
+        self.assertIsNone(rule)
+
+    def test_validate_operation_amount_success(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_min,
+            currency='USD',
+            amount=Decimal('500.00'),
+        )
+        self.assertTrue(result['is_valid'])
+        self.assertTrue(result['has_rule'])
+        self.assertEqual(result['monto_minimo'], Decimal('50.00'))
+        self.assertEqual(result['remaining_daily'], Decimal('5500.00'))
+        self.assertEqual(result['remaining_monthly'], Decimal('29500.00'))
+
+    def test_validate_operation_amount_below_minimum(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_min,
+            currency=self.usd,
+            amount=Decimal('25.00'),
+        )
+        self.assertFalse(result['is_valid'])
+        self.assertIn('inferior al mínimo', result['errors'][0])
+
+    def test_validate_operation_amount_exceeds_maximum(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_min,
+            currency=self.usd,
+            amount=Decimal('3500.00'),
+        )
+        self.assertFalse(result['is_valid'])
+        self.assertIn('supera el máximo', result['errors'][0])
+
+    def test_validate_operation_amount_exceeds_daily_accumulated(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_min,
+            currency=self.usd,
+            amount=Decimal('2000.00'),
+            accumulated_daily=Decimal('5000.00'),
+        )
+        self.assertFalse(result['is_valid'])
+        self.assertTrue(any('límite diario' in err for err in result['errors']))
+
+    def test_validate_operation_amount_exceeds_monthly_accumulated(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_min,
+            currency=self.usd,
+            amount=Decimal('1000.00'),
+            accumulated_monthly=Decimal('29500.00'),
+        )
+        self.assertFalse(result['is_valid'])
+        self.assertTrue(any('límite mensual' in err for err in result['errors']))
+
+    def test_validate_operation_amount_without_rule(self):
+        result = OperationLimitValidationService.validate_operation_amount(
+            segment_or_customer=self.cliente_vip,
+            currency=self.usd,
+            amount=Decimal('999999.00'),
+        )
+        self.assertTrue(result['is_valid'])
+        self.assertFalse(result['has_rule'])
+
+    def test_validate_operation_amount_raise_exception(self):
+        with self.assertRaises(ValidationError):
+            OperationLimitValidationService.validate_operation_amount(
+                segment_or_customer=self.cliente_min,
+                currency=self.usd,
+                amount=Decimal('10.00'),
+                raise_exception=True,
+            )
+
+    def test_calculate_quotation_includes_limits_payload(self):
+        calc = RateCalculationService.calculate_quotation(
+            exchange_rate=self.rate,
+            segment_or_customer=self.cliente_min,
+            amount=Decimal('500.00'),
+            operation_type='BUY',
+            is_source_base=True,
+            validate_limits=True,
+        )
+        self.assertIn('limits', calc)
+        self.assertIsNotNone(calc['limits'])
+        self.assertTrue(calc['limits']['is_valid'])
+        self.assertEqual(calc['limits']['monto_minimo'], Decimal('50.00'))
+
+    def test_calculate_quotation_raise_on_limit_violation(self):
+        with self.assertRaises(ValidationError):
+            RateCalculationService.calculate_quotation(
+                exchange_rate=self.rate,
+                segment_or_customer=self.cliente_min,
+                amount=Decimal('10.00'),
+                operation_type='BUY',
+                is_source_base=True,
+                validate_limits=True,
+                raise_on_limit_violation=True,
+            )
+
+
+class OperationLimitFormTest(TestCase):
+    """
+    Pruebas unitarias para formularios OperationLimitForm y OperationLimitFilterForm.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+
+    def test_operation_limit_form_valid(self):
+        data = {
+            'segment': 'MIN',
+            'currency': self.usd.id,
+            'monto_minimo': '10.00',
+            'monto_maximo': '1000.00',
+            'limite_diario': '2000.00',
+            'limite_mensual': '10000.00',
+            'is_active': True,
+        }
+        form = OperationLimitForm(data=data)
+        self.assertTrue(form.is_valid())
+
+    def test_operation_limit_form_invalid_hierarchy(self):
+        data = {
+            'segment': 'MIN',
+            'currency': self.usd.id,
+            'monto_minimo': '500.00',
+            'monto_maximo': '100.00',
+            'limite_diario': '2000.00',
+            'limite_mensual': '10000.00',
+            'is_active': True,
+        }
+        form = OperationLimitForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn('monto_minimo', form.errors)
+
+    def test_operation_limit_filter_form(self):
+        form = OperationLimitFilterForm(data={'segment': 'MIN', 'is_active': 'true'})
+        self.assertTrue(form.is_valid())
+
+
+class OperationLimitViewsTest(TestCase):
+    """
+    Pruebas para las vistas CBVs de gestión de límites operativos.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='admin_user', password='password123', is_staff=True)
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.limit = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('2000.00'),
+            limite_diario=Decimal('5000.00'),
+            limite_mensual=Decimal('20000.00'),
+            is_active=True,
+        )
+
+    def test_limit_list_view_authenticated(self):
+        self.client.login(username='admin_user', password='password123')
+        response = self.client.get(reverse('rates:limit_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Límites Operativos')
+        self.assertContains(response, 'USD')
+        self.assertContains(response, 'Minorista')
+
+    def test_limit_create_view(self):
+        self.client.login(username='admin_user', password='password123')
+        pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        response = self.client.post(
+            reverse('rates:limit_create'),
+            data={
+                'segment': 'MAY',
+                'currency': pyg.id,
+                'monto_minimo': '100000.00',
+                'monto_maximo': '50000000.00',
+                'limite_diario': '100000000.00',
+                'limite_mensual': '500000000.00',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(OperationLimit.objects.filter(segment='MAY', currency=pyg).exists())
+
+    def test_limit_update_view(self):
+        self.client.login(username='admin_user', password='password123')
+        response = self.client.post(
+            reverse('rates:limit_update', args=[self.limit.id]),
+            data={
+                'segment': 'MIN',
+                'currency': self.usd.id,
+                'monto_minimo': '100.00',
+                'monto_maximo': '3000.00',
+                'limite_diario': '8000.00',
+                'limite_mensual': '30000.00',
+                'is_active': True,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.limit.refresh_from_db()
+        self.assertEqual(self.limit.monto_minimo, Decimal('100.00'))
+
+    def test_limit_detail_view(self):
+        self.client.login(username='admin_user', password='password123')
+        response = self.client.get(reverse('rates:limit_detail', args=[self.limit.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Política de Límites Operativos')
+        self.assertContains(response, 'Simulación de Validaciones')
+
+    def test_limit_delete_view(self):
+        self.client.login(username='admin_user', password='password123')
+        response = self.client.post(reverse('rates:limit_delete', args=[self.limit.id]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(OperationLimit.objects.filter(id=self.limit.id).exists())
+
+
+class OperationLimitApiViewsTest(TestCase):
+    """
+    Pruebas para los endpoints API REST JSON de límites operativos.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.limit = OperationLimit.objects.create(
+            segment=Cliente.Segmentacion.MINORISTA,
+            currency=self.usd,
+            monto_minimo=Decimal('50.00'),
+            monto_maximo=Decimal('2000.00'),
+            limite_diario=Decimal('5000.00'),
+            limite_mensual=Decimal('20000.00'),
+            is_active=True,
+        )
+
+    def test_api_limits_list(self):
+        response = self.client.get(reverse('rates:api_limits'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertGreaterEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['segment'], 'MIN')
+
+    def test_api_limit_detail(self):
+        response = self.client.get(reverse('rates:api_limit_detail', args=['MIN', 'USD']))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['limit']['monto_minimo'], 50.0)
+
+    def test_api_limit_detail_not_found(self):
+        response = self.client.get(reverse('rates:api_limit_detail', args=['VIP', 'USD']))
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_limits_validate_valid_amount(self):
+        payload = {
+            'segment': 'MIN',
+            'currency': 'USD',
+            'amount': '500.00',
+        }
+        response = self.client.post(
+            reverse('rates:api_limits_validate'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['validation']['is_valid'])
+
+    def test_api_limits_validate_invalid_amount_below_min(self):
+        payload = {
+            'segment': 'MIN',
+            'currency': 'USD',
+            'amount': '10.00',
+        }
+        response = self.client.post(
+            reverse('rates:api_limits_validate'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 422)
+        data = response.json()
+        self.assertFalse(data['success'])
+        self.assertFalse(data['validation']['is_valid'])
+        self.assertIn('inferior al mínimo', data['validation']['errors'][0])
+
+
+class CurrencyFiltersTemplateTagTest(TestCase):
+    """
+    Pruebas unitarias para las etiquetas y filtros de plantilla monetarios (SCRUM-83 / SCRUM-70).
+    Verifica formateo estándar paraguayo/latinoamericano: miles con punto (.) y decimales con coma (,).
+    """
+
+    def setUp(self):
+        self.pyg = Currency.objects.create(
+            code='PYG',
+            name='Guaraní Paraguayo',
+            symbol='₲',
+            decimals=0,
+        )
+        self.usd = Currency.objects.create(
+            code='USD',
+            name='Dólar Estadounidense',
+            symbol='$',
+            decimals=2,
+        )
+        self.eur = Currency.objects.create(
+            code='EUR',
+            name='Euro',
+            symbol='€',
+            decimals=2,
+        )
+
+    def test_format_currency_with_currency_model_pyg(self):
+        """PYG no utiliza decimales y antepone el símbolo ₲."""
+        result = format_currency(Decimal('7500000'), self.pyg)
+        self.assertEqual(result, '₲ 7.500.000')
+
+        result_int = format_currency(7500000, self.pyg)
+        self.assertEqual(result_int, '₲ 7.500.000')
+
+    def test_format_currency_with_currency_model_usd(self):
+        """USD utiliza 2 decimales y antepone el símbolo $."""
+        result = format_currency(Decimal('1250.50'), self.usd)
+        self.assertEqual(result, '$ 1.250,50')
+
+        result_float = format_currency(1250.5, self.usd)
+        self.assertEqual(result_float, '$ 1.250,50')
+
+    def test_format_currency_without_currency_object(self):
+        """Sin objeto Currency utiliza 2 decimales por defecto sin símbolo."""
+        result = format_currency(Decimal('1250.50'))
+        self.assertEqual(result, '1.250,50')
+
+    def test_format_currency_empty_and_none(self):
+        """Valores vacíos o None retornan cadena vacía."""
+        self.assertEqual(format_currency(None), '')
+        self.assertEqual(format_currency(''), '')
+        self.assertEqual(format_currency(None, self.usd), '')
+
+    def test_format_number_various_decimal_places(self):
+        """format_number formatea con separadores de miles (.) y decimales (,)."""
+        self.assertEqual(format_number(1250.5, 2), '1.250,50')
+        self.assertEqual(format_number(7500000, 0), '7.500.000')
+        self.assertEqual(format_number(1000000.1234, 4), '1.000.000,1234')
+        self.assertEqual(format_number(-1250.5, 2), '-1.250,50')
+        self.assertEqual(format_number(0, 2), '0,00')
+
+    def test_format_number_invalid_values(self):
+        """Valores no numéricos retornan el valor original o cadena vacía."""
+        self.assertEqual(format_number(None), '')
+        self.assertEqual(format_number(''), '')
+        self.assertEqual(format_number('invalido'), 'invalido')
+
+    def test_format_rate_precision(self):
+        """format_rate maneja tasas con 2 decimales por defecto y hasta 6 decimales."""
+        self.assertEqual(format_rate(Decimal('7450.00')), '7.450,00')
+        self.assertEqual(format_rate(Decimal('0.000134')), '0,000134')
+        self.assertEqual(format_rate(Decimal('150.0000'), 4), '150,0000')
+        self.assertEqual(format_rate(None), '')
+        self.assertEqual(format_rate(''), '')
+
+
 

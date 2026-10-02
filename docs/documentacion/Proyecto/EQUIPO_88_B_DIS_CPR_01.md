@@ -1,6 +1,6 @@
 # Detalle de la Infraestructura de Producción — EQUIPO 88 B DIS CPR 01
 
-> Última actualización: SCRUM 57 — incorpora los casos de prueba para `rates` (monedas, tasas, comisiones, cotizador) y `payments` (medios de pago), derivados de RF28–RF31 y RN08–RN18 de la ERS v3.2.
+> Última actualización: Hito 5 (SCRUM-85) — incorpora los casos de prueba para Entidades Financieras (CPR-ENT), Medios de Cobro (CPR-REC), Límites Operativos (CPR-LIM), Filtros de Formato de Moneda (CPR-FLT), Transacciones Cambiarias y Orquestación (CPR-TXN), Expiración y Cancelación (CPR-EXP), Comprobante de Transacción (CPR-RCP) y Sembrado Idempotente (CPR-SED), derivados de RF-32 a RF-38 y RN-19 a RN-26 de la ERS v3.3.
 
 ## 1. Descripción general
 
@@ -1256,6 +1256,112 @@ Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funciona
 | **CPR-PAY-009** | API crear medio | Cliente activo | POST JSON válido a `/payments/api/` | Respuesta 201 con medio asociado al cliente activo | Alta |
 | **CPR-PAY-010** | API actualizar y eliminar | Medio propio existente | PUT/PATCH y luego DELETE al detalle | Respuestas 200 y eliminación confirmada | Alta |
 | **CPR-PAY-011** | Validar campos de titularidad | Cliente activo | Enviar entidad, cuenta o titular vacíos | Respuesta 400 con errores de campo | Media |
+
+---
+
+## 28.8. Módulo 8: Pruebas de Entidades Financieras (`payments.EntidadFinanciera`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-ENT-001** | Crear entidad financiera válida | Catálogo abierto | Crear entidad con nombre "Banco Continental", código "CONTINENTAL", tipo "BANCO", RUC válido y activo | Registro persistido correctamente con campos obligatorios | Alta |
+| **CPR-ENT-002** | Impedir código duplicado | Existe entidad con código "ITAU" | Intentar registrar otra entidad con código "ITAU" | Error de integridad/unicidad en campo `code` | Crítica |
+| **CPR-ENT-003** | Validar tipo de entidad permitido | Catálogo disponible | Intentar registrar con tipo no listado en opciones (`BANCO`, `FINANCIERA`, `COOPERATIVA`, `BILLETERA`, `OTRO`) | Rechazo por validación de opciones (choices) | Alta |
+| **CPR-ENT-004** | Filtrado de entidades activas | Existen entidades activas e inactivas | Consultar selector de entidades para medios de pago o cobro | Solo se listan aquellas con `is_active=True` | Alta |
+| **CPR-ENT-005** | Desactivación lógica de entidad | Entidad vinculada a medios de pago | Marcar entidad como inactiva | La entidad permanece para integridad histórica pero se excluye de nuevos registros | Media |
+
+---
+
+## 28.9. Módulo 9: Pruebas de Medios de Cobro / Recepción (`payments.ReceivingMethod`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-REC-001** | Crear primer medio de cobro | Cliente activo sin medios de cobro | Registrar cuenta bancaria con entidad financiera, número y titular | Registro creado activo y marcado como predeterminado automáticamente | Alta |
+| **CPR-REC-002** | Crear segundo medio de cobro | Cliente con un medio predeterminado | Registrar billetera electrónica sin tildar predeterminado | Se crea activo sin desplazar al predeterminado existente | Alta |
+| **CPR-REC-003** | Exclusividad atómica de predeterminado | Cliente con dos medios de cobro | Marcar el segundo medio como predeterminado | El segundo queda predeterminado y el primero pierde la marca atómicamente | Crítica |
+| **CPR-REC-004** | Impedir predeterminado inactivo | Medio de cobro inactivo | Intentar guardar con `is_active=False` e `is_default=True` | Error de validación; no se permite predeterminado inactivo | Alta |
+| **CPR-REC-005** | Desactivar medio predeterminado | Medio de cobro predeterminado activo | Desactivar mediante formulario o vista de toggle | Queda inactivo y se desmarca de predeterminado | Alta |
+| **CPR-REC-006** | Aislamiento de listado de cobro | Clientes A y B con cuentas registradas | Acceder a `/payments/receiving-methods/` con cliente A activo | Solo se listan los medios de cobro pertenecientes al cliente A | Crítica |
+| **CPR-REC-007** | Proteger edición IDOR de medio de cobro | Cliente A activo; medio de cobro de B | Enviar POST de actualización a la URL del medio de B | Respuesta 404 o 403; los datos del cliente B no sufren modificaciones | Crítica |
+| **CPR-REC-008** | Proteger eliminación IDOR de medio de cobro | Cliente A activo; medio de cobro de B | Solicitar eliminación o borrado del medio de B | Rechazo con 404/403; registro de B intacto | Crítica |
+| **CPR-REC-009** | Validación de formularios especializados | Cliente activo | Enviar `BankTransferForm` o `DigitalWalletForm` con datos requeridos incompletos | Errores de validación en campos específicos y formulario no procesado | Media |
+
+---
+
+## 28.10. Módulo 10: Pruebas de Límites Operativos (`rates.OperationLimit` y `OperationLimitValidationService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-LIM-001** | Crear límite operativo válido | Parámetros del sistema | Crear límite para segmento MIN y moneda USD con mín 10.00, máx 5000.00 y límite diario 15000.00 | Registro persistido correctamente | Alta |
+| **CPR-LIM-002** | Impedir mínimo mayor a máximo | Parámetros del sistema | Intentar crear límite con `min_amount = 1000.00` y `max_amount = 500.00` | Error de validación de modelo/formulario | Crítica |
+| **CPR-LIM-003** | Unicidad por segmento y divisa | Existe límite MIN en USD | Intentar registrar otro límite para segmento MIN y divisa USD | Error de restricción única (`unique_together`) | Alta |
+| **CPR-LIM-004** | Validar monto dentro de límites | Límite MIN USD [10, 5000] | Validar monto de 500 USD mediante `OperationLimitValidationService` | Validación exitosa, operación autorizada | Alta |
+| **CPR-LIM-005** | Rechazar monto inferior al mínimo | Límite MIN USD [10, 5000] | Validar monto de 5 USD | Retorna `is_valid=False` con mensaje claro de monto inferior al mínimo | Crítica |
+| **CPR-LIM-006** | Rechazar monto superior al máximo | Límite MIN USD [10, 5000] | Validar monto de 6000 USD | Retorna `is_valid=False` con mensaje indicando superación del tope permitido | Crítica |
+| **CPR-LIM-007** | Fallback sin límite configurado | Segmento o moneda sin regla registrada | Validar monto positivo en divisa no restringida | Operación admitida por defecto o sujeta a tope global de plataforma | Media |
+
+---
+
+## 28.11. Módulo 11: Pruebas de Filtros de Formato de Moneda (`rates.templatetags.currency_filters`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-FLT-001** | Formato de guaraníes (PYG) | Valor numérico o Decimal `1500000` | Aplicar filtro `currency_format:'PYG'` | Retorna `"1.500.000"` sin decimales y con separador de miles | Alta |
+| **CPR-FLT-002** | Formato de divisa con decimales (USD) | Valor Decimal `1234.5` | Aplicar filtro `currency_format:'USD'` | Retorna `"1.234,50"` o formato estándar con dos cifras decimales | Alta |
+| **CPR-FLT-003** | Formato de tipo de cambio | Tasa Decimal `7450.2500` | Aplicar filtro `exchange_rate_format` | Retorna formato amigable respetando precisión requerida | Media |
+| **CPR-FLT-004** | Formato de porcentaje | Valor Decimal `1.50` | Aplicar filtro `percentage_format` | Retorna `"1,50%"` | Media |
+| **CPR-FLT-005** | Manejo de valores vacíos o nulos | Valor `None` o cadena vacía | Aplicar filtros de formato de moneda | Retorna `"-"` o string vacío sin generar excepciones 500 | Media |
+
+---
+
+## 28.12. Módulo 12: Pruebas de Transacciones Cambiarias y Orquestación (`transactions.Transaction` y `TransactionService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-TXN-001** | Crear orden de compra (COMPRA) | Cliente activo con medios válidos; tasa USD/PYG vigente | Ejecutar `TransactionService.create_transaction_order` para COMPRA de 100 USD | Transacción persistida en estado `PENDIENTE`, montos y comisión congelados, `quote_expires_at` fijado a `now + 5 min` | Crítica |
+| **CPR-TXN-002** | Crear orden de venta (VENTA) | Cliente activo; tasa vigente | Solicitar VENTA de 200 USD acreditando en cuenta bancaria | Transacción persistida en estado `PENDIENTE` con desglose exacto de cambio y comisión | Crítica |
+| **CPR-TXN-003** | Confirmar transacción vigente | Transacción `PENDIENTE` dentro de los 5 minutos | Invocar `TransactionService.confirm_transaction(tx, user)` | Estado cambia a `CONFIRMADA`, se sella `confirmed_at` con timestamp actual | Crítica |
+| **CPR-TXN-004** | Impedir re-confirmación | Transacción ya en estado `CONFIRMADA` | Intentar ejecutar nuevamente confirmación | Error de validación o excepción; estado y timestamps permanecen inmutables | Alta |
+| **CPR-TXN-005** | Validar pertenencia de medios | Cliente A activo | Intentar crear transacción vinculando `PaymentMethod` perteneciente a cliente B | Error de validación en formulario o servicio; orden rechazada | Crítica |
+| **CPR-TXN-006** | Formulario `TransactionOrderForm` | Datos de prueba válidos | Instanciar formulario con cliente activo y datos completos | Formulario válido; los QuerySets de medios de pago y cobro se restringen al cliente activo | Alta |
+| **CPR-TXN-007** | Listado de transacciones paginado | Cliente A con 15 transacciones | Acceder a `/transactions/` autenticado con cliente A | Listado muestra solo transacciones de A, con paginación y filtros operativos | Alta |
+| **CPR-TXN-008** | Detalle de transacción propio | Transacción perteneciente a cliente A | Acceder a `/transactions/<pk>/` con cliente A activo | Respuesta 200 con visualización completa del detalle y trazabilidad | Alta |
+| **CPR-TXN-009** | Proteger detalle IDOR | Transacción perteneciente a cliente B | Intentar acceder a `/transactions/<pk_B>/` con cliente A activo | Respuesta 404 Not Found; se evita fuga de información | Crítica |
+| **CPR-TXN-010** | API REST crear orden de transacción | Cliente activo autenticado | Enviar POST JSON a `/transactions/api/create/` con payload válido | Respuesta 201 Created con UUID de la transacción, estado `PENDIENTE` y vigencia | Alta |
+| **CPR-TXN-011** | Exactitud decimal financiera | Tasa y comisiones con múltiples decimales | Calcular y persistir transacción | Montos finales calculados con objetos `Decimal`, sin imprecisión de punto flotante | Crítica |
+
+---
+
+## 28.13. Módulo 13: Pruebas de Expiración a 5 Minutos y Cancelación (`transactions` y `QuoteFreezeService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-EXP-001** | Ventana de cotización congelada | Orden creada | Verificar `quote_expires_at` respecto a `created_at` | La diferencia temporal es exactamente de 300 segundos (5 minutos) | Alta |
+| **CPR-EXP-002** | Rechazo de confirmación por expiración | Transacción `PENDIENTE` con `quote_expires_at` vencido | Intentar confirmar mediante servicio o vista web | Transacción pasa automáticamente a estado `EXPIRADA`; se rechaza la confirmación con mensaje descriptivo | Crítica |
+| **CPR-EXP-003** | Cancelación voluntaria de orden | Transacción `PENDIENTE` | POST a `/transactions/<pk>/cancel/` indicando motivo | Estado transiciona a `CANCELADA`, registrando usuario que cancela y motivo | Alta |
+| **CPR-EXP-004** | API REST cancelar orden | Transacción `PENDIENTE` del cliente activo | Enviar POST JSON a `/transactions/api/<pk>/cancel/` con motivo | Respuesta 200 OK con confirmación de estado `CANCELADA` | Alta |
+| **CPR-EXP-005** | Impedir cancelación de transacción confirmada | Transacción en estado `CONFIRMADA` | Intentar cancelar mediante servicio o API | Rechazo de operación; las transacciones liquidadas no pueden anularse arbitrariamente | Crítica |
+| **CPR-EXP-006** | Cuenta regresiva en pantalla de confirmación | Transacción `PENDIENTE` | Renderizar `TransactionConfirmView` | Template incluye script y elemento de cuenta regresiva sincronizado con `quote_expires_at` | Media |
+
+---
+
+## 28.14. Módulo 14: Pruebas de Comprobante de Transacción (`TransactionReceiptView`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-RCP-001** | Emisión de comprobante confirmado | Transacción en estado `CONFIRMADA` | Acceder a `/transactions/<pk>/receipt/` | Respuesta 200 con comprobante oficial conteniendo código de transacción, importes, tasas y datos fiscales | Alta |
+| **CPR-RCP-002** | Denegar comprobante en orden no confirmada | Transacción en estado `PENDIENTE` o `CANCELADA` | Intentar acceder a la URL del comprobante | Redirección o error 400/404 informando que no existe comprobante disponible para órdenes no liquidadas | Alta |
+| **CPR-RCP-003** | Aislamiento IDOR de comprobante | Transacción confirmada de cliente B | Intentar acceder al comprobante con cliente A activo | Respuesta 404 Not Found; denegación estricta de comprobantes ajenos | Crítica |
+| **CPR-RCP-004** | Formato de impresión amigable | Vista de comprobante | Evaluar hoja de estilos de impresión en template | Dispone de reglas `@media print` para ocultar botones de navegación y optimizar impresión/PDF | Media |
+
+---
+
+## 28.15. Módulo 15: Pruebas de Comando de Sembrado Idempotente (`customers.seed_data`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-SED-001** | Ejecución inicial de sembrado | Base de datos limpia o inicializada | Ejecutar `python manage.py seed_data` | Catálogos de monedas (`USD`, `EUR`, `BRL`, `ARS`, `PYG`), bancos, tasas, comisiones, límites y clientes creados exitosamente | Alta |
+| **CPR-SED-002** | Idempotencia en ejecuciones sucesivas | Base de datos ya sembrada | Ejecutar `python manage.py seed_data` por segunda vez | Comando finaliza sin errores, actualiza o mantiene registros sin generar duplicados | Crítica |
+| **CPR-SED-003** | Verificación de límites y asignaciones sembradas | Post-ejecución de sembrado | Consultar instancias de `OperationLimit` y `CustomerUserAssignment` | Existen límites válidos para cada segmento y los usuarios de prueba tienen clientes asignados | Alta |
 
 ---
 

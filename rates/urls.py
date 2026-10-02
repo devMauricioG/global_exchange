@@ -43,4 +43,16 @@ urlpatterns = [
     path('api/freeze/', views.FreezeQuoteApiView.as_view(), name='api_freeze'),
     path('api/frozen-quote/', views.GetFrozenQuoteApiView.as_view(), name='api_frozen_quote'),
     path('api/unfreeze/', views.UnfreezeQuoteApiView.as_view(), name='api_unfreeze'),
+
+    # Gestión Administrativa de Límites Operativos por Moneda y Segmento (SCRUM-77)
+    path('limits/', views.OperationLimitListView.as_view(), name='limit_list'),
+    path('limits/add/', views.OperationLimitCreateView.as_view(), name='limit_create'),
+    path('limits/<int:pk>/', views.OperationLimitDetailView.as_view(), name='limit_detail'),
+    path('limits/<int:pk>/edit/', views.OperationLimitUpdateView.as_view(), name='limit_update'),
+    path('limits/<int:pk>/delete/', views.OperationLimitDeleteView.as_view(), name='limit_delete'),
+
+    # Endpoints API REST Límites Operativos (SCRUM-77)
+    path('api/limits/', views.OperationLimitListApiView.as_view(), name='api_limits'),
+    path('api/limits/validate/', views.ValidateOperationLimitApiView.as_view(), name='api_limits_validate'),
+    path('api/limits/<str:segment>/<str:currency_code>/', views.OperationLimitDetailApiView.as_view(), name='api_limit_detail'),
 ]

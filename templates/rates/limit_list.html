@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Límites Operativos — Global Exchange{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.65rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                🛡️ Límites Operativos por Moneda y Segmento
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Parametrice montos mínimos, máximos por transacción y topes acumulados diarios/mensuales para control de riesgos y cumplimiento PLA/FT.
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a href="{% url 'rates:rate_calculator' %}" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+                🧮 Cotizador
+            </a>
+            <a href="{% url 'rates:limit_create' %}" class="btn btn-primary">
+                ➕ Nuevo Límite Operativo
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Métricas Resumen -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid var(--primary);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Reglas de Límites</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-top: 0.35rem;">
+            {{ total_limits }}
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid var(--success);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Límites Activos</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #34d399; margin-top: 0.35rem;">
+            {{ active_limits }}
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid #f87171;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Límites Inactivos</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #f87171; margin-top: 0.35rem;">
+            {{ inactive_limits }}
+        </div>
+    </div>
+    <div class="card" style="padding: 1.25rem; border-left: 4px solid #fbbf24;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">Segmentos Habilitados</div>
+        <div style="font-size: 1.75rem; font-weight: 800; color: #fbbf24; margin-top: 0.35rem;">
+            {{ available_segments_count }}
+        </div>
+    </div>
+</div>
+
+<!-- Filtros -->
+<div class="card" style="margin-bottom: 1.5rem; padding: 1.25rem;">
+    <form method="get" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 180px;">
+            <label for="filter_segment" class="form-label" style="margin-bottom: 0.35rem;">Segmento:</label>
+            {{ filter_form.segment }}
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+            <label for="filter_currency" class="form-label" style="margin-bottom: 0.35rem;">Moneda:</label>
+            {{ filter_form.currency }}
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+            <label for="filter_is_active" class="form-label" style="margin-bottom: 0.35rem;">Estado:</label>
+            {{ filter_form.is_active }}
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary" style="padding: 0.625rem 1.25rem;">Filtrar</button>
+            <a href="{% url 'rates:limit_list' %}" class="btn btn-secondary" style="padding: 0.625rem 1rem;">Limpiar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Tabla de Límites Operativos -->
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div style="overflow-x: auto;">
+        <table class="table" style="width: 100%; margin: 0;">
+            <thead>
+                <tr>
+                    <th>Segmento</th>
+                    <th>Divisa</th>
+                    <th style="text-align: right;">Mínimo / Op.</th>
+                    <th style="text-align: right;">Máximo / Op.</th>
+                    <th style="text-align: right;">Límite Diario</th>
+                    <th style="text-align: right;">Límite Mensual</th>
+                    <th style="text-align: center;">Estado</th>
+                    <th style="text-align: center;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for limit in limits %}
+                <tr>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <span class="badge {% if limit.segment == 'MIN' %}badge-min{% elif limit.segment == 'MAY' %}badge-may{% elif limit.segment == 'COR' %}badge-cor{% elif limit.segment == 'VIP' %}badge-vip{% else %}badge-min{% endif %}" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+                                {{ limit.get_segment_display }}
+                            </span>
+                            <span style="color: var(--text-subtle); font-size: 0.8rem; font-family: monospace;">({{ limit.segment }})</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span style="font-weight: 700; color: #a5b4fc; font-size: 1rem;">
+                            {{ limit.currency.code }}
+                        </span>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">
+                            ({{ limit.currency.symbol }})
+                        </span>
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: var(--text-main);">
+                        {{ limit.monto_minimo }} {{ limit.currency.code }}
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: var(--text-main);">
+                        {% if limit.monto_maximo > 0 %}
+                            {{ limit.monto_maximo }} {{ limit.currency.code }}
+                        {% else %}
+                            <span style="color: var(--text-muted); font-style: italic;">Sin Máx</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: #34d399;">
+                        {% if limit.limite_diario > 0 %}
+                            {{ limit.limite_diario }} {{ limit.currency.code }}
+                        {% else %}
+                            <span style="color: var(--text-muted); font-style: italic;">Sin Límite</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: #60a5fa;">
+                        {% if limit.limite_mensual > 0 %}
+                            {{ limit.limite_mensual }} {{ limit.currency.code }}
+                        {% else %}
+                            <span style="color: var(--text-muted); font-style: italic;">Sin Límite</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center;">
+                        {% if limit.is_active %}
+                            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                Activo
+                            </span>
+                        {% else %}
+                            <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
+                                Inactivo
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center;">
+                        <div style="display: inline-flex; gap: 0.35rem;">
+                            <a href="{% url 'rates:limit_detail' limit.pk %}" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.85rem;" title="Ver Detalle">
+                                👁️
+                            </a>
+                            <a href="{% url 'rates:limit_update' limit.pk %}" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.85rem;" title="Editar">
+                                ✏️
+                            </a>
+                            <a href="{% url 'rates:limit_delete' limit.pk %}" class="btn btn-danger" style="padding: 0.35rem 0.65rem; font-size: 0.85rem; background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Eliminar">
+                                🗑️
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🛡️</div>
+                        <p style="font-size: 1.1rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.25rem;">
+                            No se encontraron reglas de límites operativos
+                        </p>
+                        <p style="font-size: 0.9rem; margin-bottom: 1.25rem;">
+                            No existen parámetros registrados con los filtros aplicados.
+                        </p>
+                        <a href="{% url 'rates:limit_create' %}" class="btn btn-primary">
+                            ➕ Configurar Primer Límite
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

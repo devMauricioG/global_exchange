@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle de Límite — {{ limit.get_segment_display }} ({{ limit.currency.code }}) — Global Exchange{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <span class="badge {% if limit.segment == 'MIN' %}badge-min{% elif limit.segment == 'MAY' %}badge-may{% elif limit.segment == 'COR' %}badge-cor{% elif limit.segment == 'VIP' %}badge-vip{% else %}badge-min{% endif %}" style="font-size: 1.1rem; padding: 0.5rem 1rem;">
+                {{ limit.get_segment_display }}
+            </span>
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    Política de Límites Operativos — {{ limit.currency.code }}
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.875rem; margin: 0;">
+                    Divisa: <strong style="color: #a5b4fc;">{{ limit.currency.name }} ({{ limit.currency.symbol }})</strong> | Estado:
+                    {% if limit.is_active %}
+                        <span style="color: #34d399; font-weight: 700;">● Activo</span>
+                    {% else %}
+                        <span style="color: #f87171; font-weight: 700;">○ Inactivo</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="{% url 'rates:limit_list' %}" class="btn btn-secondary">← Volver</a>
+            <a href="{% url 'rates:rate_calculator' %}?segment={{ limit.segment }}" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+                🧮 Abrir Cotizador
+            </a>
+            <a href="{% url 'rates:limit_update' limit.id %}" class="btn btn-primary">✏️ Editar Límites</a>
+        </div>
+    </div>
+</div>
+
+<!-- Tarjetas de Parámetros de Límites -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid var(--primary);">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Monto Mínimo / Op.</div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--text-main); margin-top: 0.5rem;">
+            {{ limit.monto_minimo }} <span style="font-size: 1rem; color: var(--text-muted);">{{ limit.currency.code }}</span>
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Piso mínimo por operación</div>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid #818cf8;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Monto Máximo / Op.</div>
+        <div style="font-size: 2rem; font-weight: 800; color: #a5b4fc; margin-top: 0.5rem;">
+            {% if limit.monto_maximo > 0 %}
+                {{ limit.monto_maximo }} <span style="font-size: 1rem; color: var(--text-muted);">{{ limit.currency.code }}</span>
+            {% else %}
+                <span style="color: var(--text-muted); font-size: 1.5rem;">Sin Máximo</span>
+            {% endif %}
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Tope individual por transacción</div>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid #34d399;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Límite Acumulado Diario</div>
+        <div style="font-size: 2rem; font-weight: 800; color: #34d399; margin-top: 0.5rem;">
+            {% if limit.limite_diario > 0 %}
+                {{ limit.limite_diario }} <span style="font-size: 1rem; color: var(--text-muted);">{{ limit.currency.code }}</span>
+            {% else %}
+                <span style="color: var(--text-muted); font-size: 1.5rem;">Sin Límite</span>
+            {% endif %}
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Cupo diario por cliente</div>
+    </div>
+
+    <div class="card" style="padding: 1.5rem; text-align: center; border-top: 4px solid #60a5fa;">
+        <div style="color: var(--text-muted); font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">Límite Acumulado Mensual</div>
+        <div style="font-size: 2rem; font-weight: 800; color: #60a5fa; margin-top: 0.5rem;">
+            {% if limit.limite_mensual > 0 %}
+                {{ limit.limite_mensual }} <span style="font-size: 1rem; color: var(--text-muted);">{{ limit.currency.code }}</span>
+            {% else %}
+                <span style="color: var(--text-muted); font-size: 1.5rem;">Sin Límite</span>
+            {% endif %}
+        </div>
+        <div style="color: var(--text-subtle); font-size: 0.8rem; margin-top: 0.25rem;">Cupo mensual por cliente</div>
+    </div>
+</div>
+
+<!-- Simulador de Validación Rápida -->
+<div class="card" style="margin-bottom: 2rem;">
+    <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 1rem;">
+        🧪 Simulación de Validaciones por Monto
+    </h3>
+    <div style="overflow-x: auto;">
+        <table class="table" style="width: 100%; margin: 0;">
+            <thead>
+                <tr>
+                    <th>Monto Evaluado</th>
+                    <th>Estado de Validación</th>
+                    <th>Resultado / Observaciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sim in simulations %}
+                <tr>
+                    <td style="font-weight: 700; color: var(--text-main); font-size: 1rem;">
+                        {{ sim.amount }} {{ limit.currency.code }}
+                    </td>
+                    <td>
+                        {% if sim.is_valid %}
+                            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                ✅ Aprobado
+                            </span>
+                        {% else %}
+                            <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
+                                ❌ Bloqueado
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td style="color: {% if sim.is_valid %}#34d399{% else %}#f87171{% endif %}; font-size: 0.9rem;">
+                        {% if sim.is_valid %}
+                            Operación permitida dentro de los umbrales configurados.
+                        {% else %}
+                            {{ sim.errors|join:", " }}
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

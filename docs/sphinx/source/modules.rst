@@ -6,4 +6,7 @@ global_exchange
 
    authentication
    customers
-
+   payments
+   rates
+   transactions
+   config
