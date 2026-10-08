@@ -6,9 +6,10 @@ para la administración y registro seguro de cuentas bancarias, billeteras digit
 y otros instrumentos financieros asociados a los clientes en Global Exchange.
 """
 import re
+from datetime import date
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from datetime import date
+from django.utils import timezone
 
 class EntidadFinanciera(models.Model):
     """
@@ -649,3 +650,176 @@ class PaymentWebhookEvent(models.Model):
     def __str__(self) -> str:
         proc = 'Procesado' if self.procesado else 'Pendiente'
         return f'{self.gateway} — {self.tipo_evento} ({self.event_id}) [{proc}]'
+
+
+class SipapTransferRecord(models.Model):
+    """
+    Modelo representativo de una Transferencia Bancaria Interbancaria SIPAP (SCRUM-93 / SCRUM-87).
+
+    Almacena las transferencias entrantes del Sistema de Pagos del Paraguay (SIPAP),
+    incluyendo código de transferencia único, entidad financiera de origen y destino,
+    cuentas involucradas, monto, titularidad y estado de conciliación.
+
+    :ivar codigo_transferencia: Identificador único de la transferencia bancaria (ej. SIPAP-20261008-001234).
+    :vartype codigo_transferencia: str
+    :ivar transaction: Orden cambiaria asociada para conciliación (:class:`transactions.models.Transaction`).
+    :vartype transaction: transactions.models.Transaction
+    :ivar gateway_record: Registro de pasarela asociado (:class:`PaymentGatewayRecord`).
+    :vartype gateway_record: PaymentGatewayRecord
+    :ivar banco_origen: Entidad bancaria o financiera remitente.
+    :vartype banco_origen: str
+    :ivar cuenta_origen: Número de cuenta bancaria remitente.
+    :vartype cuenta_origen: str
+    :ivar titular_origen: Nombre o razón social del titular que transfiere los fondos.
+    :vartype titular_origen: str
+    :ivar documento_origen: Cédula de identidad o RUC del titular remitente.
+    :vartype documento_origen: str
+    :ivar banco_destino: Entidad bancaria receptora (cuenta recaudadora de la casa de cambio).
+    :vartype banco_destino: str
+    :ivar cuenta_destino: Número de cuenta bancaria recaudadora receptora.
+    :vartype cuenta_destino: str
+    :ivar monto: Monto acreditado o transferido.
+    :vartype monto: decimal.Decimal
+    :ivar moneda: Código ISO de la moneda transferida (ej. 'PYG', 'USD').
+    :vartype moneda: str
+    :ivar estado: Estado de la transferencia ('PENDIENTE', 'CONFIRMADA', 'RECHAZADA', 'REVERTIDA').
+    :vartype estado: str
+    :ivar motivo_rechazo: Detalle o motivo en caso de rechazo o disconformidad en la conciliación.
+    :vartype motivo_rechazo: str
+    :ivar fecha_transferencia: Marca temporal informada de la transferencia bancaria.
+    :vartype fecha_transferencia: datetime.datetime
+    :ivar fecha_conciliacion: Marca temporal de conciliación en el sistema.
+    :vartype fecha_conciliacion: datetime.datetime
+    :ivar metadata: Carga útil adicional con metadatos de la compensación interbancaria.
+    :vartype metadata: dict
+    :ivar created_at: Timestamp de registro en el sistema.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Timestamp de última actualización.
+    :vartype updated_at: datetime.datetime
+    """
+
+    class Estado(models.TextChoices):
+        PENDIENTE = 'PENDIENTE', 'Pendiente de Conciliación'
+        CONFIRMADA = 'CONFIRMADA', 'Confirmada / Acreditada'
+        RECHAZADA = 'RECHAZADA', 'Rechazada'
+        REVERTIDA = 'REVERTIDA', 'Revertida'
+
+    codigo_transferencia = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name='Código de Transferencia SIPAP',
+        help_text='Número de comprobante o referencia interbancaria única (ej. SIPAP-20261008-001234).',
+    )
+    transaction = models.ForeignKey(
+        'transactions.Transaction',
+        on_delete=models.SET_NULL,
+        related_name='sipap_transfers',
+        null=True,
+        blank=True,
+        verbose_name='Transacción Cambiaria',
+        help_text='Transacción asociada para liquidación automática.',
+    )
+    gateway_record = models.ForeignKey(
+        'PaymentGatewayRecord',
+        on_delete=models.SET_NULL,
+        related_name='sipap_transfers',
+        null=True,
+        blank=True,
+        verbose_name='Registro de Pasarela',
+        help_text='Registro general de pasarela de pago vinculado.',
+    )
+    banco_origen = models.CharField(
+        max_length=100,
+        verbose_name='Banco / Entidad de Origen',
+        help_text='Entidad bancaria desde la cual se remitieron los fondos.',
+    )
+    cuenta_origen = models.CharField(
+        max_length=50,
+        verbose_name='Cuenta de Origen',
+        help_text='Número de cuenta bancaria del cliente remitente.',
+    )
+    titular_origen = models.CharField(
+        max_length=150,
+        verbose_name='Titular de Origen',
+        help_text='Nombre completo o razón social del titular remitente.',
+    )
+    documento_origen = models.CharField(
+        max_length=30,
+        blank=True,
+        verbose_name='Documento / RUC de Origen',
+        help_text='Documento de identidad o RUC del titular remitente.',
+    )
+    banco_destino = models.CharField(
+        max_length=100,
+        default='Banco Itaú Paraguay',
+        verbose_name='Banco de Destino',
+        help_text='Entidad bancaria recaudadora de Global Exchange.',
+    )
+    cuenta_destino = models.CharField(
+        max_length=50,
+        default='900-1234567-01',
+        verbose_name='Cuenta de Destino',
+        help_text='Número de cuenta recaudadora oficial.',
+    )
+    monto = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        verbose_name='Monto Transferido',
+        help_text='Monto exacto transferido en la operación SIPAP.',
+    )
+    moneda = models.CharField(
+        max_length=10,
+        default='PYG',
+        verbose_name='Moneda',
+        help_text='Código de moneda de la transferencia (ej. PYG, USD).',
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+        db_index=True,
+        verbose_name='Estado de la Transferencia',
+        help_text='Estado actual de la conciliación bancaria.',
+    )
+    motivo_rechazo = models.TextField(
+        blank=True,
+        verbose_name='Motivo de Rechazo',
+        help_text='Razón documentada en caso de no poder conciliar la transferencia.',
+    )
+    fecha_transferencia = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Fecha de Transferencia',
+        help_text='Timestamp informado por la entidad bancaria.',
+    )
+    fecha_conciliacion = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Fecha de Conciliación',
+        help_text='Timestamp en que el sistema confirmó el depósito.',
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='Metadatos SIPAP',
+        help_text='Información complementaria devuelta por la red SIPAP.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de Creación')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Última Actualización')
+
+    class Meta:
+        verbose_name = 'Registro de Transferencia SIPAP'
+        verbose_name_plural = 'Registros de Transferencias SIPAP'
+        ordering = ['-fecha_transferencia']
+        indexes = [
+            models.Index(fields=['codigo_transferencia']),
+            models.Index(fields=['estado', 'fecha_transferencia']),
+        ]
+
+    def __str__(self) -> str:
+        return f'SIPAP {self.codigo_transferencia} — {self.moneda} {self.monto} [{self.get_estado_display()}]'
+
+    @property
+    def is_confirmed(self) -> bool:
+        """Indica si la transferencia fue confirmada y conciliada exitosamente."""
+        return self.estado == self.Estado.CONFIRMADA

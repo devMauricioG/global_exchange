@@ -40,8 +40,9 @@ from payments.models import (
     PaymentMethod,
     PaymentWebhookEvent,
     ReceivingMethod,
+    SipapTransferRecord,
 )
-from payments.services import StripeService
+from payments.services import StripeService, SipapService
 from rates.models import Currency, ExchangeRate
 from transactions.models import Transaction
 
@@ -1237,4 +1238,349 @@ class StripeCreateCheckoutSessionViewTestCase(StripeTestBaseMixin, TestCase):
         response = self.client.post(self.checkout_url)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, 'https://checkout.stripe.com/pay/cs_redir_123')
+
+
+class SipapServiceTestCase(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas unitarias para el servicio bancario local SipapService (SCRUM-93 / SCRUM-87).
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Configurar transacción con moneda origen PYG y monto exacto para pruebas SIPAP
+        self.transaccion_sipap = Transaction.objects.create(
+            codigo_referencia='TX-SIPAP-001',
+            cliente=self.cliente,
+            tipo_operacion=Transaction.TipoOperacion.COMPRA,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tasa_base=Decimal('7500.00'),
+            comision_segmento=Decimal('0.00'),
+            tasa_neta=Decimal('7500.00'),
+            monto_origen=Decimal('750000.00'),
+            monto_destino=Decimal('100.00'),
+            medio_pago_origen=self.medio_pago,
+            medio_acreditacion_destino=self.medio_acreditacion,
+            estado=Transaction.Estado.PENDIENTE,
+        )
+
+    def test_generate_transfer_code_format(self):
+        code = SipapService.generate_transfer_code()
+        self.assertTrue(code.startswith('SIPAP-'))
+        parts = code.split('-')
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(len(parts[1]), 8)  # YYYYMMDD
+        self.assertEqual(len(parts[2]), 6)  # sufijo aleatorio
+
+    def test_simulate_transfer_success(self):
+        record = SipapService.simulate_transfer(
+            monto=Decimal('750000.00'),
+            moneda='PYG',
+            banco_origen='Banco Continental',
+            cuenta_origen='12345678',
+            titular_origen='Carlos Cliente',
+            documento_origen='1234567',
+        )
+        self.assertIsNotNone(record.id)
+        self.assertEqual(record.monto, Decimal('750000.00'))
+        self.assertEqual(record.moneda, 'PYG')
+        self.assertEqual(record.estado, SipapTransferRecord.Estado.PENDIENTE)
+        self.assertFalse(record.is_confirmed)
+        self.assertIn('SIPAP', str(record))
+
+    def test_simulate_transfer_with_auto_confirm(self):
+        record = SipapService.simulate_transfer(
+            monto=Decimal('500000.00'),
+            moneda='PYG',
+            auto_confirm=True,
+        )
+        self.assertEqual(record.estado, SipapTransferRecord.Estado.CONFIRMADA)
+        self.assertTrue(record.is_confirmed)
+        self.assertIsNotNone(record.fecha_conciliacion)
+
+    def test_simulate_transfer_invalid_amount_raises_error(self):
+        with self.assertRaises(ValidationError):
+            SipapService.simulate_transfer(monto=Decimal('0.00'))
+
+        with self.assertRaises(ValidationError):
+            SipapService.simulate_transfer(monto=Decimal('-100.00'))
+
+    def test_simulate_transfer_duplicate_code_raises_error(self):
+        code = 'SIPAP-TEST-UNIQUE-001'
+        SipapService.simulate_transfer(monto=Decimal('100000.00'), codigo_transferencia=code)
+        with self.assertRaises(ValidationError):
+            SipapService.simulate_transfer(monto=Decimal('200000.00'), codigo_transferencia=code)
+
+    def test_validate_transfer_scenarios(self):
+        code = 'SIPAP-TEST-VAL-001'
+        record = SipapService.simulate_transfer(
+            monto=Decimal('750000.00'),
+            moneda='PYG',
+            cuenta_origen='11223344',
+            codigo_transferencia=code,
+        )
+
+        # Validación exitosa
+        valido, err, rec = SipapService.validate_transfer(
+            codigo_transferencia=code,
+            expected_monto=Decimal('750000.00'),
+            expected_moneda='PYG',
+            expected_cuenta_origen='11223344',
+        )
+        self.assertTrue(valido)
+        self.assertIsNone(err)
+        self.assertEqual(rec.id, record.id)
+
+        # Código inexistente
+        valido, err, _ = SipapService.validate_transfer('INEXISTENTE-999')
+        self.assertFalse(valido)
+        self.assertIn('No se encontró', err)
+
+        # Discrepancia de monto
+        valido, err, _ = SipapService.validate_transfer(code, expected_monto=Decimal('800000.00'))
+        self.assertFalse(valido)
+        self.assertIn('Discrepancia en el monto', err)
+
+        # Discrepancia de divisa
+        valido, err, _ = SipapService.validate_transfer(code, expected_moneda='USD')
+        self.assertFalse(valido)
+        self.assertIn('Discrepancia en la moneda', err)
+
+        # Discrepancia de cuenta origen
+        valido, err, _ = SipapService.validate_transfer(code, expected_cuenta_origen='99999999')
+        self.assertFalse(valido)
+        self.assertIn('Discrepancia en cuenta de origen', err)
+
+    def test_confirm_deposit_standalone(self):
+        code = 'SIPAP-CONFIRM-STANDALONE'
+        result = SipapService.confirm_deposit(
+            codigo_transferencia=code,
+            monto=Decimal('350000.00'),
+            moneda='PYG',
+            banco_origen='Banco Atlas',
+            cuenta_origen='55667788',
+        )
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['codigo_transferencia'], code)
+
+        gateway_rec = PaymentGatewayRecord.objects.get(id=result['gateway_record_id'])
+        self.assertEqual(gateway_rec.gateway, PaymentGatewayRecord.Gateway.SIPAP)
+        self.assertEqual(gateway_rec.estado, PaymentGatewayRecord.Estado.COMPLETADO)
+        self.assertEqual(gateway_rec.monto, Decimal('350000.00'))
+
+        sipap_rec = SipapTransferRecord.objects.get(id=result['sipap_transfer_id'])
+        self.assertEqual(sipap_rec.estado, SipapTransferRecord.Estado.CONFIRMADA)
+        self.assertIsNotNone(sipap_rec.fecha_conciliacion)
+
+    def test_confirm_deposit_with_transaction_updates_transaction_state(self):
+        code = 'SIPAP-CONFIRM-TX-001'
+        result = SipapService.confirm_deposit(
+            codigo_transferencia=code,
+            transaction_obj=self.transaccion_sipap,
+            monto=self.transaccion_sipap.monto_origen,
+            moneda='PYG',
+            banco_origen='Banco GNB',
+        )
+        self.assertEqual(result['status'], 'success')
+
+        self.transaccion_sipap.refresh_from_db()
+        self.assertEqual(self.transaccion_sipap.estado, Transaction.Estado.COMPLETADA)
+        self.assertIn('SIPAP', self.transaccion_sipap.observaciones)
+
+    def test_confirm_deposit_mismatch_raises_error(self):
+        code = 'SIPAP-MISMATCH-001'
+        with self.assertRaises(ValidationError):
+            SipapService.confirm_deposit(
+                codigo_transferencia=code,
+                transaction_obj=self.transaccion_sipap,
+                monto=Decimal('999999.00'),  # monto erróneo
+                moneda='PYG',
+            )
+
+    def test_confirm_deposit_strict_idempotency(self):
+        code = 'SIPAP-IDEMPOTENT-001'
+        first_result = SipapService.confirm_deposit(
+            codigo_transferencia=code,
+            transaction_obj=self.transaccion_sipap,
+            monto=self.transaccion_sipap.monto_origen,
+            moneda='PYG',
+        )
+        self.assertEqual(first_result['status'], 'success')
+
+        # Segunda invocación con la misma referencia bancaria
+        second_result = SipapService.confirm_deposit(
+            codigo_transferencia=code,
+            transaction_obj=self.transaccion_sipap,
+            monto=self.transaccion_sipap.monto_origen,
+            moneda='PYG',
+        )
+        self.assertEqual(second_result['status'], 'already_processed')
+        self.assertEqual(second_result['codigo_transferencia'], code)
+
+        # Verificar que solo existe un registro en PaymentGatewayRecord
+        records_count = PaymentGatewayRecord.objects.filter(
+            gateway=PaymentGatewayRecord.Gateway.SIPAP,
+            referencia_externa=code,
+        ).count()
+        self.assertEqual(records_count, 1)
+
+    def test_reject_transfer_cancels_pending_transaction(self):
+        code = 'SIPAP-REJECT-TX-001'
+        record = SipapService.simulate_transfer(
+            monto=self.transaccion_sipap.monto_origen,
+            moneda='PYG',
+            transaction_obj=self.transaccion_sipap,
+            codigo_transferencia=code,
+        )
+
+        result = SipapService.reject_transfer(code, motivo='Cuenta remitente bloqueada')
+        self.assertEqual(result['status'], 'rejected')
+
+        record.refresh_from_db()
+        self.assertEqual(record.estado, SipapTransferRecord.Estado.RECHAZADA)
+        self.assertEqual(record.motivo_rechazo, 'Cuenta remitente bloqueada')
+
+        # Transacción cambiaria vinculada pasa a CANCELADA
+        self.transaccion_sipap.refresh_from_db()
+        self.assertEqual(self.transaccion_sipap.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('cancelada: transferencia SIPAP rechazada', self.transaccion_sipap.observaciones)
+
+
+class SipapEndpointsTestCase(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas HTTP de integración para los endpoints de simulación y conciliación SIPAP (SCRUM-93).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.transaccion_sipap = Transaction.objects.create(
+            codigo_referencia='TX-SIPAP-HTTP-001',
+            cliente=self.cliente,
+            tipo_operacion=Transaction.TipoOperacion.COMPRA,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tasa_base=Decimal('7500.00'),
+            comision_segmento=Decimal('0.00'),
+            tasa_neta=Decimal('7500.00'),
+            monto_origen=Decimal('750000.00'),
+            monto_destino=Decimal('100.00'),
+            medio_pago_origen=self.medio_pago,
+            medio_acreditacion_destino=self.medio_acreditacion,
+            estado=Transaction.Estado.PENDIENTE,
+        )
+        self.simular_url = reverse('payments:sipap-simulate-transfer')
+        self.confirmar_url = reverse('payments:sipap-confirm-deposit')
+        self.rechazar_url = reverse('payments:sipap-reject-transfer')
+
+    def test_simulate_endpoint_success(self):
+        payload = {
+            'monto': '1500000.00',
+            'moneda': 'PYG',
+            'banco_origen': 'Banco Familiar',
+            'cuenta_origen': '44556677',
+            'titular_origen': 'Juan Pérez',
+        }
+        response = self.client.post(
+            self.simular_url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data['monto'], '1500000.00')
+        self.assertEqual(data['estado'], 'PENDIENTE')
+        self.assertTrue(data['codigo_transferencia'].startswith('SIPAP-'))
+
+    def test_simulate_endpoint_missing_monto(self):
+        response = self.client.post(
+            self.simular_url,
+            data=json.dumps({'moneda': 'PYG'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('monto', response.json()['error'])
+
+    def test_confirm_endpoint_success_and_idempotency(self):
+        code = 'SIPAP-HTTP-CONFIRM-123'
+        payload = {
+            'codigo_transferencia': code,
+            'transaction_id': self.transaccion_sipap.id,
+            'monto': '750000.00',
+            'moneda': 'PYG',
+            'banco_origen': 'Banco Sudameris',
+        }
+
+        # 1. Primera confirmación exitosa
+        response = self.client.post(
+            self.confirmar_url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'success')
+
+        self.transaccion_sipap.refresh_from_db()
+        self.assertEqual(self.transaccion_sipap.estado, Transaction.Estado.COMPLETADA)
+
+        # 2. Segunda llamada con idéntico comprobante -> Idempotencia
+        repeat_response = self.client.post(
+            self.confirmar_url,
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(repeat_response.status_code, 200)
+        self.assertEqual(repeat_response.json()['status'], 'already_processed')
+
+    def test_confirm_endpoint_missing_code_returns_400(self):
+        response = self.client.post(
+            self.confirmar_url,
+            data=json.dumps({'monto': '100000'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('codigo_transferencia', response.json()['error'])
+
+    def test_query_status_endpoint(self):
+        code = 'SIPAP-HTTP-QUERY-456'
+        SipapService.simulate_transfer(
+            monto=Decimal('250000.00'),
+            moneda='PYG',
+            codigo_transferencia=code,
+        )
+
+        query_url = reverse('payments:sipap-query-status', kwargs={'codigo': code})
+        response = self.client.get(query_url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['codigo_transferencia'], code)
+        self.assertEqual(data['monto'], '250000.00')
+
+        # Consulta de código no existente -> 404
+        not_found_url = reverse('payments:sipap-query-status', kwargs={'codigo': 'NO-EXISTE'})
+        not_found_resp = self.client.get(not_found_url)
+        self.assertEqual(not_found_resp.status_code, 404)
+
+    def test_reject_endpoint_cancels_transaction(self):
+        code = 'SIPAP-HTTP-REJECT-789'
+        SipapService.simulate_transfer(
+            monto=self.transaccion_sipap.monto_origen,
+            moneda='PYG',
+            transaction_obj=self.transaccion_sipap,
+            codigo_transferencia=code,
+        )
+
+        reject_payload = {
+            'codigo_transferencia': code,
+            'motivo': 'Fondos insuficientes en origen',
+        }
+        response = self.client.post(
+            self.rechazar_url,
+            data=json.dumps(reject_payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'rejected')
+
+        self.transaccion_sipap.refresh_from_db()
+        self.assertEqual(self.transaccion_sipap.estado, Transaction.Estado.CANCELADA)
 

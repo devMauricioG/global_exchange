@@ -203,5 +203,29 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Incorporé `stripe>=16.0.0` a `requirements.txt` y actualicé `docs/sphinx/source/payments.rst` para indexar `payments.services`.
 - Redacté una suite de pruebas automatizadas con 24 tests específicos en `payments/tests.py` que cubren conversiones de moneda, mocks de la API de Stripe, validación de firmas, procesamiento idempotente y llamadas HTTP, elevando la suite del proyecto a **313 tests aprobados con 100% de éxito (OK)**.
 
+---
+
+## Mauricio González — 08/10/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 4 — Servicio de simulación y confirmación bancaria local SIPAP (SCRUM-93 / SCRUM-87)
+
+**Resumen:**
+- Diseñé y modelé la entidad `SipapTransferRecord` en `payments/models.py`, capturando transferencias de la red SIPAP (Sistema de Pagos del Paraguay) con código de comprobante interbancario único, cuentas bancarias origen y destino, titularidad, montos, moneda y estados (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`, `REVERTIDA`).
+- Implementé el servicio `SipapService` en `payments/services.py`:
+  - `generate_transfer_code`: generador de códigos estándar con formato `SIPAP-YYYYMMDD-XXXXXX`.
+  - `simulate_transfer`: simulación y persistencia de transferencias bancarias para entornos operativos y de desarrollo.
+  - `validate_transfer`: validación de existencia, integridad de montos, monedas y cuentas de origen.
+  - `confirm_deposit`: conciliación y confirmación automática con **idempotencia estricta**, actualizando el registro de pasarela `PaymentGatewayRecord` a `COMPLETADO` y la orden cambiaria a `COMPLETADA` sin duplicar acreditaciones ante reintentos.
+  - `reject_transfer`: registro de rechazos bancarios con anulación atómica de órdenes pendientes (`CANCELADA`), cumpliendo con los criterios de aceptación de SCRUM-87.
+- Implementé los endpoints HTTP en `payments/views.py` y `payments/urls.py`:
+  - `sipap_confirm_deposit` (`/payments/sipap/confirmar/`): endpoint POST `@csrf_exempt` para confirmación y conciliación automática.
+  - `sipap_simulate_transfer` (`/payments/sipap/simular/`): endpoint POST `@csrf_exempt` para inyección de comprobantes de prueba.
+  - `sipap_query_status` (`/payments/sipap/consultar/<str:codigo>/`): endpoint GET para consulta de estado de transferencias.
+  - `sipap_reject_transfer` (`/payments/sipap/rechazar/`): endpoint POST `@csrf_exempt` para registro de rechazos.
+- Registré `SipapTransferRecord` en el panel de administración de Django (`payments/admin.py`).
+- Generé la migración de base de datos `payments/migrations/0008_sipaptransferrecord.py`.
+- Desarrollé una suite de pruebas automatizadas con 17 tests específicos (`SipapServiceTestCase` y `SipapEndpointsTestCase`) en `payments/tests.py`, elevando la suite del proyecto a **330 tests aprobados al 100% de éxito (OK)**.
+- Actualicé el estado de la tarea en `docs/documentacion/Jira workflow/TAREAS.md` y documenté la solución en `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
+
 
 

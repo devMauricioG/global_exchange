@@ -32,4 +32,10 @@ urlpatterns = [
     # Pasarela Stripe y Webhooks (SCRUM-92)
     path('webhook/stripe/', views.stripe_webhook, name='stripe-webhook'),
     path('stripe/checkout/<int:transaction_id>/', views.StripeCreateCheckoutSessionView.as_view(), name='stripe-create-checkout'),
+
+    # Pasarela y Conciliación Bancaria SIPAP (SCRUM-93)
+    path('sipap/confirmar/', views.sipap_confirm_deposit, name='sipap-confirm-deposit'),
+    path('sipap/simular/', views.sipap_simulate_transfer, name='sipap-simulate-transfer'),
+    path('sipap/consultar/<str:codigo>/', views.sipap_query_status, name='sipap-query-status'),
+    path('sipap/rechazar/', views.sipap_reject_transfer, name='sipap-reject-transfer'),
 ]
