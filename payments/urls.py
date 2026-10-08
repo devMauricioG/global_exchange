@@ -28,4 +28,8 @@ urlpatterns = [
     # Endpoints API REST (JSON)
     path('api/', views.PaymentMethodListCreateAPIView.as_view(), name='paymentmethod-api-list'),
     path('api/<int:pk>/', views.PaymentMethodDetailAPIView.as_view(), name='paymentmethod-api-detail'),
+
+    # Pasarela Stripe y Webhooks (SCRUM-92)
+    path('webhook/stripe/', views.stripe_webhook, name='stripe-webhook'),
+    path('stripe/checkout/<int:transaction_id>/', views.StripeCreateCheckoutSessionView.as_view(), name='stripe-create-checkout'),
 ]

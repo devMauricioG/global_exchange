@@ -20,6 +20,8 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-50** | Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-56** | Suite de Pruebas Unitarias e Integración para Monedas, Cotizaciones, Comisiones, Medios de Pago, Usuarios y Clientes | Sprint 2 | Equipo de Desarrollo | Finalizado |
+| **SCRUM-92** | Modelado de Pasarela y Servicio de Webhook de Stripe en `payments/` | Sprint 4 | Mauricio González | Finalizado |
+
 
 ---
 
@@ -285,4 +287,42 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `rates/tests.py`
   * `authentication/tests.py`
   * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 14. SCRUM-92: Modelado de pasarela y servicio de webhook de Stripe en apps/payments/
+
+* **Objetivo:** Implementar en `payments/` el modelo de pasarela externa, el servicio de integración `StripeService` (sesiones de Checkout y PaymentIntent) y el endpoint receptor de webhooks (`stripe_webhook`) con validación criptográfica y procesamiento idempotente.
+* **Aportes y Solución con IA:**
+  * Modelado de datos en `payments/models.py`:
+    * `PaymentGatewayRecord`: seguimiento de órdenes y sesiones de Stripe Checkout / PaymentIntents con estados (`PENDIENTE`, `COMPLETADO`, `FALLIDO`, `CANCELADO`, `REEMBOLSADO`), montos, divisas y URLs de redirección.
+    * `PaymentWebhookEvent`: registro inmutable con `event_id` único para garantizar idempotencia y prevenir dobles acreditaciones ante reintentos de Stripe.
+  * Servicio `StripeService` en `payments/services.py`:
+    * Conversión bidireccional y normalización de montos para divisas estándar (en centavos) y divisas de cero decimales como el guaraní paraguayo (`PYG`).
+    * Creación de sesiones de Stripe Checkout (`create_checkout_session`) y PaymentIntents (`create_payment_intent`).
+    * Verificación de firmas criptográficas HMAC-SHA256 (`verify_webhook_signature`) mediante `stripe.Webhook.construct_event`.
+    * Procesador de eventos (`process_webhook_event`) con soporte para `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed` y `checkout.session.expired`, actualizando transitoriamente el estado de la transacción a `COMPLETADA`.
+  * Controlador y enrutamiento en `payments/views.py` y `payments/urls.py`:
+    * Endpoint `@csrf_exempt` `stripe_webhook` (`/payments/webhook/stripe/`) con validación de cabecera `Stripe-Signature`.
+    * Vista CBV `StripeCreateCheckoutSessionView` (`/payments/stripe/checkout/<int:transaction_id>/`) con validación de cliente activo y control de acceso.
+  * Configuración de entorno en `config/settings/base.py` y `.env.example` (`STRIPE_PUBLIC_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY`).
+  * Migración `payments/migrations/0007_paymentwebhookevent_paymentgatewayrecord.py`.
+  * Registro en panel de administración `payments/admin.py` e indexación en Sphinx `docs/sphinx/source/payments.rst`.
+  * Suite de pruebas automatizadas: 24 tests unitarios y de integración en `payments/tests.py` con mocks de la API de Stripe, elevando el total a **313 tests aprobados con 100% de éxito (OK)**.
+* **Archivos intervenidos:**
+  * `payments/models.py`
+  * `payments/services.py`
+  * `payments/views.py`
+  * `payments/urls.py`
+  * `payments/admin.py`
+  * `payments/tests.py`
+  * `payments/migrations/0007_paymentwebhookevent_paymentgatewayrecord.py`
+  * `config/settings/base.py`
+  * `.env.example`
+  * `requirements.txt`
+  * `docs/sphinx/source/payments.rst`
+  * `docs/chat_ia.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+
 

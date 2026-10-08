@@ -184,4 +184,24 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - **Documentación de Diseño y Casos de Prueba (SCRUM-85):** Actualicé los artefactos formales del proyecto: ERS v3.3 (`EQUIPO_08_A_ERS.md` con RF-32 a RF-38 y RN-19 a RN-26), Diagrama de Clases UML (`DIS_CLA_01`), Diagrama de Paquetes UML (`DIS_PAQ_01`) y Matriz de Casos de Prueba (`DIS_CPR_01` con Módulos 8 a 15, CPR-ENT a CPR-SED).
 - **Docstrings Sphinx y Cierre de Release (SCRUM-86):** Estandaricé los docstrings Sphinx/Google style en todos los módulos de Sprint 3, incorporé el paquete `transactions` al árbol de documentación en `docs/sphinx/source/transactions.rst` y `modules.rst`, recompilé el sitio HTML en `docs/sphinx/build/html/` con 0 errores y 0 advertencias, y registré la bitácora para el etiquetado del release Hito 5.
 
+---
+
+## Mauricio González — 08/10/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 4 — Modelado de pasarela y servicio de webhook de Stripe en `payments/` (SCRUM-92)
+
+**Resumen:**
+- Diseñé e implementé las entidades `PaymentGatewayRecord` y `PaymentWebhookEvent` en `payments/models.py` para almacenar intentos de pago, Checkout Sessions, PaymentIntents y registro inmutable de webhooks garantizando idempotencia.
+- Desarrollé el servicio de pasarela `StripeService` en `payments/services.py` con soporte para:
+  - Creación de sesiones de Stripe Checkout (`create_checkout_session`) con cálculo y normalización de montos para divisas tradicionales (centavos) y divisas de cero decimales (PYG).
+  - Creación directa de PaymentIntents (`create_payment_intent`).
+  - Validación criptográfica de firmas HMAC-SHA256 (`verify_webhook_signature`) con manejo riguroso de excepciones `SignatureVerificationError`.
+  - Procesamiento transaccional e idempotente de eventos de webhook (`process_webhook_event`), reconociendo `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed` y `checkout.session.expired`.
+- Expuse el endpoint HTTP `@csrf_exempt` `stripe_webhook` en `payments/views.py` y `payments/urls.py` (`/payments/webhook/stripe/`), junto con la vista `StripeCreateCheckoutSessionView` (`/payments/stripe/checkout/<int:transaction_id>/`).
+- Registré las entidades en el panel administrativo de Django (`payments/admin.py`) y configuré las variables de entorno en `config/settings/base.py` y `.env.example`.
+- Generé la migración de base de datos `payments/migrations/0007_paymentwebhookevent_paymentgatewayrecord.py`.
+- Incorporé `stripe>=16.0.0` a `requirements.txt` y actualicé `docs/sphinx/source/payments.rst` para indexar `payments.services`.
+- Redacté una suite de pruebas automatizadas con 24 tests específicos en `payments/tests.py` que cubren conversiones de moneda, mocks de la API de Stripe, validación de firmas, procesamiento idempotente y llamadas HTTP, elevando la suite del proyecto a **313 tests aprobados con 100% de éxito (OK)**.
+
+
 

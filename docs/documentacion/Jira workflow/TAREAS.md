@@ -88,7 +88,7 @@ TAREAS
 
 *SCRUM-86: Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v3.0.0-sprint3.*Descripción: Redactar docstrings estructurados en todos los módulos de Sprint 3, recompilar el sitio web de documentación técnica Sphinx, consolidar las interacciones de IA en docs/chat_ia.md y crear el Git Tag oficial v0.3.0-sprint3 para la entrega del Hito 5. *Principal: SCRUM-69.*Sprint: SCRUM Sprint 3. *Bloquea: -.*Estado: Finalizado.
 
-*SCRUM-92: Modelado de pasarela y servicio de webhook de Stripe en apps/payments/.*Descripción: Implementar en apps/payments/ el servicio de integración con Stripe (StripeService), generación de sesiones de Stripe Checkout / PaymentIntent y endpoint receptor de webhooks (stripe_webhook) con validación de signatura y secreto para transaccionar órdenes. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-94, SCRUM-95.*Estado: Por Hacer.
+*SCRUM-92: Modelado de pasarela y servicio de webhook de Stripe en apps/payments/.*Descripción: Implementar en apps/payments/ el servicio de integración con Stripe (StripeService), generación de sesiones de Stripe Checkout / PaymentIntent y endpoint receptor de webhooks (stripe_webhook) con validación de signatura y secreto para transaccionar órdenes. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-94, SCRUM-95.*Estado: Finalizado.
 
 *SCRUM-93: Servicio de simulación y confirmación bancaria local SIPAP.*Descripción: Diseñar en apps/payments/ o apps/transactions/ el servicio de conciliación SIPAP (SipapService) con validación de código de transferencia interbancaria, cuenta origen/destino y endpoint de confirmación automática de depósitos. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-94, SCRUM-95.*Estado: Por Hacer.
 
