@@ -21,6 +21,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-50** | Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-56** | Suite de Pruebas Unitarias e Integración para Monedas, Cotizaciones, Comisiones, Medios de Pago, Usuarios y Clientes | Sprint 2 | Equipo de Desarrollo | Finalizado |
 | **SCRUM-92** | Modelado de Pasarela y Servicio de Webhook de Stripe en `payments/` | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-93** | Servicio de Simulación y Confirmación Bancaria Local SIPAP | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -324,5 +325,39 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/chat_ia.md`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 14. SCRUM-93: Servicio de simulación y confirmación bancaria local SIPAP
+
+* **Objetivo:** Implementar en `payments/` el servicio de conciliación interbancaria SIPAP (`SipapService`), modelado del comprobante bancario (`SipapTransferRecord`), validación de códigos de transferencia, cuentas de origen/destino y endpoints de confirmación automática de depósitos con estricta idempotencia y transición a `CANCELADA` ante rechazos (criterio SCRUM-87).
+* **Aportes y Solución con IA:**
+  * Modelado de datos en `payments/models.py`:
+    * `SipapTransferRecord`: entidad representativa de la transferencia interbancaria nacional con campos: `codigo_transferencia` (único, ej. `SIPAP-YYYYMMDD-XXXXXX`), `transaction` (FK opcional a `Transaction`), `gateway_record` (FK a `PaymentGatewayRecord`), `banco_origen`, `cuenta_origen`, `titular_origen`, `documento_origen`, `banco_destino`, `cuenta_destino`, `monto`, `moneda`, `estado` (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`, `REVERTIDA`), `motivo_rechazo`, `fecha_transferencia`, `fecha_conciliacion`, `metadata` y timestamps.
+  * Servicio `SipapService` en `payments/services.py`:
+    * `generate_transfer_code(prefix='SIPAP')`: generador de códigos estándar correlativos.
+    * `simulate_transfer(...)`: inyección de transferencias simuladas para entornos operativos y de prueba con soporte de confirmación inmediata opcional.
+    * `validate_transfer(...)`: validación de existencia, montos exactos, divisas y cuentas remitentes.
+    * `confirm_deposit(...)`: conciliación atómica y automática de depósitos bancarios. Aplica control de **idempotencia estricta** verificando comprobantes ya conciliados para evitar duplicación de asientos, actualiza `PaymentGatewayRecord` a `COMPLETADO` y transiciona la transacción cambiaria vinculada de `PENDIENTE` a `COMPLETADA`.
+    * `reject_transfer(...)`: registro de rechazos por disconformidad bancaria, actualizando la pasarela a `FALLIDO` y cancelando atómicamente la orden cambiaria vinculada (`CANCELADA`).
+  * Vistas y Enrutamiento en `payments/views.py` y `payments/urls.py`:
+    * `sipap_confirm_deposit` (`/payments/sipap/confirmar/`): endpoint POST `@csrf_exempt` para conciliación automática e idempotente.
+    * `sipap_simulate_transfer` (`/payments/sipap/simular/`): endpoint POST `@csrf_exempt` para generación controlada de comprobantes simulados.
+    * `sipap_query_status` (`/payments/sipap/consultar/<str:codigo>/`): endpoint GET para consulta de estado de transferencias.
+    * `sipap_reject_transfer` (`/payments/sipap/rechazar/`): endpoint POST `@csrf_exempt` para rechazo documentado y anulación de órdenes.
+  * Migración generada: `payments/migrations/0008_sipaptransferrecord.py`.
+  * Registro en Django Admin: `payments/admin.py` con `SipapTransferRecordAdmin`.
+  * Suite de pruebas automatizadas: pruebas unitarias exhaustivas (`SipapServiceTestCase`) y de integración HTTP (`SipapEndpointsTestCase`) en `payments/tests.py`, elevando la cobertura a **330 tests aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `payments/models.py`
+  * `payments/services.py`
+  * `payments/views.py`
+  * `payments/urls.py`
+  * `payments/admin.py`
+  * `payments/tests.py`
+  * `payments/migrations/0008_sipaptransferrecord.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
 
 

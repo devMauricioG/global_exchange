@@ -37,8 +37,9 @@ from .models import (
     PaymentMethod,
     PaymentWebhookEvent,
     ReceivingMethod,
+    SipapTransferRecord,
 )
-from .services import StripeService
+from .services import StripeService, SipapService
 
 
 def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
@@ -703,4 +704,213 @@ class StripeCreateCheckoutSessionView(LoginRequiredMixin, View):
             return redirect(checkout_url)
 
         return JsonResponse(session_data, status=200)
+
+
+# ==============================================================================
+# INTEGRACIÓN Y SIMULACIÓN BANCARIA LOCAL SIPAP (SCRUM-93 / SCRUM-87)
+# ==============================================================================
+
+@csrf_exempt
+def sipap_confirm_deposit(request: HttpRequest) -> HttpResponse:
+    """
+    Endpoint HTTP para la confirmación y conciliación automática de depósitos SIPAP (SCRUM-93).
+
+    Acepta peticiones POST con carga útil JSON o form-data conteniendo el código de
+    transferencia interbancaria y datos opcionales de la transacción cambiaria.
+    Ejecuta conciliación idempotente contra :class:`~payments.services.SipapService`:
+    - Valida montos y divisas si está vinculada a una transacción.
+    - Actualiza el estado del comprobante y el registro de pasarela a COMPLETADO.
+    - Transiciona la orden cambiaria a COMPLETADA sin duplicar acreditaciones.
+
+    :param request: Solicitud HTTP POST con parámetros de la transferencia.
+    :type request: django.http.HttpRequest
+    :return: Respuesta JSON con detalles de conciliación (status 200) o error (status 400/405).
+    :rtype: django.http.HttpResponse
+    """
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'], 'Solo se admiten peticiones POST para confirmación SIPAP.')
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        data = request.POST.dict()
+
+    if not data and request.POST:
+        data = request.POST.dict()
+
+    codigo_transferencia = (data.get('codigo_transferencia') or '').strip()
+    if not codigo_transferencia:
+        return JsonResponse({'error': 'El campo codigo_transferencia es obligatorio.'}, status=400)
+
+    transaction_obj = None
+    transaction_id = data.get('transaction_id')
+    if transaction_id:
+        from transactions.models import Transaction
+        transaction_obj = Transaction.objects.filter(id=transaction_id).first()
+        if not transaction_obj:
+            return JsonResponse({'error': f'No se encontró la transacción con id {transaction_id}.'}, status=404)
+
+    try:
+        result = SipapService.confirm_deposit(
+            codigo_transferencia=codigo_transferencia,
+            transaction_obj=transaction_obj,
+            banco_origen=data.get('banco_origen'),
+            cuenta_origen=data.get('cuenta_origen'),
+            titular_origen=data.get('titular_origen'),
+            documento_origen=data.get('documento_origen'),
+            monto=data.get('monto'),
+            moneda=data.get('moneda'),
+        )
+        return JsonResponse(result, status=200)
+    except ValidationError as exc:
+        return JsonResponse({'error': str(exc.message if hasattr(exc, 'message') else exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({'error': f'Error al conciliar depósito SIPAP: {str(exc)}'}, status=500)
+
+
+@csrf_exempt
+def sipap_simulate_transfer(request: HttpRequest) -> HttpResponse:
+    """
+    Endpoint HTTP para generar y simular transferencias bancarias en la red SIPAP (SCRUM-93).
+
+    Permite a operadores, desarrolladores o pruebas automatizadas inyectar comprobantes
+    bancarios simulados con validación estricta de formato y montos.
+
+    :param request: Solicitud HTTP POST con datos de la transferencia.
+    :type request: django.http.HttpRequest
+    :return: Respuesta JSON con los datos del registro SIPAP creado (status 201).
+    :rtype: django.http.HttpResponse
+    """
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'], 'Solo se admiten peticiones POST para simulación SIPAP.')
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        data = request.POST.dict()
+
+    if not data and request.POST:
+        data = request.POST.dict()
+
+    monto = data.get('monto')
+    if not monto:
+        return JsonResponse({'error': 'El parámetro monto es requerido.'}, status=400)
+
+    transaction_obj = None
+    transaction_id = data.get('transaction_id')
+    if transaction_id:
+        from transactions.models import Transaction
+        transaction_obj = Transaction.objects.filter(id=transaction_id).first()
+        if not transaction_obj:
+            return JsonResponse({'error': f'No se encontró la transacción {transaction_id}.'}, status=404)
+
+    try:
+        record = SipapService.simulate_transfer(
+            monto=monto,
+            moneda=data.get('moneda', 'PYG'),
+            banco_origen=data.get('banco_origen', 'Banco Itaú Paraguay'),
+            cuenta_origen=data.get('cuenta_origen', '12345678'),
+            titular_origen=data.get('titular_origen', 'Cliente Remitente'),
+            documento_origen=data.get('documento_origen', '1234567-8'),
+            banco_destino=data.get('banco_destino'),
+            cuenta_destino=data.get('cuenta_destino'),
+            transaction_obj=transaction_obj,
+            codigo_transferencia=data.get('codigo_transferencia'),
+            auto_confirm=bool(data.get('auto_confirm', False)),
+            metadata=data.get('metadata'),
+        )
+        return JsonResponse({
+            'id': record.id,
+            'codigo_transferencia': record.codigo_transferencia,
+            'monto': str(record.monto),
+            'moneda': record.moneda,
+            'estado': record.estado,
+            'estado_display': record.get_estado_display(),
+            'banco_origen': record.banco_origen,
+            'cuenta_origen': record.cuenta_origen,
+            'titular_origen': record.titular_origen,
+            'banco_destino': record.banco_destino,
+            'cuenta_destino': record.cuenta_destino,
+            'fecha_transferencia': record.fecha_transferencia.isoformat(),
+            'fecha_conciliacion': record.fecha_conciliacion.isoformat() if record.fecha_conciliacion else None,
+            'transaction_id': record.transaction_id,
+        }, status=201)
+    except ValidationError as exc:
+        return JsonResponse({'error': str(exc.message if hasattr(exc, 'message') else exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({'error': f'Error al simular transferencia SIPAP: {str(exc)}'}, status=500)
+
+
+def sipap_query_status(request: HttpRequest, codigo: str) -> HttpResponse:
+    """
+    Endpoint HTTP GET para consultar el estado operativo de una transferencia SIPAP (SCRUM-93).
+
+    :param request: Solicitud HTTP GET.
+    :type request: django.http.HttpRequest
+    :param codigo: Código único de transferencia SIPAP.
+    :type codigo: str
+    :return: Respuesta JSON con el estado actual o 404 si no existe.
+    :rtype: django.http.HttpResponse
+    """
+    if request.method != 'GET':
+        return HttpResponseNotAllowed(['GET'], 'Solo se admite método GET para consulta de estado SIPAP.')
+
+    record = SipapTransferRecord.objects.filter(codigo_transferencia=codigo).first()
+    if not record:
+        return JsonResponse({'error': f'No se encontró la transferencia SIPAP {codigo}.'}, status=404)
+
+    return JsonResponse({
+        'codigo_transferencia': record.codigo_transferencia,
+        'monto': str(record.monto),
+        'moneda': record.moneda,
+        'estado': record.estado,
+        'estado_display': record.get_estado_display(),
+        'banco_origen': record.banco_origen,
+        'cuenta_origen': record.cuenta_origen,
+        'titular_origen': record.titular_origen,
+        'banco_destino': record.banco_destino,
+        'cuenta_destino': record.cuenta_destino,
+        'fecha_transferencia': record.fecha_transferencia.isoformat(),
+        'fecha_conciliacion': record.fecha_conciliacion.isoformat() if record.fecha_conciliacion else None,
+        'transaction_id': record.transaction_id,
+        'is_confirmed': record.is_confirmed,
+    }, status=200)
+
+
+@csrf_exempt
+def sipap_reject_transfer(request: HttpRequest) -> HttpResponse:
+    """
+    Endpoint HTTP POST para registrar el rechazo de una transferencia SIPAP (SCRUM-93 / SCRUM-87).
+
+    Ante un rechazo, cancela atómicamente la orden cambiaria asociada si estaba pendiente.
+
+    :param request: Solicitud HTTP POST con `codigo_transferencia` y `motivo`.
+    :type request: django.http.HttpRequest
+    :return: Respuesta JSON con el resultado del rechazo (status 200).
+    :rtype: django.http.HttpResponse
+    """
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'], 'Solo se admiten peticiones POST para rechazo SIPAP.')
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        data = request.POST.dict()
+
+    if not data and request.POST:
+        data = request.POST.dict()
+
+    codigo = (data.get('codigo_transferencia') or '').strip()
+    if not codigo:
+        return JsonResponse({'error': 'El campo codigo_transferencia es requerido.'}, status=400)
+
+    motivo = data.get('motivo', 'Transferencia rechazada por la entidad bancaria.')
+
+    try:
+        result = SipapService.reject_transfer(codigo_transferencia=codigo, motivo=motivo)
+        return JsonResponse(result, status=200)
+    except ValidationError as exc:
+        return JsonResponse({'error': str(exc.message if hasattr(exc, 'message') else exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({'error': f'Error al rechazar transferencia SIPAP: {str(exc)}'}, status=500)
 

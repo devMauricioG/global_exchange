@@ -33,7 +33,7 @@ class EntidadFinancieraAdmin(admin.ModelAdmin):
     ordering = ('tipo', 'orden')
 
 
-from .models import ReceivingMethod, PaymentGatewayRecord, PaymentWebhookEvent
+from .models import ReceivingMethod, PaymentGatewayRecord, PaymentWebhookEvent, SipapTransferRecord
 
 
 @admin.register(ReceivingMethod)
@@ -57,4 +57,24 @@ class PaymentWebhookEventAdmin(admin.ModelAdmin):
     list_filter = ('gateway', 'procesado', 'tipo_evento', 'created_at')
     search_fields = ('event_id', 'tipo_evento')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(SipapTransferRecord)
+class SipapTransferRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'codigo_transferencia',
+        'banco_origen',
+        'cuenta_origen',
+        'titular_origen',
+        'monto',
+        'moneda',
+        'estado',
+        'fecha_transferencia',
+        'fecha_conciliacion',
+    )
+    list_filter = ('estado', 'moneda', 'banco_origen', 'fecha_transferencia')
+    search_fields = ('codigo_transferencia', 'titular_origen', 'cuenta_origen', 'documento_origen')
+    readonly_fields = ('created_at', 'updated_at', 'fecha_conciliacion')
+    raw_id_fields = ('transaction', 'gateway_record')
 
