@@ -92,7 +92,7 @@ TAREAS
 
 *SCRUM-93: Servicio de simulación y confirmación bancaria local SIPAP.*Descripción: Diseñar en apps/payments/ o apps/transactions/ el servicio de conciliación SIPAP (SipapService) con validación de código de transferencia interbancaria, cuenta origen/destino y endpoint de confirmación automática de depósitos. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-94, SCRUM-95.*Estado: Finalizado.
 
-*SCRUM-94: Orquestación en TransactionService para transición atómica de pago y liquidación.*Descripción: Extender apps/transactions/services.py para procesar la confirmación de pago entrante (Stripe o SIPAP), verificar integridad del monto y cambiar atómicamente el estado de la transacción de PENDIENTE a COMPLETADA registrando fecha de pago y referencia externa. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-95, SCRUM-104.*Estado: Por Hacer.
+*SCRUM-94: Orquestación en TransactionService para transición atómica de pago y liquidación.*Descripción: Extender apps/transactions/services.py para procesar la confirmación de pago entrante (Stripe o SIPAP), verificar integridad del monto y cambiar atómicamente el estado de la transacción de PENDIENTE a COMPLETADA registrando fecha de pago y referencia externa. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-95, SCRUM-104.*Estado: Finalizado.
 
 *SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria.*Descripción: Crear las vistas y plantillas para el flujo de pago del cliente (templates/transactions/payment_checkout.html), botón de redirección segura a Stripe y modal para carga de comprobante o referencia SIPAP. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Por Hacer.
 

@@ -22,6 +22,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-56** | Suite de Pruebas Unitarias e Integración para Monedas, Cotizaciones, Comisiones, Medios de Pago, Usuarios y Clientes | Sprint 2 | Equipo de Desarrollo | Finalizado |
 | **SCRUM-92** | Modelado de Pasarela y Servicio de Webhook de Stripe en `payments/` | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-93** | Servicio de Simulación y Confirmación Bancaria Local SIPAP | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-94** | Orquestación en TransactionService para Transición Atómica de Pago y Liquidación | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -356,6 +357,43 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `payments/admin.py`
   * `payments/tests.py`
   * `payments/migrations/0008_sipaptransferrecord.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 15. SCRUM-94: Orquestación en TransactionService para transición atómica de pago y liquidación
+
+* **Objetivo:** Extender `apps/transactions/services.py` y `apps/transactions/models.py` para procesar la confirmación y liquidación atómica de pagos entrantes (Stripe o SIPAP), verificar rigurosamente la integridad de montos y divisas, y transicionar de forma atómica e idempotente el estado de la transacción de `PENDIENTE` a `COMPLETADA` registrando `fecha_pago`, `referencia_externa_pago` y `pasarela_pago` (criterio SCRUM-87).
+* **Aportes y Solución con IA:**
+  * Extensión del Modelo `Transaction` (`transactions/models.py`):
+    * Incorporación de campos de liquidación: `fecha_pago` (timestamp de confirmación), `referencia_externa_pago` (identificador devuelto por Stripe o comprobante SIPAP) y `pasarela_pago` (STRIPE, SIPAP, EFECTIVO).
+    * Actualización del método `mark_as_completed` para persistir atómicamente `fecha_pago`, `referencia_externa_pago`, `pasarela_pago` y `observaciones`.
+  * Orquestación Transaccional en `TransactionService` (`transactions/services.py`):
+    * `process_payment_confirmation`: método maestro de liquidación con validaciones exhaustivas:
+      * Control estricto de **idempotencia**: ante reintentos o llamadas repetidas con la misma referencia, retorna la orden completada sin duplicar operaciones contables. Si ya fue liquidada con una referencia distinta, rechaza la operación.
+      * Verificación de estado previo: bloquea liquidaciones sobre órdenes canceladas o terminales.
+      * Validación de monto exacto: compara el monto recibido con el `monto_origen` de la orden, arrojando `ValidationError` ante cualquier discrepancia.
+      * Validación de divisa: compara la divisa informada con la `moneda_origen` esperada (ej. PYG vs USD).
+      * Transición atómica: actualiza el estado de la orden a `COMPLETADA`, asienta la auditoría en observaciones y sincroniza registros vinculados de `PaymentGatewayRecord`.
+    * Métodos de conveniencia: `confirm_stripe_payment`, `confirm_sipap_payment` y `reject_payment_and_cancel`.
+  * Integración con `payments/services.py`:
+    * Delegación completa desde `StripeService._mark_transaction_completed` hacia `TransactionService.confirm_stripe_payment`.
+    * Delegación desde `SipapService.confirm_deposit` hacia `TransactionService.confirm_sipap_payment`.
+    * Delegación desde `SipapService.reject_transfer` hacia `TransactionService.reject_payment_and_cancel`.
+  * Panel Administrativo y Migración:
+    * Actualización de `TransactionAdmin` en `transactions/admin.py` con filtros y visualización de pasarela, fecha de pago y referencia.
+    * Migración `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`.
+  * Suite de Pruebas Automatizadas:
+    * Se incorporó `TransactionPaymentOrchestrationTest` en `transactions/tests.py` con 9 pruebas unitarias que cubren: liquidación exitosa, discrepancia de monto, discrepancia de moneda, idempotencia estricta, rechazo sobre órdenes canceladas, métodos helper y rechazos de pasarela, alcanzando un total de **339 tests aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `transactions/models.py`
+  * `transactions/services.py`
+  * `transactions/admin.py`
+  * `transactions/tests.py`
+  * `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`
+  * `payments/services.py`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`

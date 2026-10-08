@@ -465,3 +465,260 @@ class TransactionService:
             tx.mark_as_cancelled(motivo=motivo_final)
             logger.info(f"Transacción {tx.codigo_referencia} anulada manualmente por cliente {cliente.id}.")
             return tx
+
+    # ==========================================================================
+    # ORQUESTACIÓN DE PAGO Y LIQUIDACIÓN (SCRUM-94 / SCRUM-87)
+    # ==========================================================================
+
+    @classmethod
+    def process_payment_confirmation(
+        cls,
+        transaction_obj: Union[int, str, Transaction],
+        gateway: str,
+        referencia_externa: str,
+        monto_pagado: Union[Decimal, float, int, str],
+        moneda_pagada: str,
+        datos_adicionales: Optional[Dict[str, Any]] = None,
+        usuario_operador: Optional[Any] = None,
+        fecha_pago: Optional[Any] = None,
+    ) -> Transaction:
+        """
+        Orquesta y procesa la confirmación atómica de pago y liquidación de una orden cambiaria (SCRUM-94 / SCRUM-87).
+
+        Ejecuta las validaciones de consistencia financiera e integridad:
+        - Resuelve la orden cambiaria asegurando su existencia.
+        - **Idempotencia estricta**: si la orden ya se encuentra COMPLETADA con la misma referencia de pago,
+          retorna la transacción sin duplicar asientos contables ni alterar estados.
+        - Valida que la transacción no haya sido cancelada previamente ni se encuentre en un estado terminal inválido.
+        - Comprueba que el monto pagado coincida de manera exacta con el `monto_origen` de la orden.
+        - Comprueba que la divisa informada coincida exactamente con la `moneda_origen` de la orden.
+        - Transiciona atómicamente la orden cambiaria de PENDIENTE a COMPLETADA registrando `fecha_pago`,
+          `referencia_externa_pago`, `pasarela_pago`, notas de auditoría, y actualiza los registros
+          asociados de pasarela (:class:`payments.models.PaymentGatewayRecord`) a COMPLETADO.
+
+        :param transaction_obj: ID numérico o instancia de :class:`~transactions.models.Transaction`.
+        :type transaction_obj: int or str or transactions.models.Transaction
+        :param gateway: Pasarela o medio tecnológico utilizado (ej. 'STRIPE', 'SIPAP', 'EFECTIVO').
+        :type gateway: str
+        :param referencia_externa: Identificador devuelto por la pasarela o comprobante interbancario.
+        :type referencia_externa: str
+        :param monto_pagado: Monto exacto cobrado o transferido.
+        :type monto_pagado: decimal.Decimal or float or int or str
+        :param moneda_pagada: Código ISO de la divisa del pago (ej. 'USD', 'PYG').
+        :type moneda_pagada: str
+        :param datos_adicionales: Metadatos adicionales de la liquidación (opcional).
+        :type datos_adicionales: dict or None
+        :param usuario_operador: Usuario operador o cajero que formalizó la liquidación (opcional).
+        :type usuario_operador: Any or None
+        :param fecha_pago: Marca temporal informada del pago (opcional).
+        :type fecha_pago: datetime.datetime or None
+        :return: Instancia de Transaction liquidada en estado COMPLETADA.
+        :rtype: transactions.models.Transaction
+        :raises django.core.exceptions.ValidationError: Ante discrepancias en montos, monedas o estados incompatibles.
+        """
+        if isinstance(transaction_obj, Transaction):
+            tx = transaction_obj
+        else:
+            try:
+                tx = Transaction.objects.select_related('cliente', 'base_currency', 'target_currency').get(id=int(transaction_obj))
+            except (Transaction.DoesNotExist, ValueError, TypeError):
+                raise ValidationError({'transaction': f'No se encontró la transacción cambiaria especificada: {transaction_obj}.'})
+
+        ref = (referencia_externa or '').strip()
+        if not ref:
+            raise ValidationError({'referencia_externa': 'Debe suministrarse una referencia externa válida para liquidar el pago.'})
+
+        gateway_str = (gateway or 'PASARELA').strip().upper()
+
+        # 1. Idempotencia estricta
+        if tx.estado == Transaction.Estado.COMPLETADA:
+            if tx.referencia_externa_pago == ref or not tx.referencia_externa_pago:
+                logger.info('Transacción %s ya fue completada previamente con referencia %s. Omitiendo duplicado.', tx.codigo_referencia, ref)
+                return tx
+            raise ValidationError({
+                'estado': f'La transacción {tx.codigo_referencia} ya fue completada con una referencia de pago diferente ({tx.referencia_externa_pago}).'
+            })
+
+        # 2. Control de estado previo
+        if tx.estado == Transaction.Estado.CANCELADA:
+            raise ValidationError({
+                'estado': f'No es posible confirmar el pago de la transacción {tx.codigo_referencia} porque se encuentra CANCELADA.'
+            })
+
+        if tx.estado != Transaction.Estado.PENDIENTE:
+            raise ValidationError({
+                'estado': f'La transacción {tx.codigo_referencia} se encuentra en estado "{tx.get_estado_display()}" y no admite confirmación de pago.'
+            })
+
+        # 3. Validación de integridad del monto
+        try:
+            amount_decimal = Decimal(str(monto_pagado))
+        except Exception:
+            raise ValidationError({'monto': 'El monto informado para la confirmación de pago no es un número válido.'})
+
+        if amount_decimal <= Decimal('0.00'):
+            raise ValidationError({'monto': 'El monto de pago debe ser mayor a cero.'})
+
+        expected_amount = tx.monto_origen
+        if amount_decimal != expected_amount:
+            raise ValidationError({
+                'monto': f'Discrepancia en el monto de pago: la transacción requiere {expected_amount} pero se informó un pago de {amount_decimal}.'
+            })
+
+        # 4. Validación de divisa
+        currency_code = (moneda_pagada or '').strip().upper()
+        expected_currency = getattr(tx.moneda_origen, 'code', 'PYG').upper() if hasattr(tx, 'moneda_origen') else 'PYG'
+        if currency_code != expected_currency:
+            raise ValidationError({
+                'moneda': f'Discrepancia en la divisa: la transacción espera cobrar en {expected_currency} pero el pago se recibió en {currency_code}.'
+            })
+
+        # 5. Transición atómica a COMPLETADA
+        payment_time = fecha_pago or timezone.now()
+        display_gateway = 'Stripe' if gateway_str == 'STRIPE' else ('SIPAP' if gateway_str == 'SIPAP' else gateway_str)
+        note = f'Pago liquidado exitosamente vía {display_gateway} [Ref: {ref}].'
+        if datos_adicionales:
+            detalles = ', '.join(f'{k}={v}' for k, v in datos_adicionales.items() if v)
+            if detalles:
+                note = f'{note} ({detalles})'
+
+        with transaction.atomic():
+            if tx.observaciones:
+                tx.observaciones = f'{tx.observaciones}\n{note}'
+            else:
+                tx.observaciones = note
+
+            tx.mark_as_completed(
+                user=usuario_operador,
+                fecha_pago=payment_time,
+                referencia_externa=ref,
+                pasarela=gateway_str,
+                save=True,
+            )
+
+            # Sincronizar PaymentGatewayRecord si existe
+            try:
+                from payments.models import PaymentGatewayRecord
+                PaymentGatewayRecord.objects.filter(
+                    gateway=gateway_str,
+                    referencia_externa=ref,
+                ).update(
+                    transaction=tx,
+                    cliente=tx.cliente,
+                    estado=PaymentGatewayRecord.Estado.COMPLETADO,
+                )
+            except Exception as exc:
+                logger.warning('No se pudo actualizar PaymentGatewayRecord para ref %s: %s', ref, str(exc))
+
+            logger.info('Transacción %s liquidada y completada exitosamente vía %s [%s].', tx.codigo_referencia, gateway_str, ref)
+            return tx
+
+    @classmethod
+    def confirm_stripe_payment(
+        cls,
+        transaction_obj: Union[int, str, Transaction],
+        payment_reference: str,
+        monto: Union[Decimal, float, int, str],
+        moneda: str = 'USD',
+        metadata: Optional[Dict[str, Any]] = None,
+        usuario_operador: Optional[Any] = None,
+        fecha_pago: Optional[Any] = None,
+    ) -> Transaction:
+        """
+        Método de conveniencia para orquestar la confirmación de cobros recibidos vía Stripe.
+        """
+        return cls.process_payment_confirmation(
+            transaction_obj=transaction_obj,
+            gateway='STRIPE',
+            referencia_externa=payment_reference,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+            datos_adicionales=metadata,
+            usuario_operador=usuario_operador,
+            fecha_pago=fecha_pago,
+        )
+
+    @classmethod
+    def confirm_sipap_payment(
+        cls,
+        transaction_obj: Union[int, str, Transaction],
+        codigo_transferencia: str,
+        monto: Union[Decimal, float, int, str],
+        moneda: str = 'PYG',
+        banco_origen: Optional[str] = None,
+        cuenta_origen: Optional[str] = None,
+        titular_origen: Optional[str] = None,
+        usuario_operador: Optional[Any] = None,
+        fecha_pago: Optional[Any] = None,
+    ) -> Transaction:
+        """
+        Método de conveniencia para orquestar la confirmación de transferencias locales SIPAP.
+        """
+        datos = {}
+        if banco_origen:
+            datos['banco_origen'] = banco_origen
+        if cuenta_origen:
+            datos['cuenta_origen'] = cuenta_origen
+        if titular_origen:
+            datos['titular_origen'] = titular_origen
+
+        return cls.process_payment_confirmation(
+            transaction_obj=transaction_obj,
+            gateway='SIPAP',
+            referencia_externa=codigo_transferencia,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+            datos_adicionales=datos,
+            usuario_operador=usuario_operador,
+            fecha_pago=fecha_pago,
+        )
+
+    @classmethod
+    def reject_payment_and_cancel(
+        cls,
+        transaction_obj: Union[int, str, Transaction],
+        gateway: str,
+        referencia_externa: str,
+        motivo: str = 'Pago rechazado por la pasarela de pagos.',
+        usuario_operador: Optional[Any] = None,
+    ) -> Transaction:
+        """
+        Transiciona atómicamente la orden cambiaria a CANCELADA ante un rechazo de pago en pasarela (SCRUM-87 / SCRUM-94).
+        """
+        if isinstance(transaction_obj, Transaction):
+            tx = transaction_obj
+        else:
+            try:
+                tx = Transaction.objects.get(id=int(transaction_obj))
+            except (Transaction.DoesNotExist, ValueError, TypeError):
+                raise ValidationError({'transaction': 'La transacción solicitada no existe.'})
+
+        if tx.estado == Transaction.Estado.COMPLETADA:
+            raise ValidationError({'estado': 'No es posible cancelar una transacción que ya fue COMPLETADA.'})
+
+        gateway_str = (gateway or 'PASARELA').strip().upper()
+        ref = (referencia_externa or '').strip()
+
+        if tx.estado == Transaction.Estado.PENDIENTE:
+            with transaction.atomic():
+                motivo_cancel = f"[Rechazo de Pago - {gateway_str}] Transacción cancelada: transferencia {gateway_str} rechazada [{motivo}]. Ref: {ref}"
+                tx.mark_as_cancelled(motivo=motivo_cancel)
+                if usuario_operador:
+                    tx.usuario = usuario_operador
+                    tx.save(update_fields=['usuario', 'updated_at'])
+
+                try:
+                    from payments.models import PaymentGatewayRecord
+                    PaymentGatewayRecord.objects.filter(
+                        gateway=gateway_str,
+                        referencia_externa=ref,
+                    ).update(
+                        estado=PaymentGatewayRecord.Estado.FALLIDO,
+                        error_mensaje=motivo,
+                    )
+                except Exception as exc:
+                    logger.warning('No se pudo actualizar PaymentGatewayRecord a FALLIDO: %s', str(exc))
+
+                logger.info('Transacción %s cancelada debido a rechazo de pago en %s [%s].', tx.codigo_referencia, gateway_str, ref)
+
+        return tx

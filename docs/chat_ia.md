@@ -227,5 +227,24 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Desarrollé una suite de pruebas automatizadas con 17 tests específicos (`SipapServiceTestCase` y `SipapEndpointsTestCase`) en `payments/tests.py`, elevando la suite del proyecto a **330 tests aprobados al 100% de éxito (OK)**.
 - Actualicé el estado de la tarea en `docs/documentacion/Jira workflow/TAREAS.md` y documenté la solución en `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
 
+---
+
+## Mauricio González — 08/10/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 4 — Orquestación en TransactionService para transición atómica de pago y liquidación (SCRUM-94 / SCRUM-87)
+
+**Resumen:**
+- Extendí el modelo `Transaction` en `transactions/models.py` agregando los campos `fecha_pago` (marca temporal exacta de confirmación), `referencia_externa_pago` (identificador devuelto por Stripe o comprobante SIPAP) y `pasarela_pago` (`STRIPE`, `SIPAP`, `EFECTIVO`), actualizando `mark_as_completed` para persistir atómicamente estos valores junto a las observaciones de auditoría.
+- Generé la migración de base de datos `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`.
+- Actualicé el panel de administración `TransactionAdmin` en `transactions/admin.py` con filtros y visualización de pasarela, fecha de pago y referencias externas.
+- Implementé la orquestación centralizada en `TransactionService` (`transactions/services.py`):
+  - `process_payment_confirmation`: método atómico maestro con verificación de estado previo (no cancelada ni terminal), control estricto de **idempotencia** (retorna la orden sin duplicar operaciones si ya fue liquidada con la misma referencia), validación matemática del monto de pago frente a `monto_origen`, comprobación de correspondencia de moneda frente a `moneda_origen`, registro de auditoría y actualización coordinada con `PaymentGatewayRecord`.
+  - `confirm_stripe_payment`: método helper para liquidación de sesiones y PaymentIntents de Stripe.
+  - `confirm_sipap_payment`: método helper para conciliación y acreditación de transferencias bancarias SIPAP.
+  - `reject_payment_and_cancel`: método atómico para anular transacciones pendientes (`CANCELADA`) y asentar registros de error ante rechazos en pasarela.
+- Conecté `StripeService` y `SipapService` en `payments/services.py` para delegar la transición atómica de las transacciones cambiarias en `TransactionService`.
+- Escribí 9 pruebas unitarias exhaustivas en `TransactionPaymentOrchestrationTest` dentro de `transactions/tests.py`, elevando la suite del proyecto a **339 tests aprobados al 100% de éxito (OK)**.
+- Actualicé `TAREAS.md`, `RESOLUCION_TAREAS_IA.md` y `chat_ia.md`.
+
 
 

@@ -21,24 +21,29 @@ class TransactionAdmin(admin.ModelAdmin):
         'monto_destino',
         'tasa_neta',
         'estado',
-        'token_congelamiento',
+        'pasarela_pago',
+        'fecha_pago',
         'created_at',
     )
     list_filter = (
         'estado',
+        'pasarela_pago',
         'tipo_operacion',
         'base_currency',
         'target_currency',
+        'fecha_pago',
         'created_at',
     )
     search_fields = (
         'codigo_referencia',
+        'referencia_externa_pago',
         'cliente__nombre',
         'cliente__documento_ruc',
         'token_congelamiento',
     )
     readonly_fields = (
         'codigo_referencia',
+        'fecha_pago',
         'created_at',
         'updated_at',
     )
@@ -62,8 +67,14 @@ class TransactionAdmin(admin.ModelAdmin):
                 'monto_destino',
             )
         }),
-        ('Instrumentos Financieros', {
-            'fields': ('medio_pago_origen', 'medio_acreditacion_destino')
+        ('Instrumentos Financieros y Liquidación', {
+            'fields': (
+                'medio_pago_origen',
+                'medio_acreditacion_destino',
+                'pasarela_pago',
+                'referencia_externa_pago',
+                'fecha_pago',
+            )
         }),
         ('Trazabilidad y Observaciones', {
             'fields': ('observaciones', 'created_at', 'updated_at')
