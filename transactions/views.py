@@ -263,6 +263,13 @@ class TransactionDetailView(LoginRequiredMixin, DetailView):
         context['can_cancel'] = (
             tx.estado == Transaction.Estado.PENDIENTE and cliente and tx.cliente_id == cliente.id
         )
+        context['can_pay'] = (
+            tx.estado == Transaction.Estado.PENDIENTE and not is_expired and (
+                self.request.user.is_staff or (cliente and tx.cliente_id == cliente.id)
+            )
+        )
+        if self.request.GET.get('checkout') == 'success':
+            context['stripe_success'] = True
         return context
 
 
@@ -271,6 +278,203 @@ class TransactionReceiptView(TransactionDetailView):
     Vista optimizada para impresión / exportación del comprobante de liquidación cambiaria.
     """
     template_name = 'transactions/receipt.html'
+
+
+class TransactionPaymentCheckoutView(LoginRequiredMixin, DetailView):
+    """
+    Vista web interactiva para el flujo de pago y conciliación bancaria de una transacción (SCRUM-95).
+
+    Permite al cliente:
+    1. Visualizar el resumen financiero y desglose de liquidación de la orden con temporizador de congelamiento.
+    2. Iniciar el pago en línea con tarjeta internacional mediante redirección segura a Stripe Checkout.
+    3. Visualizar los datos de la cuenta recaudadora SIPAP de Global Exchange e ingresar el código de comprobante
+       o transferir directamente para conciliación bancaria automática.
+    4. Probar en entornos de prueba con el simulador SIPAP asistido.
+    """
+    model = Transaction
+    template_name = 'transactions/payment_checkout.html'
+    context_object_name = 'transaction'
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related(
+            'cliente', 'base_currency', 'target_currency',
+            'medio_pago_origen', 'medio_acreditacion_destino',
+            'usuario'
+        )
+        if self.request.user.is_staff or self.request.user.is_superuser:
+            return qs
+
+        cliente = get_active_customer(self.request)
+        if cliente:
+            return qs.filter(cliente=cliente)
+        return qs.none()
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+
+        try:
+            tx = self.get_object()
+        except Http404:
+            messages.error(request, 'Transacción no encontrada o no posee permisos para acceder a ella.')
+            return redirect('transactions:list')
+
+        # Verificar si expiró
+        if tx.estado == Transaction.Estado.PENDIENTE and TransactionService.is_transaction_expired(tx):
+            TransactionService.check_and_cancel_single(tx)
+            messages.error(
+                request,
+                f'El tiempo de congelamiento de la tasa para la orden {tx.codigo_referencia} ha expirado. '
+                'La transacción fue cancelada automáticamente por seguridad.',
+            )
+            return redirect('transactions:detail', pk=tx.pk)
+
+        # Si ya está completada
+        if tx.estado == Transaction.Estado.COMPLETADA:
+            messages.info(
+                request,
+                f'La transacción {tx.codigo_referencia} ya ha sido pagada y liquidada exitosamente.',
+            )
+            return redirect('transactions:detail', pk=tx.pk)
+
+        # Si fue cancelada
+        if tx.estado == Transaction.Estado.CANCELADA:
+            messages.warning(
+                request,
+                f'La transacción {tx.codigo_referencia} se encuentra cancelada y no admite nuevos pagos.',
+            )
+            return redirect('transactions:detail', pk=tx.pk)
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        tx = self.object
+
+        from django.utils import timezone
+        remaining_seconds = 0
+        if tx.estado == Transaction.Estado.PENDIENTE and tx.created_at:
+            elapsed = (timezone.now() - tx.created_at).total_seconds()
+            remaining_seconds = max(0, int(TransactionService.EXPIRATION_DURATION_SECONDS - elapsed))
+
+        collector_bank_info = {
+            'banco': 'Banco Continental S.A.E.C.A. (Red SIPAP / BCP)',
+            'cuenta': '00-24958170-02',
+            'titular': 'Global Exchange S.A.',
+            'ruc': '80045612-3',
+            'concepto': tx.codigo_referencia,
+        }
+
+        context['remaining_seconds'] = remaining_seconds
+        context['collector_bank_info'] = collector_bank_info
+        context['stripe_available'] = True
+        context['sipap_available'] = True
+        return context
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        """
+        Procesa la confirmación manual o simulación asistida de pago SIPAP desde el checkout.
+        """
+        tx = self.get_object()
+
+        if TransactionService.is_transaction_expired(tx):
+            TransactionService.check_and_cancel_single(tx)
+            msg = 'La cotización de la transacción ha expirado. La orden fue cancelada.'
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                return JsonResponse({'success': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect('transactions:detail', pk=tx.pk)
+
+        action = request.POST.get('action', 'confirm_sipap')
+
+        if action == 'simulate_sipap':
+            from payments.services import SipapService
+            try:
+                banco = request.POST.get('banco_origen') or 'Banco Itaú Paraguay S.A.'
+                cuenta = request.POST.get('cuenta_origen') or '12345678'
+                titular = request.POST.get('titular_origen') or tx.cliente.nombre
+                documento = request.POST.get('documento_origen') or tx.cliente.documento_ruc
+
+                record = SipapService.simulate_transfer(
+                    monto=tx.monto_origen,
+                    moneda=tx.moneda_origen.code,
+                    banco_origen=banco,
+                    cuenta_origen=cuenta,
+                    titular_origen=titular,
+                    documento_origen=documento,
+                    transaction_obj=tx,
+                    auto_confirm=False,
+                )
+                TransactionService.confirm_sipap_payment(
+                    transaction_obj=tx,
+                    codigo_transferencia=record.codigo_transferencia,
+                    monto=tx.monto_origen,
+                    moneda=tx.moneda_origen.code,
+                    banco_origen=banco,
+                    cuenta_origen=cuenta,
+                    titular_origen=titular,
+                )
+                msg = f'¡Transferencia SIPAP {record.codigo_transferencia} simulada y conciliada exitosamente! Orden liquidada.'
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                    return JsonResponse({
+                        'success': True,
+                        'message': msg,
+                        'redirect_url': reverse('transactions:detail', kwargs={'pk': tx.pk}),
+                    })
+                messages.success(request, msg)
+                return redirect('transactions:detail', pk=tx.pk)
+            except Exception as exc:
+                err_msg = f'Error en simulación SIPAP: {str(exc)}'
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                    return JsonResponse({'success': False, 'error': err_msg}, status=400)
+                messages.error(request, err_msg)
+                return self.get(request, *args, **kwargs)
+
+        # Confirmación de comprobante SIPAP ingresado por el cliente
+        codigo_transferencia = request.POST.get('codigo_transferencia', '').strip()
+        banco_origen = request.POST.get('banco_origen', '').strip()
+        cuenta_origen = request.POST.get('cuenta_origen', '').strip()
+        titular_origen = request.POST.get('titular_origen', '').strip()
+        documento_origen = request.POST.get('documento_origen', '').strip()
+
+        if not codigo_transferencia:
+            err_msg = 'Por favor ingresá el código de comprobante o transferencia SIPAP.'
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                return JsonResponse({'success': False, 'error': err_msg}, status=400)
+            messages.error(request, err_msg)
+            return self.get(request, *args, **kwargs)
+
+        try:
+            TransactionService.confirm_sipap_payment(
+                transaction_obj=tx,
+                codigo_transferencia=codigo_transferencia,
+                monto=tx.monto_origen,
+                moneda=tx.moneda_origen.code,
+                banco_origen=banco_origen,
+                cuenta_origen=cuenta_origen,
+                titular_origen=titular_origen,
+            )
+            msg = f'¡Transferencia SIPAP {codigo_transferencia} confirmada con éxito! La transacción {tx.codigo_referencia} ha sido liquidada.'
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                return JsonResponse({
+                    'success': True,
+                    'message': msg,
+                    'redirect_url': reverse('transactions:detail', kwargs={'pk': tx.pk}),
+                })
+            messages.success(request, msg)
+            return redirect('transactions:detail', pk=tx.pk)
+        except ValidationError as ve:
+            err_msg = str(ve.message if hasattr(ve, 'message') else ve)
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                return JsonResponse({'success': False, 'error': err_msg}, status=400)
+            messages.error(request, f'No se pudo confirmar el pago SIPAP: {err_msg}')
+            return self.get(request, *args, **kwargs)
+        except Exception as exc:
+            err_msg = f'Error al conciliar pago SIPAP: {str(exc)}'
+            if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+                return JsonResponse({'success': False, 'error': err_msg}, status=500)
+            messages.error(request, err_msg)
+            return self.get(request, *args, **kwargs)
 
 
 class TransactionListView(LoginRequiredMixin, ListView):

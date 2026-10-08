@@ -94,7 +94,7 @@ TAREAS
 
 *SCRUM-94: Orquestación en TransactionService para transición atómica de pago y liquidación.*Descripción: Extender apps/transactions/services.py para procesar la confirmación de pago entrante (Stripe o SIPAP), verificar integridad del monto y cambiar atómicamente el estado de la transacción de PENDIENTE a COMPLETADA registrando fecha de pago y referencia externa. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-95, SCRUM-104.*Estado: Finalizado.
 
-*SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria.*Descripción: Crear las vistas y plantillas para el flujo de pago del cliente (templates/transactions/payment_checkout.html), botón de redirección segura a Stripe y modal para carga de comprobante o referencia SIPAP. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Por Hacer.
+*SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria.*Descripción: Crear las vistas y plantillas para el flujo de pago del cliente (templates/transactions/payment_checkout.html), botón de redirección segura a Stripe y modal para carga de comprobante o referencia SIPAP. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Finalizado.
 
 *SCRUM-96: Configuración del Realm de Keycloak para OTP/TOTP y mapeo de claims MFA en tokens.*Descripción: Configurar en Keycloak el flujo de autenticación OTP (Google Authenticator/FreeOTP), definir políticas condicionales por rol (obligatorio para administradores/operadores) y mapear el claim amr / otp en el ID Token y Userinfo de OIDC. *Principal: SCRUM-88.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-97.*Estado: Por Hacer.
 

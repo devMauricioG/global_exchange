@@ -10,6 +10,7 @@ Cubre exhaustivamente:
 - Panel de administración :class:`~transactions.admin.TransactionAdmin`.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 import io
 import json
@@ -987,3 +988,174 @@ class TransactionPaymentOrchestrationTest(TransactionTestMixin, TestCase):
                 referencia_externa='REF-FAILED-CANCEL',
             )
         self.assertIn('estado', ctx.exception.message_dict)
+
+
+class TransactionPaymentCheckoutViewTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas unitarias e integración para la interfaz web de Checkout de Pago (SCRUM-95).
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_checkout_view_get_authenticated_success(self):
+        """GET /transactions/<pk>/pago/ carga la interfaz de checkout con resumen financiero y pasarelas."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/payment_checkout.html')
+        self.assertEqual(response.context['transaction'].id, self.tx.id)
+        self.assertIn('remaining_seconds', response.context)
+        self.assertIn('collector_bank_info', response.context)
+        self.assertTrue(response.context['stripe_available'])
+        self.assertTrue(response.context['sipap_available'])
+        self.assertContains(response, self.tx.codigo_referencia)
+        self.assertContains(response, 'Stripe')
+        self.assertContains(response, 'SIPAP')
+
+    def test_checkout_view_alternate_url_alias(self):
+        """Verifica que el alias /checkout/ también resuelva a la vista de pago."""
+        url = reverse('transactions:payment_checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_checkout_view_unauthenticated_redirects(self):
+        """Usuarios no autenticados son redirigidos a la vista de login."""
+        self.client.logout()
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/oidc/authenticate/', response.url)
+
+    def test_checkout_view_idor_prevention(self):
+        """Un cliente no puede acceder al checkout de una transacción perteneciente a otro cliente."""
+        tx_otro = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:payment-checkout', kwargs={'pk': tx_otro.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:list'))
+
+    def test_checkout_view_completed_transaction_redirects(self):
+        """Una transacción ya liquidada no permite acceder al checkout y redirige a su detalle."""
+        self.tx.mark_as_completed()
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+    def test_checkout_view_cancelled_transaction_redirects(self):
+        """Una transacción cancelada no permite acceder al checkout y redirige a su detalle."""
+        self.tx.mark_as_cancelled(motivo='Cancelación de prueba')
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+    def test_checkout_view_expired_transaction_auto_cancels_and_redirects(self):
+        """Una transacción con cotización expirada (>5 min) es cancelada automáticamente al ingresar al checkout."""
+        past_time = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past_time)
+
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('Expiración', self.tx.observaciones)
+
+    def test_checkout_view_post_sipap_confirmation_success(self):
+        """POST con comprobante SIPAP confirma el pago, transiciona a COMPLETADA y redirige al detalle."""
+        ref = 'SIPAP-TRANS-WEB-999'
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': ref,
+            'banco_origen': 'Banco Continental',
+            'cuenta_origen': '11223344',
+            'titular_origen': self.cliente.nombre,
+            'documento_origen': self.cliente.documento_ruc,
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.pasarela_pago, 'SIPAP')
+        self.assertEqual(self.tx.referencia_externa_pago, ref)
+
+    def test_checkout_view_post_sipap_empty_code_error(self):
+        """POST sin código de transferencia SIPAP retorna mensaje de error y no liquida la orden."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': '',
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 200)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_checkout_view_post_sipap_ajax_success(self):
+        """Petición AJAX POST con código SIPAP retorna respuesta JSON de éxito."""
+        ref = 'SIPAP-AJAX-WEB-001'
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': ref,
+        }
+        response = self.client.post(url, payload, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertTrue(data['success'])
+        self.assertIn('redirect_url', data)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+
+    def test_checkout_view_post_simulate_sipap_success(self):
+        """POST con acción simulate_sipap genera comprobante simulado y liquida automáticamente."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'simulate_sipap',
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.pasarela_pago, 'SIPAP')
+        self.assertTrue(self.tx.referencia_externa_pago.startswith('SIPAP-'))
+
+    def test_transaction_detail_shows_checkout_cta_when_pending(self):
+        """Verifica que transaction_detail.html muestre el botón de acceso al checkout si la orden está pendiente."""
+        url = reverse('transactions:detail', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        checkout_url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        self.assertContains(response, checkout_url)
+        self.assertContains(response, 'Pagar Ahora')
+
+    def test_transaction_detail_shows_payment_gateway_when_completed(self):
+        """Verifica que transaction_detail.html muestre la pasarela y referencia externa si fue pagada."""
+        self.tx.mark_as_completed(
+            fecha_pago=timezone.now(),
+            referencia_externa='cs_test_checkout_888',
+            pasarela='STRIPE',
+        )
+        url = reverse('transactions:detail', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Stripe')
+        self.assertContains(response, 'cs_test_checkout_888')
+

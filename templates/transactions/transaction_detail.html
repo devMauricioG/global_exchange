@@ -30,6 +30,11 @@
             </p>
         </div>
         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end;">
+            {% if can_pay %}
+                <a href="{% url 'transactions:payment-checkout' pk=transaction.pk %}" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);">
+                    💳 Pagar Ahora
+                </a>
+            {% endif %}
             <a href="{% url 'transactions:receipt' pk=transaction.pk %}" target="_blank" class="btn btn-secondary">
                 🖨️ Imprimir
             </a>
@@ -42,22 +47,40 @@
         </div>
     </div>
 
+    {% if stripe_success %}
+        <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.5); border-radius: 0.875rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.6rem;">🎉</span>
+            <div>
+                <strong style="color: var(--success); font-size: 1rem;">Pago recibido a través de Stripe</strong>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">Hemos procesado tu pago en línea. La transacción ha sido o será liquidada automáticamente.</p>
+            </div>
+        </div>
+    {% endif %}
+
     {% if transaction.estado == 'PENDIENTE' %}
-        <!-- Banner de Temporizador de Expiración (5 min) -->
-        <div id="expirationTimerBanner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.875rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
+        <!-- Banner de Temporizador de Expiración (5 min) y Pago Inmediato -->
+        <div id="expirationTimerBanner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.875rem; padding: 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <span style="font-size: 1.5rem;">⏱️</span>
+                <span style="font-size: 1.6rem;">⏱️</span>
                 <div>
-                    <div style="font-weight: 700; color: var(--warning);">Tiempo Restante de Cotización Congelada</div>
+                    <div style="font-weight: 700; color: var(--warning); font-size: 1rem;">Cotización Congelada — Pendiente de Pago</div>
                     <div style="font-size: 0.85rem; color: var(--text-muted);">
-                        Si la transacción no se liquida en el plazo de 5 minutos, expira y pasa a estado cancelado.
+                        Tenés 5 minutos para liquidar la orden mediante Stripe o SIPAP antes de su anulación automática.
                     </div>
                 </div>
             </div>
-            <div style="text-align: right;">
-                <span id="countdownTimer" style="font-size: 1.4rem; font-weight: 800; color: var(--warning); font-family: monospace;">
-                    --:--
-                </span>
+            <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                <div style="text-align: right; background: rgba(15, 23, 42, 0.6); padding: 0.4rem 0.85rem; border-radius: 0.5rem; border: 1px solid rgba(245, 158, 11, 0.3);">
+                    <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Expira en</div>
+                    <span id="countdownTimer" style="font-size: 1.3rem; font-weight: 800; color: var(--warning); font-family: monospace;">
+                        --:--
+                    </span>
+                </div>
+                {% if can_pay %}
+                    <a href="{% url 'transactions:payment-checkout' pk=transaction.pk %}" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 800; padding: 0.65rem 1.25rem; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);">
+                        💳 Pagar Ahora →
+                    </a>
+                {% endif %}
             </div>
         </div>
     {% endif %}
@@ -173,6 +196,26 @@
                 </div>
             </div>
         </div>
+
+        {% if transaction.pasarela_pago %}
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Pasarela de Pago Conciliada</div>
+                    <div style="font-size: 1.05rem; font-weight: 800; color: var(--success);">
+                        {% if transaction.pasarela_pago == 'STRIPE' %}💳 Stripe (Tarjeta Internacional){% elif transaction.pasarela_pago == 'SIPAP' %}🏦 SIPAP (Transferencia Bancaria BCP){% else %}{{ transaction.get_pasarela_pago_display }}{% endif %}
+                    </div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        Referencia Externa: <code style="color: var(--primary); font-weight: 700;">{{ transaction.referencia_externa_pago|default:"N/A" }}</code>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Fecha de Liquidación</div>
+                    <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main);">
+                        {{ transaction.fecha_pago|date:"d/m/Y H:i:s"|default:"Confirmada" }}
+                    </div>
+                </div>
+            </div>
+        {% endif %}
 
         {% if transaction.observaciones %}
             <div style="background: rgba(30, 41, 59, 0.4); border-left: 3px solid var(--primary); padding: 0.875rem 1.25rem; border-radius: 0.5rem; margin-bottom: 1.5rem; font-size: 0.9rem;">
