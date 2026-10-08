@@ -573,18 +573,20 @@ class StripeService:
     @classmethod
     def _mark_transaction_completed(cls, transaction_obj: Any, external_reference: Optional[str] = None) -> None:
         """
-        Transiciona el estado de la transacción a COMPLETADA de forma segura y atómica.
+        Transiciona el estado de la transacción a COMPLETADA de forma segura y atómica delegando en TransactionService (SCRUM-94).
         """
-        from transactions.models import Transaction
-        if transaction_obj.estado == Transaction.Estado.PENDIENTE:
-            transaction_obj.estado = Transaction.Estado.COMPLETADA
-            note = f'Pago verificado vía Stripe [{external_reference or "Sin referencia"}].'
-            if transaction_obj.observaciones:
-                transaction_obj.observaciones = f'{transaction_obj.observaciones}\n{note}'
-            else:
-                transaction_obj.observaciones = note
-            transaction_obj.save(update_fields=['estado', 'observaciones', 'updated_at'])
-            logger.info('Transacción %s actualizada a COMPLETADA tras cobro en Stripe.', transaction_obj.codigo_referencia)
+        if not transaction_obj:
+            return
+
+        from transactions.services import TransactionService
+        if transaction_obj.estado == transaction_obj.Estado.PENDIENTE:
+            TransactionService.confirm_stripe_payment(
+                transaction_obj=transaction_obj,
+                payment_reference=external_reference or transaction_obj.codigo_referencia,
+                monto=transaction_obj.monto_origen,
+                moneda=getattr(transaction_obj.moneda_origen, 'code', 'USD'),
+            )
+            logger.info('Transacción %s actualizada a COMPLETADA tras cobro en Stripe vía TransactionService.', transaction_obj.codigo_referencia)
 
 
 class SipapService:
@@ -886,18 +888,20 @@ class SipapService:
             sipap_record.gateway_record = gateway_record
             sipap_record.save()
 
-            # 5. Transición atómica de la transacción cambiaria si aplica
+            # 5. Transición atómica de la transacción cambiaria si aplica (SCRUM-94)
             if target_trans:
-                from transactions.models import Transaction
-                if target_trans.estado == Transaction.Estado.PENDIENTE:
-                    target_trans.estado = Transaction.Estado.COMPLETADA
-                    note = f'Depósito bancario SIPAP confirmado [{code} - {sipap_record.banco_origen}].'
-                    if target_trans.observaciones:
-                        target_trans.observaciones = f'{target_trans.observaciones}\n{note}'
-                    else:
-                        target_trans.observaciones = note
-                    target_trans.save(update_fields=['estado', 'observaciones', 'updated_at'])
-                    logger.info('Transacción %s completada exitosamente vía SIPAP.', target_trans.codigo_referencia)
+                from transactions.services import TransactionService
+                if target_trans.estado == target_trans.Estado.PENDIENTE:
+                    TransactionService.confirm_sipap_payment(
+                        transaction_obj=target_trans,
+                        codigo_transferencia=code,
+                        monto=sipap_record.monto,
+                        moneda=sipap_record.moneda,
+                        banco_origen=sipap_record.banco_origen,
+                        cuenta_origen=sipap_record.cuenta_origen,
+                        titular_origen=sipap_record.titular_origen,
+                    )
+                    logger.info('Transacción %s completada exitosamente vía SIPAP orquestada por TransactionService.', target_trans.codigo_referencia)
 
         return {
             'status': 'success',
@@ -917,7 +921,7 @@ class SipapService:
 
         Si la transferencia estaba vinculada a una transacción cambiaria en estado
         `PENDIENTE`, transiciona dicha orden a `CANCELADA` cumpliendo con las
-        reglas de negocio de conciliación bancaria (SCRUM-87 / SCRUM-93).
+        reglas de negocio de conciliación bancaria (SCRUM-87 / SCRUM-93 / SCRUM-94).
 
         :param codigo_transferencia: Código de la transferencia a rechazar.
         :type codigo_transferencia: str
@@ -931,7 +935,7 @@ class SipapService:
         if not record:
             raise ValidationError(f'No se encontró ninguna transferencia con código {code}.')
 
-        from transactions.models import Transaction
+        from transactions.services import TransactionService
 
         with transaction.atomic():
             record.estado = SipapTransferRecord.Estado.RECHAZADA
@@ -947,15 +951,13 @@ class SipapService:
             )
 
             # Transicionar a CANCELADA la transacción vinculada si estaba en PENDIENTE
-            if record.transaction and record.transaction.estado == Transaction.Estado.PENDIENTE:
-                record.transaction.estado = Transaction.Estado.CANCELADA
-                note = f'Transacción cancelada: transferencia SIPAP rechazada [{motivo}].'
-                if record.transaction.observaciones:
-                    record.transaction.observaciones = f'{record.transaction.observaciones}\n{note}'
-                else:
-                    record.transaction.observaciones = note
-                record.transaction.save(update_fields=['estado', 'observaciones', 'updated_at'])
-                logger.info('Transacción %s cancelada debido a rechazo de transferencia SIPAP.', record.transaction.codigo_referencia)
+            if record.transaction and record.transaction.estado == record.transaction.Estado.PENDIENTE:
+                TransactionService.reject_payment_and_cancel(
+                    transaction_obj=record.transaction,
+                    gateway='SIPAP',
+                    referencia_externa=code,
+                    motivo=motivo,
+                )
 
         return {
             'status': 'rejected',

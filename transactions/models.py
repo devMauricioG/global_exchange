@@ -202,6 +202,26 @@ class Transaction(models.Model):
         verbose_name='Usuario Operador',
         help_text='Usuario del sistema o cajero que registró o gestionó la operación.',
     )
+    fecha_pago = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='Fecha de Pago',
+        help_text='Timestamp exacto en que se confirmó y acreditó el pago de la orden (SCRUM-94).',
+    )
+    referencia_externa_pago = models.CharField(
+        max_length=255,
+        blank=True,
+        db_index=True,
+        verbose_name='Referencia Externa de Pago',
+        help_text='Código de referencia o ID de cobro devuelto por la pasarela (Stripe, SIPAP, etc.).',
+    )
+    pasarela_pago = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name='Pasarela de Pago',
+        help_text='Pasarela tecnológica utilizada para el pago (STRIPE, SIPAP, EFECTIVO).',
+    )
     observaciones = models.TextField(
         blank=True,
         verbose_name='Observaciones',
@@ -327,15 +347,35 @@ class Transaction(models.Model):
         self.full_clean()
         super().save(*args, **kwargs)
 
-    def mark_as_completed(self, user=None, save: bool = True) -> None:
+    def mark_as_completed(
+        self,
+        user=None,
+        fecha_pago=None,
+        referencia_externa: str = '',
+        pasarela: str = '',
+        save: bool = True,
+    ) -> None:
         """
-        Realiza la transición de estado a COMPLETADA.
+        Realiza la transición de estado a COMPLETADA registrando fecha, pasarela y referencia de pago (SCRUM-94).
         """
         self.estado = self.Estado.COMPLETADA
+        self.fecha_pago = fecha_pago or timezone.now()
+        if referencia_externa:
+            self.referencia_externa_pago = referencia_externa
+        if pasarela:
+            self.pasarela_pago = pasarela
         if user:
             self.usuario = user
         if save:
-            self.save(update_fields=['estado', 'usuario', 'updated_at'])
+            self.save(update_fields=[
+                'estado',
+                'usuario',
+                'fecha_pago',
+                'referencia_externa_pago',
+                'pasarela_pago',
+                'observaciones',
+                'updated_at',
+            ])
 
     def mark_as_cancelled(self, motivo: str = '', save: bool = True) -> None:
         """

@@ -803,3 +803,187 @@ class TransactionAdminTest(TransactionTestMixin, TestCase):
         self.assertIn('estado', tx_admin.list_filter)
         self.assertIn('codigo_referencia', tx_admin.search_fields)
         self.assertIn('codigo_referencia', tx_admin.readonly_fields)
+        self.assertIn('fecha_pago', tx_admin.readonly_fields)
+        self.assertIn('pasarela_pago', tx_admin.list_display)
+
+
+class TransactionPaymentOrchestrationTest(TransactionTestMixin, TestCase):
+    """
+    Suite de pruebas unitarias para la orquestación atómica de pago y liquidación (SCRUM-94 / SCRUM-87).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_process_payment_confirmation_success(self):
+        """Verifica la liquidación atómica exitosa de una transacción con registro de pasarela y fecha."""
+        ref = 'pi_test_stripe_valid_999'
+        monto = self.tx.monto_origen
+        moneda = self.tx.moneda_origen.code
+
+        completed_tx = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx,
+            gateway='STRIPE',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+            datos_adicionales={'metodo': 'tarjeta_visa'},
+            usuario_operador=self.user,
+        )
+
+        self.assertEqual(completed_tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(completed_tx.referencia_externa_pago, ref)
+        self.assertEqual(completed_tx.pasarela_pago, 'STRIPE')
+        self.assertIsNotNone(completed_tx.fecha_pago)
+        self.assertEqual(completed_tx.usuario, self.user)
+        self.assertIn('Stripe', completed_tx.observaciones)
+        self.assertIn('metodo=tarjeta_visa', completed_tx.observaciones)
+
+        # Verificar persistencia en base de datos
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.referencia_externa_pago, ref)
+        self.assertEqual(self.tx.pasarela_pago, 'STRIPE')
+        self.assertIsNotNone(self.tx.fecha_pago)
+
+    def test_process_payment_confirmation_amount_mismatch_raises_error(self):
+        """Verifica el rechazo estricto si el monto informado difiere del monto_origen."""
+        wrong_monto = Decimal('500.00')
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx.id,
+                gateway='STRIPE',
+                referencia_externa='ref_mismatch',
+                monto_pagado=wrong_monto,
+                moneda_pagada=self.tx.moneda_origen.code,
+            )
+        self.assertIn('monto', ctx.exception.message_dict)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_currency_mismatch_raises_error(self):
+        """Verifica el rechazo si la moneda pagada no coincide con la moneda de origen de la transacción."""
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='STRIPE',
+                referencia_externa='ref_cur_mismatch',
+                monto_pagado=self.tx.monto_origen,
+                moneda_pagada='EUR',  # orden espera PYG
+            )
+        self.assertIn('moneda', ctx.exception.message_dict)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_cancelled_transaction_fails(self):
+        """Verifica que una orden ya cancelada no pueda transicionar a completada."""
+        self.tx.mark_as_cancelled(motivo='Cancelada previamente')
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='SIPAP',
+                referencia_externa='SIPAP-CANCEL-TEST',
+                monto_pagado=self.tx.monto_origen,
+                moneda_pagada=self.tx.moneda_origen.code,
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+    def test_process_payment_confirmation_strict_idempotency(self):
+        """Verifica que una segunda confirmación con la misma referencia retorne la orden sin re-procesar."""
+        ref = 'IDEMPOTENT-REF-001'
+        monto = self.tx.monto_origen
+        moneda = self.tx.moneda_origen.code
+
+        # Primera confirmación
+        tx1 = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+        )
+        self.assertEqual(tx1.estado, Transaction.Estado.COMPLETADA)
+        fecha_primera = tx1.fecha_pago
+
+        # Segunda confirmación con la misma referencia (idempotente)
+        tx2 = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx.id,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+        )
+        self.assertEqual(tx2.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(tx2.fecha_pago, fecha_primera)
+
+        # Tercera llamada con referencia DIFERENTE debe arrojar ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='SIPAP',
+                referencia_externa='OTHER-CONFLICTING-REF',
+                monto_pagado=monto,
+                moneda_pagada=moneda,
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+    def test_confirm_stripe_payment_helper(self):
+        """Verifica el método helper confirm_stripe_payment."""
+        ref = 'cs_test_session_stripe_001'
+        res = TransactionService.confirm_stripe_payment(
+            transaction_obj=self.tx,
+            payment_reference=ref,
+            monto=self.tx.monto_origen,
+            moneda=self.tx.moneda_origen.code,
+            metadata={'session_id': ref},
+        )
+        self.assertEqual(res.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(res.pasarela_pago, 'STRIPE')
+        self.assertEqual(res.referencia_externa_pago, ref)
+
+    def test_confirm_sipap_payment_helper(self):
+        """Verifica el método helper confirm_sipap_payment."""
+        ref = 'SIPAP-20261008-HELPER'
+        res = TransactionService.confirm_sipap_payment(
+            transaction_obj=self.tx,
+            codigo_transferencia=ref,
+            monto=self.tx.monto_origen,
+            moneda=self.tx.moneda_origen.code,
+            banco_origen='Banco Itaú',
+            cuenta_origen='123456',
+            titular_origen='Titular Prueba',
+        )
+        self.assertEqual(res.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(res.pasarela_pago, 'SIPAP')
+        self.assertEqual(res.referencia_externa_pago, ref)
+        self.assertIn('Banco Itaú', res.observaciones)
+
+    def test_reject_payment_and_cancel_success(self):
+        """Verifica que reject_payment_and_cancel transicione la orden a CANCELADA con auditoría."""
+        ref = 'SIPAP-REJECT-001'
+        motivo = 'Cuenta origen con fondos bloqueados'
+
+        res = TransactionService.reject_payment_and_cancel(
+            transaction_obj=self.tx,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            motivo=motivo,
+        )
+        self.assertEqual(res.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('Rechazo de Pago - SIPAP', res.observaciones)
+        self.assertIn(motivo, res.observaciones)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_reject_payment_on_completed_transaction_fails(self):
+        """Verifica que no se pueda cancelar una transacción ya completada."""
+        self.tx.mark_as_completed()
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.reject_payment_and_cancel(
+                transaction_obj=self.tx,
+                gateway='STRIPE',
+                referencia_externa='REF-FAILED-CANCEL',
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
