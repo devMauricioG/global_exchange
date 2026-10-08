@@ -15,7 +15,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q, QuerySet
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
@@ -31,7 +31,14 @@ from django.views.generic import (
 
 from customers.models import Cliente
 from .forms import PaymentMethodFilterForm, PaymentMethodForm, ReceivingMethodForm
-from .models import EntidadFinanciera, PaymentMethod, ReceivingMethod
+from .models import (
+    EntidadFinanciera,
+    PaymentGatewayRecord,
+    PaymentMethod,
+    PaymentWebhookEvent,
+    ReceivingMethod,
+)
+from .services import StripeService
 
 
 def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
@@ -602,3 +609,98 @@ class PaymentMethodDetailAPIView(LoginRequiredMixin, View):
         pm_id = pm.id
         pm.delete()
         return JsonResponse({'deleted': True, 'id': pm_id}, status=200)
+
+
+# ==============================================================================
+# INTEGRACIÓN DE PASARELA STRIPE Y RECEPCIÓN DE WEBHOOKS (SCRUM-92 / SCRUM-87)
+# ==============================================================================
+
+@csrf_exempt
+def stripe_webhook(request: HttpRequest) -> HttpResponse:
+    """
+    Endpoint HTTP receptor de notificaciones Webhook emitidas por Stripe (SCRUM-92).
+
+    Verifica la signatura criptográfica HMAC-SHA256 en la cabecera `Stripe-Signature`
+    utilizando el secreto compartido `STRIPE_WEBHOOK_SECRET` y delega la ejecución
+    idempotente del evento a :class:`~payments.services.StripeService`.
+
+    :param request: Solicitud HTTP POST raw entrante desde los servidores de Stripe.
+    :type request: django.http.HttpRequest
+    :return: Respuesta JSON con código de estado 200 en caso de éxito, 400 ante firma
+             o carga útil inválida, o 405 si el método no es POST.
+    :rtype: django.http.HttpResponse
+    """
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'], 'Método no permitido. Solo se aceptan peticiones POST para webhooks.')
+
+    payload = request.body
+    sig_header = request.headers.get('Stripe-Signature') or request.META.get('HTTP_STRIPE_SIGNATURE')
+
+    if not sig_header:
+        return JsonResponse({'error': 'Cabecera de firma Stripe-Signature ausente en la petición.'}, status=400)
+
+    try:
+        event = StripeService.verify_webhook_signature(payload, sig_header)
+    except ValidationError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({'error': f'Error de validación de firma: {str(exc)}'}, status=400)
+
+    try:
+        result = StripeService.process_webhook_event(event)
+        return JsonResponse(result, status=200)
+    except Exception as exc:
+        return JsonResponse({'error': f'Error al procesar evento de webhook: {str(exc)}'}, status=500)
+
+
+class StripeCreateCheckoutSessionView(LoginRequiredMixin, View):
+    """
+    Vista controladora para iniciar el flujo de pago con Stripe Checkout (SCRUM-92 / SCRUM-95).
+
+    Genera una sesión de pago alojada en Stripe para la orden cambiaria especificada y
+    devuelve la URL de redirección a la pasarela externa o redirige directamente al cliente.
+    """
+
+    def post(self, request: HttpRequest, transaction_id: int, *args: Any, **kwargs: Any) -> HttpResponse:
+        cliente = get_current_cliente(request)
+        if not cliente:
+            return JsonResponse({'error': 'No se identificó un cliente activo en la sesión.'}, status=403)
+
+        from transactions.models import Transaction
+        trans = get_object_or_404(Transaction, id=transaction_id)
+
+        # Validación de titularidad si no es administrador u operador
+        if not request.user.is_staff and trans.cliente_id != cliente.id:
+            raise PermissionDenied('No posee permisos para efectuar el pago de esta transacción.')
+
+        if trans.estado != Transaction.Estado.PENDIENTE:
+            return JsonResponse({'error': 'La transacción no se encuentra en estado pendiente de pago.'}, status=400)
+
+        # Construcción de URLs de retorno dinámicas
+        base_url = request.build_absolute_uri('/')[:-1]
+        success_url = f'{base_url}/transactions/{trans.id}/?checkout=success&session_id={{CHECKOUT_SESSION_ID}}'
+        cancel_url = f'{base_url}/transactions/{trans.id}/?checkout=cancel'
+
+        try:
+            session_data = StripeService.create_checkout_session(
+                transaction_obj=trans,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                customer_email=getattr(cliente, 'correo', None),
+            )
+        except ValidationError as exc:
+            return JsonResponse({'error': str(exc)}, status=400)
+        except Exception as exc:
+            return JsonResponse({'error': f'Error al generar checkout de Stripe: {str(exc)}'}, status=500)
+
+        # Si la petición es AJAX o solicita JSON explícito
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'application/json' in request.headers.get('accept', ''):
+            return JsonResponse(session_data, status=200)
+
+        # Redirección directa para envíos de formularios estándar
+        checkout_url = session_data.get('checkout_url')
+        if checkout_url:
+            return redirect(checkout_url)
+
+        return JsonResponse(session_data, status=200)
+

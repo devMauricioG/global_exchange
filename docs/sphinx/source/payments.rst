@@ -36,6 +36,14 @@ payments.models module
    :show-inheritance:
    :undoc-members:
 
+payments.services module
+------------------------
+
+.. automodule:: payments.services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 payments.urls module
 --------------------
 

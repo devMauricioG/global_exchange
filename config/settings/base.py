@@ -91,3 +91,9 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_URL = '/oidc/authenticate/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'
+
+# Configuración de Pasarela de Pagos Stripe (SCRUM-92)
+STRIPE_PUBLIC_KEY = os.getenv('STRIPE_PUBLIC_KEY', 'pk_test_sample')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'sk_test_sample')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_sample')
+STRIPE_CURRENCY = os.getenv('STRIPE_CURRENCY', 'usd')
