@@ -23,6 +23,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-92** | Modelado de Pasarela y Servicio de Webhook de Stripe en `payments/` | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-93** | Servicio de Simulación y Confirmación Bancaria Local SIPAP | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-94** | Orquestación en TransactionService para Transición Atómica de Pago y Liquidación | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-95** | Vistas e Interfaces de Usuario para Pago en Línea y Confirmación Bancaria | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -394,6 +395,45 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `transactions/tests.py`
   * `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`
   * `payments/services.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 16. SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria
+
+* **Objetivo:** Construir la interfaz de usuario y las vistas web para el flujo de pago del cliente (`templates/transactions/payment_checkout.html`), permitiendo la selección entre pasarela de tarjetas internacional (Stripe Checkout) y transferencia bancaria local (SIPAP), con integración al temporizador de cotización congelada y modales interactivos para carga de comprobantes y simulación asistida.
+* **Aportes y Solución con IA:**
+  * Vista Web de Checkout (`TransactionPaymentCheckoutView` en `transactions/views.py`):
+    * Vista basada en clases (`DetailView`, `LoginRequiredMixin`) protegida contra IDOR asegurando que únicamente el cliente titular autenticado o personal administrativo pueda acceder al checkout.
+    * Comprobaciones de seguridad en el ciclo de vida:
+      * Si la orden ya está `COMPLETADA`, redirige al detalle con mensaje informativo.
+      * Si la orden está `CANCELADA`, redirige al detalle con mensaje de advertencia.
+      * Si la cotización congelada ha expirado (>5 minutos), cancela automáticamente la transacción y redirige al detalle.
+    * Procesamiento de confirmación de comprobante SIPAP (`POST` estándar y `POST AJAX`):
+      * Valida el ingreso de `codigo_transferencia`, banco emisor y datos del remitente.
+      * Invoca a `TransactionService.confirm_sipap_payment` para conciliar atómicamente la orden y transicionarla a `COMPLETADA`.
+      * Soporta la acción `simulate_sipap` para generar transferencias asistidas en entornos de demostración y QA.
+  * Plantilla Interactiva de Checkout (`templates/transactions/payment_checkout.html`):
+    * Diseño responsivo adaptado al sistema de diseño oscuro de Global Exchange.
+    * Resumen financiero de la orden: Monto a pagar destacado, desglose de cotización, comisiones aplicadas, monto neto a recibir y medio de acreditación destino.
+    * Temporizador regresivo en JavaScript de 5 minutos sincronizado con el timestamp de creación de la transacción.
+    * Sección de Pasarela Stripe: Formulario con redirección segura a Stripe Checkout (`payments:stripe-create-checkout`) con insignias de seguridad PCI-DSS y cifrado SSL.
+    * Sección de Cuenta Recaudadora SIPAP: Exhibición de datos bancarios institucionales de Global Exchange (Banco, RUC, N° de Cuenta, Titular y Concepto requerido con botón para copiar al portapapeles).
+    * Modales interactivos: Modal de carga manual de comprobante SIPAP y modal de simulación asistida de transferencias.
+  * Enrutamiento y Enlaces de Navegación:
+    * Rutas registradas en `transactions/urls.py`: `path('<int:pk>/pago/', ...)` y alias `path('<int:pk>/checkout/', ...)`.
+    * En `templates/transactions/transaction_detail.html`: Se integró el botón y banner "Pagar Ahora / Proceder al Checkout" cuando la orden está pendiente, y el bloque de detalles de pasarela y referencia externa cuando la orden está liquidada.
+  * Suite de Pruebas Automatizadas:
+    * Se incorporó `TransactionPaymentCheckoutViewTest` en `transactions/tests.py` con 13 pruebas unitarias exhaustivas que cubren: acceso autenticado exitoso, redirección de usuarios no autenticados, protección IDOR multi-inquilino, bloqueo y redirección en estados terminales, cancelación automática por cotización expirada, conciliación SIPAP vía POST tradicional y AJAX, simulación asistida, y renderizado condicional de botones y pasarelas en el detalle.
+    * Total acumulado del proyecto: **352 tests unitarios aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `transactions/views.py`
+  * `transactions/urls.py`
+  * `templates/transactions/payment_checkout.html`
+  * `templates/transactions/transaction_detail.html`
+  * `transactions/tests.py`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`

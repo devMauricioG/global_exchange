@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+
+{% block title %}Checkout de Pago: {{ transaction.codigo_referencia }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto; padding-bottom: 3rem;">
+    <!-- Breadcrumb & Header -->
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.25rem;">
+                <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main);">
+                    💳 Checkout de Pago
+                </h1>
+                <span class="badge" style="background-color: var(--warning-bg); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+                    ⏳ PENDIENTE DE PAGO
+                </span>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">
+                Orden <strong>{{ transaction.codigo_referencia }}</strong> — Registrada el {{ transaction.created_at|date:"d/m/Y H:i:s" }}
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <a href="{% url 'transactions:detail' pk=transaction.pk %}" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                <span>←</span> Volver al Detalle
+            </a>
+            <a href="{% url 'transactions:list' %}" class="btn btn-secondary">
+                📋 Mis Transacciones
+            </a>
+        </div>
+    </div>
+
+    {% if transaction.estado == 'PENDIENTE' %}
+        <!-- Banner de Temporizador de Expiración (5 min) -->
+        <div id="expirationTimerBanner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.875rem; padding: 1rem 1.25rem; margin-bottom: 1.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.6rem;">⏱️</span>
+                <div>
+                    <div style="font-weight: 700; color: var(--warning); font-size: 1rem;">Tiempo Restante de Cotización Congelada</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        Para garantizar la tasa pactada, completá el pago antes de que expire el temporizador de 5 minutos.
+                    </div>
+                </div>
+            </div>
+            <div style="text-align: right; background: rgba(15, 23, 42, 0.6); padding: 0.5rem 1rem; border-radius: 0.5rem; border: 1px solid rgba(245, 158, 11, 0.3);">
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Expira en</div>
+                <span id="countdownTimer" style="font-size: 1.45rem; font-weight: 800; color: var(--warning); font-family: monospace;">
+                    --:--
+                </span>
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Grid Principal de Checkout: 2 Columnas -->
+    <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 1.75rem; align-items: start;" class="checkout-grid">
+        
+        <!-- Columna Izquierda: Resumen de la Orden -->
+        <div class="card" style="padding: 1.5rem; border: 1px solid var(--border-color); background: var(--bg-card); border-radius: 1rem;">
+            <div class="card-header" style="margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+                <h2 class="card-title" style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                    📋 Resumen de Liquidación
+                </h2>
+                <span class="badge {% if transaction.tipo_operacion == 'COMPRA' %}badge-min{% else %}badge-may{% endif %}">
+                    {{ transaction.get_tipo_operacion_display }}
+                </span>
+            </div>
+
+            <!-- Total a Pagar Destacado -->
+            <div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 0.875rem; padding: 1.25rem; margin-bottom: 1.25rem; text-align: center;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; margin-bottom: 0.25rem;">
+                    Monto Total a Entregar / Pagar
+                </div>
+                <div style="font-size: 2rem; font-weight: 800; color: var(--primary); letter-spacing: -0.02em;">
+                    {{ transaction.monto_origen|floatformat:2 }} <span style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);">{{ transaction.moneda_origen.code }}</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-subtle); margin-top: 0.25rem;">
+                    Moneda de Pago: {{ transaction.moneda_origen.name }}
+                </div>
+            </div>
+
+            <!-- Desglose de Precios y Conversión -->
+            <div style="display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.9rem; margin-bottom: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
+                    <span style="color: var(--text-muted);">Tasa de Cambio Aplicada:</span>
+                    <strong style="color: var(--text-main); font-family: monospace;">1 {{ transaction.base_currency.code }} = {{ transaction.tasa_cambio|floatformat:4 }} {{ transaction.target_currency.code }}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
+                    <span style="color: var(--text-muted);">Comisión de Operación:</span>
+                    <strong style="color: var(--text-main);">{{ transaction.monto_comision|floatformat:2 }} {{ transaction.moneda_origen.code }}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
+                    <span style="color: var(--text-muted);">Monto Neto a Recibir:</span>
+                    <strong style="color: var(--success); font-weight: 700; font-size: 1.05rem;">{{ transaction.monto_destino|floatformat:2 }} {{ transaction.moneda_destino.code }}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
+                    <span style="color: var(--text-muted);">Destino de Acreditación:</span>
+                    <span style="color: var(--text-main); text-align: right; font-weight: 600;">
+                        {{ transaction.medio_acreditacion_destino|default:"Cuenta predeterminada" }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Información del Titular -->
+            <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 0.85rem 1rem; font-size: 0.85rem;">
+                <div style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; margin-bottom: 0.2rem;">
+                    Cliente Titular
+                </div>
+                <div style="font-weight: 700; color: var(--text-main);">{{ transaction.cliente.nombre }}</div>
+                <div style="color: var(--text-subtle);">Doc / RUC: {{ transaction.cliente.documento_ruc }}</div>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Opciones de Pago (Stripe y SIPAP) -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+            
+            <!-- Opción 1: Stripe Checkout (Tarjetas Internacionales) -->
+            <div class="card" style="padding: 1.5rem; border: 1px solid rgba(99, 102, 241, 0.35); background: var(--bg-card); border-radius: 1rem; position: relative; overflow: hidden;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="display: flex; align-items: center; gap: 0.6rem;">
+                        <span style="font-size: 1.5rem;">💳</span>
+                        <div>
+                            <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                                Tarjeta Internacional (Stripe)
+                            </h3>
+                            <span style="font-size: 0.78rem; color: var(--text-muted);">Crédito y Débito Visa, Mastercard, AMEX</span>
+                        </div>
+                    </div>
+                    <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); font-size: 0.75rem;">
+                        🔒 Cifrado SSL 256-bit
+                    </span>
+                </div>
+
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.5;">
+                    Pagá de forma segura e instantánea mediante la pasarela global de <strong>Stripe</strong>. Acepta tarjetas internacionales con verificación biométrica y 3D-Secure.
+                </p>
+
+                <!-- Formulario de Redirección Segura a Stripe Checkout -->
+                <form method="post" action="{% url 'payments:stripe-create-checkout' transaction_id=transaction.id %}" id="stripeCheckoutForm">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary" id="btnStripePay" style="width: 100%; padding: 0.85rem 1.25rem; font-weight: 800; font-size: 1rem; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border: none; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); display: flex; align-items: center; justify-content: center; gap: 0.5rem; transition: transform 0.15s ease;">
+                        <span>💳</span>
+                        <span>Pagar {{ transaction.monto_origen|floatformat:2 }} {{ transaction.moneda_origen.code }} con Stripe</span>
+                        <span>→</span>
+                    </button>
+                </form>
+
+                <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.85rem; font-size: 0.75rem; color: var(--text-subtle);">
+                    <span>🛡️ Cumplimiento PCI-DSS Nivel 1</span>
+                    <span>•</span>
+                    <span>⚡ Confirmación Inmediata</span>
+                </div>
+            </div>
+
+            <!-- Opción 2: Transferencia Bancaria Local SIPAP (BCP) -->
+            <div class="card" style="padding: 1.5rem; border: 1px solid rgba(16, 185, 129, 0.35); background: var(--bg-card); border-radius: 1rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="display: flex; align-items: center; gap: 0.6rem;">
+                        <span style="font-size: 1.5rem;">🏦</span>
+                        <div>
+                            <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                                Transferencia Bancaria Local (SIPAP)
+                            </h3>
+                            <span style="font-size: 0.78rem; color: var(--text-muted);">Red interbancaria Banco Central del Paraguay (BCP)</span>
+                        </div>
+                    </div>
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem;">
+                        🇵🇾 Conciliación SIPAP
+                    </span>
+                </div>
+
+                <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
+                    Transferí los fondos desde tu banca digital o aplicación móvil a la cuenta recaudadora institucional de <strong>Global Exchange</strong> y cargá tu comprobante:
+                </p>
+
+                <!-- Caja de Datos de la Cuenta Recaudadora SIPAP -->
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.25rem; font-size: 0.875rem;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;" class="bank-details-grid">
+                        <div>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; display: block;">Banco Recaudador:</span>
+                            <strong style="color: var(--text-main);">{{ collector_bank_info.banco }}</strong>
+                        </div>
+                        <div>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; display: block;">Titular:</span>
+                            <strong style="color: var(--text-main);">{{ collector_bank_info.titular }}</strong>
+                        </div>
+                        <div>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; display: block;">RUC Institucional:</span>
+                            <strong style="color: var(--text-main); font-family: monospace;">{{ collector_bank_info.ruc }}</strong>
+                        </div>
+                        <div>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; display: block;">N° Cuenta / CBU:</span>
+                            <strong style="color: var(--text-main); font-family: monospace;">{{ collector_bank_info.cuenta }}</strong>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+                        <div>
+                            <span style="color: var(--text-muted); font-size: 0.75rem; display: block;">Concepto / Referencia Requerida:</span>
+                            <strong id="refCodeText" style="color: var(--primary); font-family: monospace; font-size: 0.95rem;">{{ collector_bank_info.concepto }}</strong>
+                        </div>
+                        <button type="button" onclick="copyReferenceCode()" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                            📋 Copiar Referencia
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Botones de Acción SIPAP -->
+                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                    <button type="button" onclick="openSipapModal()" class="btn btn-primary" style="flex: 1; padding: 0.75rem 1rem; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3); display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+                        <span>📝</span>
+                        <span>Cargar Comprobante SIPAP</span>
+                    </button>
+                    <button type="button" onclick="openSimulateModal()" class="btn btn-secondary" style="padding: 0.75rem 1rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;" title="Simular transferencia bancaria para pruebas de desarrollo">
+                        <span>⚡</span>
+                        <span>Simular Transferencia</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODAL 1: Carga y Confirmación Manual de Comprobante SIPAP -->
+<!-- ========================================================================= -->
+<div id="sipapConfirmationModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(5px); z-index: 9999; align-items: center; justify-content: center; padding: 1rem;">
+    <div class="card" style="max-width: 540px; width: 100%; padding: 1.75rem; border: 1px solid rgba(16, 185, 129, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.4rem;">🏦</span>
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    Confirmar Comprobante SIPAP
+                </h3>
+            </div>
+            <button type="button" onclick="closeSipapModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer;">
+                &times;
+            </button>
+        </div>
+
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+            Ingresá el número de comprobante o código de transferencia emitido por tu banco para conciliar automáticamente el pago de <strong>{{ transaction.monto_origen|floatformat:2 }} {{ transaction.moneda_origen.code }}</strong>.
+        </p>
+
+        <form method="post" action="{% url 'transactions:payment-checkout' pk=transaction.pk %}" id="sipapConfirmForm">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="confirm_sipap" />
+            
+            <div style="margin-bottom: 1rem;">
+                <label for="codigo_transferencia" style="font-size: 0.85rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 0.35rem;">
+                    Código de Transferencia SIPAP *
+                </label>
+                <input type="text" name="codigo_transferencia" id="codigo_transferencia" class="form-input" placeholder="Ej: SIPAP-2026-98765432 o N° de Comprobante" required style="width: 100%; font-family: monospace; font-weight: 600;" />
+                <span style="font-size: 0.75rem; color: var(--text-subtle); margin-top: 0.25rem; display: block;">
+                    Figurará en el ticket de comprobante de tu entidad bancaria.
+                </span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+                <div>
+                    <label for="banco_origen" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">
+                        Banco Emisor
+                    </label>
+                    <input type="text" name="banco_origen" id="banco_origen" class="form-input" placeholder="Ej: Banco Itaú" style="width: 100%;" />
+                </div>
+                <div>
+                    <label for="cuenta_origen" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">
+                        N° Cuenta Origen
+                    </label>
+                    <input type="text" name="cuenta_origen" id="cuenta_origen" class="form-input" placeholder="Ej: 12345678" style="width: 100%;" />
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.5rem;">
+                <div>
+                    <label for="titular_origen" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">
+                        Titular Remitente
+                    </label>
+                    <input type="text" name="titular_origen" id="titular_origen" class="form-input" value="{{ transaction.cliente.nombre }}" style="width: 100%;" />
+                </div>
+                <div>
+                    <label for="documento_origen" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">
+                        Doc / RUC Remitente
+                    </label>
+                    <input type="text" name="documento_origen" id="documento_origen" class="form-input" value="{{ transaction.cliente.documento_ruc }}" style="width: 100%;" />
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                <button type="button" onclick="closeSipapModal()" class="btn btn-secondary">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700;">
+                    Confirmar y Conciliar Pago
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODAL 2: Simulación Automática SIPAP (Entorno de Pruebas / QA) -->
+<!-- ========================================================================= -->
+<div id="simulateModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(5px); z-index: 9999; align-items: center; justify-content: center; padding: 1rem;">
+    <div class="card" style="max-width: 500px; width: 100%; padding: 1.75rem; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.4rem;">⚡</span>
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    Simulador Asistido SIPAP
+                </h3>
+            </div>
+            <button type="button" onclick="closeSimulateModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer;">
+                &times;
+            </button>
+        </div>
+
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+            Esta herramienta genera una transferencia SIPAP simulada en la base de datos por el importe exacto de <strong>{{ transaction.monto_origen|floatformat:2 }} {{ transaction.moneda_origen.code }}</strong> y ejecuta la conciliación automática inmediata.
+        </p>
+
+        <form method="post" action="{% url 'transactions:payment-checkout' pk=transaction.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="simulate_sipap" />
+            <input type="hidden" name="banco_origen" value="Banco Itaú Paraguay S.A." />
+            <input type="hidden" name="cuenta_origen" value="987654321" />
+            <input type="hidden" name="titular_origen" value="{{ transaction.cliente.nombre }}" />
+            <input type="hidden" name="documento_origen" value="{{ transaction.cliente.documento_ruc }}" />
+
+            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 0.85rem; font-size: 0.85rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span style="color: var(--text-muted);">Monto a simular:</span>
+                    <strong style="color: var(--text-main);">{{ transaction.monto_origen|floatformat:2 }} {{ transaction.moneda_origen.code }}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Transacción destino:</span>
+                    <strong style="color: var(--primary);">{{ transaction.codigo_referencia }}</strong>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                <button type="button" onclick="closeSimulateModal()" class="btn btn-secondary">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; font-weight: 700;">
+                    ⚡ Ejecutar Simulación y Conciliar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    @media (max-width: 768px) {
+        .checkout-grid {
+            grid-template-columns: 1fr !important;
+        }
+        .bank-details-grid {
+            grid-template-columns: 1fr !important;
+        }
+    }
+</style>
+
+<script>
+    // Temporizador regresivo de congelamiento de cotización (5 min)
+    {% if transaction.estado == 'PENDIENTE' and remaining_seconds > 0 %}
+        let remainingSeconds = {{ remaining_seconds }};
+        const timerElement = document.getElementById('countdownTimer');
+
+        function updateTimer() {
+            if (remainingSeconds <= 0) {
+                if (timerElement) timerElement.innerText = "00:00 (Expirado)";
+                window.location.reload();
+                return;
+            }
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            const formatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            if (timerElement) timerElement.innerText = formatted;
+            remainingSeconds--;
+        }
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
+    {% endif %}
+
+    // Manejo de Modales
+    function openSipapModal() {
+        const modal = document.getElementById('sipapConfirmationModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            setTimeout(() => {
+                const input = document.getElementById('codigo_transferencia');
+                if (input) input.focus();
+            }, 100);
+        }
+    }
+
+    function closeSipapModal() {
+        const modal = document.getElementById('sipapConfirmationModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function openSimulateModal() {
+        const modal = document.getElementById('simulateModal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function closeSimulateModal() {
+        const modal = document.getElementById('simulateModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    // Copiar código de referencia al portapapeles
+    function copyReferenceCode() {
+        const refText = document.getElementById('refCodeText')?.innerText;
+        if (refText && navigator.clipboard) {
+            navigator.clipboard.writeText(refText).then(() => {
+                alert('¡Código de referencia ' + refText + ' copiado al portapapeles!');
+            }).catch(err => {
+                console.error('Error al copiar:', err);
+            });
+        }
+    }
+
+    // Cerrar modales con tecla ESC
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeSipapModal();
+            closeSimulateModal();
+        }
+    });
+
+    // Cerrar modal al hacer click en el backdrop oscuro
+    window.addEventListener('click', function(event) {
+        const m1 = document.getElementById('sipapConfirmationModal');
+        const m2 = document.getElementById('simulateModal');
+        if (event.target === m1) closeSipapModal();
+        if (event.target === m2) closeSimulateModal();
+    });
+</script>
+{% endblock %}
