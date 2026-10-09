@@ -6,6 +6,8 @@ Define las entidades principales para la parametrización financiera en Global E
 - :class:`ExchangeRate`: Cotizaciones de compra y venta entre pares de divisas con cálculo automático de spread.
 - :class:`SegmentCommission`: Reglas de comisiones porcentuales, cargos fijos y descuentos por segmento de cliente.
 - :class:`OperationLimit`: Parámetros y reglas de límites operativos (mínimo, máximo, diario, mensual) por divisa y segmento.
+- :class:`RateAlertSubscription`: Suscripciones de clientes a alertas de cotización por par de divisas y umbral.
+- :class:`UserNotification`: Notificaciones internas dirigidas a los usuarios del sistema.
 """
 
 from decimal import Decimal
@@ -740,3 +742,222 @@ class OperationLimit(models.Model):
             f'Límites {segment_display} ({curr_code}) — Mín: {self.monto_minimo}, '
             f'Máx: {max_str}, Diario: {daily_str}, Mensual: {monthly_str}'
         )
+
+class RateAlertSubscription(models.Model):
+    """
+    Suscripción de un cliente a una alerta de cotización.
+
+    Registra la condición que debe cumplir la tasa de un par de divisas para
+    que el sistema notifique al cliente (por ejemplo: avisar cuando el USD/PYG
+    de venta sea mayor o igual a 7.500). Las notificaciones generadas se
+    almacenan como :class:`UserNotification`.
+
+    El umbral se compara contra la tasa aplicable a la operación elegida,
+    con el mismo criterio de :meth:`ExchangeRate.get_rate_for_operation`:
+    ``BUY`` usa ``sell_rate`` y ``SELL`` usa ``buy_rate``.
+
+    :ivar cliente: Cliente que creó la suscripción (:class:`~customers.models.Cliente`).
+    :vartype cliente: customers.models.Cliente
+    :ivar base_currency: Moneda base del par vigilado (:class:`Currency`).
+    :vartype base_currency: Currency
+    :ivar target_currency: Moneda cotizada del par vigilado (:class:`Currency`).
+    :vartype target_currency: Currency
+    :ivar tipo_operacion: Operación a vigilar ('BUY' o 'SELL').
+    :vartype tipo_operacion: str
+    :ivar tasa_umbral: Valor de la tasa contra el cual se evalúa la condición.
+    :vartype tasa_umbral: decimal.Decimal
+    :ivar condicion: Comparación a cumplir respecto del umbral ('GTE' o 'LTE').
+    :vartype condicion: str
+    :ivar activo: Indica si la suscripción sigue vigente.
+    :vartype activo: bool
+    :ivar created_at: Marca temporal de creación del registro.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Marca temporal de la última modificación.
+    :vartype updated_at: datetime.datetime
+    """
+
+    class TipoOperacion(models.TextChoices):
+        """
+        Tipo de operación cuya tasa se vigila.
+
+        * ``BUY``: El cliente compra la divisa base (aplica ``sell_rate``).
+        * ``SELL``: El cliente vende la divisa base (aplica ``buy_rate``).
+        """
+        BUY = 'BUY', 'Compra'
+        SELL = 'SELL', 'Venta'
+
+    class Condicion(models.TextChoices):
+        """
+        Condición de disparo de la alerta respecto del umbral.
+
+        * ``GTE``: La tasa es mayor o igual al umbral.
+        * ``LTE``: La tasa es menor o igual al umbral.
+        """
+        MAYOR_IGUAL = 'GTE', 'Mayor o igual que'
+        MENOR_IGUAL = 'LTE', 'Menor o igual que'
+
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.CASCADE,
+        related_name='rate_alerts',
+        verbose_name='Cliente',
+        help_text='Cliente titular de la suscripción de alerta.',
+    )
+    base_currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        related_name='base_rate_alerts',
+        verbose_name='Moneda Base',
+        help_text='Moneda base del par vigilado (ej. USD en USD/PYG).',
+    )
+    target_currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        related_name='target_rate_alerts',
+        verbose_name='Moneda Destino',
+        help_text='Moneda cotizada del par vigilado (ej. PYG en USD/PYG).',
+    )
+    tipo_operacion = models.CharField(
+        max_length=4,
+        choices=TipoOperacion.choices,
+        verbose_name='Tipo de Operación',
+        help_text='Operación de compra o venta cuya tasa se desea vigilar.',
+    )
+    tasa_umbral = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        verbose_name='Tasa Umbral',
+        help_text='Valor de la tasa contra el cual se evalúa la condición de la alerta.',
+    )
+    condicion = models.CharField(
+        max_length=3,
+        choices=Condicion.choices,
+        verbose_name='Condición',
+        help_text='Comparación que debe cumplir la tasa respecto del umbral.',
+    )
+    activo = models.BooleanField(
+        default=True,
+        verbose_name='Activa',
+        help_text='Indica si la suscripción está vigente y debe ser evaluada.',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Creación',
+        help_text='Timestamp automático de creación de la suscripción.',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+        help_text='Timestamp automático de la última modificación.',
+    )
+
+    class Meta:
+        verbose_name = 'Suscripción de Alerta de Cotización'
+        verbose_name_plural = 'Suscripciones de Alertas de Cotización'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['cliente', 'activo']),
+            models.Index(fields=['base_currency', 'target_currency', 'activo']),
+        ]
+
+    def clean(self) -> None:
+        """
+        Valida la consistencia de la suscripción:
+
+        1. La moneda base y la destino deben ser distintas.
+        2. La tasa umbral debe ser estrictamente positiva (> 0).
+        """
+        errors = {}
+
+        if self.base_currency_id and self.target_currency_id:
+            if self.base_currency_id == self.target_currency_id:
+                errors['target_currency'] = 'La moneda destino debe ser diferente a la moneda base.'
+
+        if self.tasa_umbral is not None and self.tasa_umbral <= Decimal('0'):
+            errors['tasa_umbral'] = 'La tasa umbral debe ser un valor estrictamente positivo (> 0).'
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs) -> None:
+        """Ejecuta la validación de limpieza antes de persistir en base de datos."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        """
+        Representación textual de la suscripción.
+
+        :return: Par de monedas, tipo de operación, condición y umbral.
+        :rtype: str
+        """
+        base = getattr(self.base_currency, 'code', '???')
+        target = getattr(self.target_currency, 'code', '???')
+        simbolo = '≥' if self.condicion == self.Condicion.MAYOR_IGUAL else '≤'
+        return f'Alerta {base}/{target} ({self.get_tipo_operacion_display()}) {simbolo} {self.tasa_umbral}'
+
+
+class UserNotification(models.Model):
+    """
+    Notificación interna dirigida a un usuario del sistema.
+
+    Almacena los avisos generados por la plataforma (por ejemplo, el
+    cumplimiento de una :class:`RateAlertSubscription`) para su consulta
+    posterior dentro de la aplicación.
+
+    :ivar usuario: Usuario destinatario de la notificación.
+    :vartype usuario: django.contrib.auth.models.User
+    :ivar titulo: Título breve de la notificación.
+    :vartype titulo: str
+    :ivar mensaje: Contenido completo de la notificación.
+    :vartype mensaje: str
+    :ivar leido: Indica si el usuario ya la marcó como leída.
+    :vartype leido: bool
+    :ivar fecha_creacion: Marca temporal de generación de la notificación.
+    :vartype fecha_creacion: datetime.datetime
+    """
+
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notificaciones',
+        verbose_name='Usuario',
+        help_text='Usuario destinatario de la notificación.',
+    )
+    titulo = models.CharField(
+        max_length=150,
+        verbose_name='Título',
+        help_text='Título breve de la notificación.',
+    )
+    mensaje = models.TextField(
+        verbose_name='Mensaje',
+        help_text='Contenido completo de la notificación.',
+    )
+    leido = models.BooleanField(
+        default=False,
+        verbose_name='Leída',
+        help_text='Indica si el usuario ya leyó la notificación.',
+    )
+    fecha_creacion = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Creación',
+        help_text='Timestamp automático de generación de la notificación.',
+    )
+
+    class Meta:
+        verbose_name = 'Notificación de Usuario'
+        verbose_name_plural = 'Notificaciones de Usuario'
+        ordering = ['-fecha_creacion']
+        indexes = [
+            models.Index(fields=['usuario', 'leido']),
+        ]
+
+    def __str__(self) -> str:
+        """
+        Representación textual de la notificación.
+
+        :return: Título y estado de lectura.
+        :rtype: str
+        """
+        estado = 'Leída' if self.leido else 'Sin leer'
+        return f'{self.titulo} ({estado})'
