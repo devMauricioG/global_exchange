@@ -9,6 +9,7 @@ Define:
 5. :class:`SegmentCommissionForm`: Formulario para la creación y edición de reglas de comisión por segmento (:class:`~rates.models.SegmentCommission`).
 6. :class:`SegmentCommissionFilterForm`: Filtrado interactivo de reglas de comisión.
 7. :class:`RateCalculatorForm`: Formulario para el simulador y motor de cotizaciones netas.
+8. :class:`RateAlertSubscriptionForm`: Alta y edición de suscripciones de alerta de cotización.
 """
 
 from decimal import Decimal
@@ -18,7 +19,9 @@ from django import forms
 from django.core.exceptions import ValidationError
 
 from customers.models import Cliente
-from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
+from .models import Currency, ExchangeRate, OperationLimit, RateAlertSubscription, SegmentCommission
+
+from django.db.models import Q
 
 
 # ==============================================================================
@@ -401,3 +404,73 @@ class OperationLimitFilterForm(forms.Form):
         widget=forms.Select(attrs={'class': 'filter-select', 'id': 'filter_is_active'}),
         label='Estado',
     )
+
+# ==============================================================================
+# FORMULARIOS PARA ALERTAS DE COTIZACIÓN (SCRUM-100)
+# ==============================================================================
+
+class RateAlertSubscriptionForm(forms.ModelForm):
+    """
+    Formulario para crear y editar suscripciones de alerta de cotización.
+
+    El cliente no es un campo del formulario: la vista lo asigna a partir del
+    cliente activo en sesión. Solo ofrece monedas activas, salvo las que ya
+    usa la suscripción que se está editando.
+    """
+
+    class Meta:
+        model = RateAlertSubscription
+        fields = ['base_currency', 'target_currency', 'tipo_operacion', 'condicion', 'tasa_umbral', 'activo']
+        widgets = {
+            'base_currency': forms.Select(attrs={'class': 'form-select'}),
+            'target_currency': forms.Select(attrs={'class': 'form-select'}),
+            'tipo_operacion': forms.Select(attrs={'class': 'form-select'}),
+            'condicion': forms.Select(attrs={'class': 'form-select'}),
+            'tasa_umbral': forms.NumberInput(
+                attrs={'class': 'form-input', 'step': 'any', 'min': '0', 'placeholder': 'Ej. 7500'}
+            ),
+            'activo': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
+        }
+        labels = {
+            'base_currency': 'Moneda Base',
+            'target_currency': 'Moneda Destino',
+            'tipo_operacion': 'Tipo de Operación',
+            'condicion': 'Condición',
+            'tasa_umbral': 'Tasa Umbral',
+            'activo': 'Alerta activa',
+        }
+        help_texts = {
+            'base_currency': 'Ej. USD en el par USD/PYG.',
+            'target_currency': 'Ej. PYG en el par USD/PYG.',
+            'tipo_operacion': 'Compra: usted compra la divisa base. Venta: usted la vende.',
+            'condicion': 'Cuándo debe avisarle el sistema respecto del umbral.',
+            'tasa_umbral': 'Valor de la tasa que activa el aviso.',
+            'activo': '',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        monedas = Currency.objects.filter(is_active=True)
+        if self.instance.pk:
+            monedas = Currency.objects.filter(
+                Q(is_active=True) | Q(pk__in=[self.instance.base_currency_id, self.instance.target_currency_id])
+            )
+            if self.instance.tasa_umbral is not None:
+                # Quita los ceros sobrantes del valor guardado (7000.000000 -> 7000) sin redondearlo.
+                self.initial['tasa_umbral'] = f'{self.instance.tasa_umbral.normalize():f}'
+        monedas = monedas.order_by('code')
+        self.fields['base_currency'].queryset = monedas
+        self.fields['target_currency'].queryset = monedas
+
+    def currency_decimals(self) -> Dict[int, int]:
+        """
+        Devuelve la cantidad de decimales de cada moneda, indexada por su id.
+
+        La plantilla lo usa para ajustar el paso de las flechas del campo de
+        umbral según la moneda destino elegida. Se limita a 6, que es la
+        precisión máxima con la que se guardan las tasas.
+
+        :return: Diccionario ``{id_moneda: decimales}``.
+        :rtype: dict
+        """
+        return {moneda.pk: min(moneda.decimals, 6) for moneda in Currency.objects.all()}

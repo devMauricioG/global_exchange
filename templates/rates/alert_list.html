@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+
+{% block title %}Alertas de Cotización - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .al-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1.25rem; margin-bottom: 1.5rem; }
+    .al-header h1 { font-size: 1.85rem; font-weight: 800; color: #f8fafc; letter-spacing: -0.03em; display: flex; align-items: center; gap: 0.75rem; }
+    .al-header p { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.35rem; }
+
+    .al-info {
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.75rem;
+        font-size: 0.85rem;
+        color: #bae6fd;
+    }
+
+    .al-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
+    .al-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 0.25s ease;
+    }
+    .al-card:hover { transform: translateY(-3px); box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.4); border-color: var(--primary); }
+    .al-card.is-inactive { opacity: 0.65; filter: grayscale(0.2); }
+
+    .al-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; }
+    .al-pair { font-size: 1.35rem; font-weight: 800; color: #f8fafc; }
+    .al-rule { color: var(--text-main); font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; }
+    .al-threshold {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--primary);
+        margin-bottom: 0.85rem;
+    }
+    .al-details { font-size: 0.82rem; color: var(--text-muted); border-top: 1px dashed var(--border-color); padding-top: 0.75rem; margin-bottom: 1.25rem; }
+    .al-actions { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem; flex-wrap: wrap; }
+
+    .al-empty { text-align: center; padding: 4rem 2rem; background: var(--bg-card); border: 1px dashed var(--border-color); border-radius: 1rem; }
+    .al-empty-icon { font-size: 3.5rem; margin-bottom: 1rem; opacity: 0.8; }
+    .al-empty h3 { font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem; }
+    .al-empty p { color: var(--text-muted); max-width: 460px; margin: 0 auto 1.5rem auto; font-size: 0.95rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="al-header">
+    <div>
+        <h1><span>🔔</span><span>Alertas de Cotización</span></h1>
+        <p>
+            Avisos de tasa para <strong>{{ cliente.nombre }}</strong> (RUC: {{ cliente.documento_ruc }}).
+            {{ activas_count }} activa{{ activas_count|pluralize }} de {{ alertas|length }}.
+        </p>
+    </div>
+    <div>
+        <a href="{% url 'rates:alert_create' %}" class="btn btn-primary">
+            <span>➕</span>
+            <span>Nueva Alerta</span>
+        </a>
+    </div>
+</div>
+
+<div class="al-info">
+    <strong>Cómo funcionan:</strong> cada alerta se dispara una sola vez. Cuando una cotización cumple la condición, recibe la notificación (y un correo) y la alerta queda inactiva. Para volver a recibir avisos, reactívela: se evaluará con la próxima cotización que se registre.
+</div>
+
+{% if alertas %}
+    <div class="al-grid">
+        {% for a in alertas %}
+            <div class="al-card {% if not a.activo %}is-inactive{% endif %}">
+                <div>
+                    <div class="al-top">
+                        <span class="al-pair">{{ a.base_currency.code }}/{{ a.target_currency.code }}</span>
+                        {% if a.activo %}
+                            <span class="badge badge-active">Activa</span>
+                        {% else %}
+                            <span class="badge badge-inactive">Inactiva</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="al-rule">
+                        Avisar cuando la tasa de <strong>{{ a.get_tipo_operacion_display|lower }}</strong> sea {{ a.get_condicion_display|lower }}:
+                    </div>
+                    <div class="al-threshold">{{ a.tasa_umbral|floatformat:"-6" }}</div>
+
+                    <div class="al-details">
+                        Creada el {{ a.created_at|date:"d/m/Y H:i" }}
+                        {% if not a.activo %}<br>Se cumplió o fue desactivada.{% endif %}
+                    </div>
+                </div>
+
+                <div class="al-actions">
+                    <form method="post" action="{% url 'rates:alert_toggle' a.pk %}" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-secondary">
+                            {% if a.activo %}Desactivar{% else %}Reactivar{% endif %}
+                        </button>
+                    </form>
+                    <a href="{% url 'rates:alert_update' a.pk %}" class="btn btn-sm btn-secondary">✏️ Editar</a>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="al-empty">
+        <div class="al-empty-icon">🔔</div>
+        <h3>Todavía no tiene alertas</h3>
+        <p>Cree una alerta para que el sistema le avise cuando una tasa llegue al valor que le interesa.</p>
+        <a href="{% url 'rates:alert_create' %}" class="btn btn-primary">
+            <span>➕</span>
+            <span>Crear Primera Alerta</span>
+        </a>
+    </div>
+{% endif %}
+{% endblock %}
