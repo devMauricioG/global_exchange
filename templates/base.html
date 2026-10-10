@@ -731,6 +731,146 @@
             font-size: 0.85rem;
             background-color: #0b1120;
         }
+
+        /* ===== Centro de Notificaciones (SCRUM-100) ===== */
+        
+        .notif-config-link {
+            display: block;
+            padding: 0.7rem 1rem;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-decoration: none;
+        }
+        .notif-config-link:hover { color: var(--primary); }
+                
+        .notif-center { position: relative; }
+        .notif-center [hidden] { display: none !important; }
+
+        .notif-bell-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 9999px;
+            color: var(--text-main);
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+        .notif-bell-btn:hover,
+        .notif-bell-btn.is-open {
+            border-color: var(--primary);
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .notif-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9999px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 0.68rem;
+            font-weight: 800;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #0f172a;
+        }
+
+        .notif-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 0.6rem);
+            right: 0;
+            width: 360px;
+            max-width: calc(100vw - 2rem);
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+            border: 1px solid var(--border-color);
+            border-radius: 0.875rem;
+            box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.6);
+            z-index: 1100;
+            overflow: hidden;
+        }
+        .notif-menu.is-open { display: block; }
+
+        .notif-menu-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .notif-menu-title { font-weight: 800; color: var(--text-main); font-size: 0.95rem; }
+        .notif-markall-btn {
+            background: none;
+            border: none;
+            color: var(--primary);
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .notif-markall-btn:hover { text-decoration: underline; }
+
+        .notif-list { max-height: 360px; overflow-y: auto; }
+        .notif-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+            padding: 0.85rem 1rem;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+        .notif-item:hover { background: rgba(56, 189, 248, 0.06); }
+        .notif-item.is-unread { background: rgba(56, 189, 248, 0.08); }
+        .notif-item.is-unread .notif-item-title::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin-right: 0.5rem;
+            border-radius: 50%;
+            background: var(--primary);
+        }
+        .notif-item-title { font-weight: 700; font-size: 0.9rem; }
+        .notif-item-msg { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem; line-height: 1.35; }
+        .notif-item-date { font-size: 0.74rem; color: var(--text-subtle); margin-top: 0.3rem; }
+
+        .notif-empty { padding: 1.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.88rem; }
+        .notif-more-btn {
+            display: block;
+            width: 100%;
+            padding: 0.75rem;
+            background: rgba(15, 23, 42, 0.6);
+            border: none;
+            border-top: 1px solid var(--border-color);
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .notif-more-btn:hover { background: rgba(56, 189, 248, 0.08); }
+        .notif-more-btn:disabled { opacity: 0.6; cursor: default; }
+
+        @media (max-width: 640px) {
+            .notif-menu { position: fixed; top: 4.5rem; left: 1rem; right: 1rem; width: auto; max-width: none; }
+        }
+        /* ===== Fin Centro de Notificaciones ===== */
+
     </style>
     {% block extra_head %}{% endblock %}
 </head>
@@ -785,6 +925,11 @@
                     </li>
 
                     <li>
+                        <li>
+                            <a href="{% url 'rates:alert_list' %}" class="nav-link {% if '/rates/alerts/' in request.path %}active{% endif %}">
+                                🔔 Alertas
+                            </a>
+                        </li>
                         <a href="{% url 'rates:dashboard' %}" class="nav-link {% if '/rates/dashboard/' in request.path %}active{% endif %}">
                             📈 Cotizaciones
                         </a>
@@ -891,6 +1036,29 @@
                 <!-- Role Badge dinámico -->
                 {% user_role_badge user %}
 
+                                <!-- ===== Centro de Notificaciones (SCRUM-100) ===== -->
+                <div class="notif-center" id="notifCenter"
+                     data-list-url="{% url 'rates:api_notifications' %}"
+                     data-read-all-url="{% url 'rates:api_notifications_read_all' %}"
+                     data-read-url-template="{% url 'rates:api_notification_read' pk=0 %}"
+                     data-csrf="{{ csrf_token }}">
+                    <button class="notif-bell-btn" id="notifBellBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Notificaciones">
+                        <span aria-hidden="true">🔔</span>
+                        <span class="notif-badge" id="notifBadge"{% if not unread_notifications_count %} hidden{% endif %}>{% if unread_notifications_count > 99 %}99+{% else %}{{ unread_notifications_count }}{% endif %}</span>
+                    </button>
+                    <div class="notif-menu" id="notifMenu" role="menu" aria-labelledby="notifBellBtn">
+                        <div class="notif-menu-header">
+                            <span class="notif-menu-title">Notificaciones</span>
+                            <button type="button" class="notif-markall-btn" id="notifMarkAllBtn">Marcar todas como leídas</button>
+                        </div>
+                        <div class="notif-list" id="notifList"></div>
+                        <div class="notif-empty" id="notifEmpty" hidden>No hay notificaciones.</div>
+                        <button type="button" class="notif-more-btn" id="notifMoreBtn" hidden>Cargar más</button>
+                        <a href="{% url 'rates:alert_list' %}" class="notif-config-link">⚙️ Configurar alertas</a>
+                    </div>
+                </div>
+                <!-- ===== Fin Centro de Notificaciones ===== -->
+
                 <span class="user-pill">
                     <span class="user-dot"></span>
                     {{ user.first_name|default:user.username }}
@@ -962,5 +1130,179 @@
             });
         }
     </script>
+
+        <!-- ===== Centro de Notificaciones (SCRUM-100) ===== -->
+    <script>
+    (function () {
+        const center = document.getElementById('notifCenter');
+        if (!center) return;
+
+        const bellBtn = document.getElementById('notifBellBtn');
+        const menu = document.getElementById('notifMenu');
+        const badge = document.getElementById('notifBadge');
+        const list = document.getElementById('notifList');
+        const emptyMsg = document.getElementById('notifEmpty');
+        const moreBtn = document.getElementById('notifMoreBtn');
+        const markAllBtn = document.getElementById('notifMarkAllBtn');
+
+        const listUrl = center.dataset.listUrl;
+        const readAllUrl = center.dataset.readAllUrl;
+        const readUrlTemplate = center.dataset.readUrlTemplate;
+        const csrfToken = center.dataset.csrf;
+
+        let nextOffset = 0;
+        let loading = false;
+        const renderedIds = new Set();
+
+        function setBadge(count) {
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : String(count);
+                badge.hidden = false;
+            } else {
+                badge.hidden = true;
+            }
+        }
+
+        function formatDate(iso) {
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            return d.toLocaleString('es-PY', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+            });
+        }
+
+        // Se arma con textContent (nunca innerHTML) para que el contenido de una
+        // notificación no pueda inyectar HTML en la página.
+        function buildItem(n) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'notif-item' + (n.leido ? '' : ' is-unread');
+            item.dataset.id = n.id;
+            item.setAttribute('role', 'menuitem');
+
+            const title = document.createElement('div');
+            title.className = 'notif-item-title';
+            title.textContent = n.titulo;
+
+            const msg = document.createElement('div');
+            msg.className = 'notif-item-msg';
+            msg.textContent = n.mensaje;
+
+            const date = document.createElement('div');
+            date.className = 'notif-item-date';
+            date.textContent = formatDate(n.fecha_creacion);
+
+            item.append(title, msg, date);
+            return item;
+        }
+
+        async function postJson(url) {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                credentials: 'same-origin',
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+        }
+
+        async function loadMore() {
+            if (loading) return;
+            loading = true;
+            moreBtn.disabled = true;
+            try {
+                const resp = await fetch(listUrl + '?offset=' + nextOffset, {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+
+                // Si llegan notificaciones nuevas entre dos cargas, el offset se corre;
+                // deduplicar por id evita mostrar la misma dos veces.
+                data.results.forEach((n) => {
+                    if (renderedIds.has(n.id)) return;
+                    renderedIds.add(n.id);
+                    list.appendChild(buildItem(n));
+                });
+                nextOffset = data.next_offset;
+                setBadge(data.unread_count);
+                moreBtn.hidden = !data.has_more;
+                emptyMsg.hidden = renderedIds.size > 0;
+            } catch (err) {
+                console.error('No se pudieron cargar las notificaciones:', err);
+                emptyMsg.textContent = 'No se pudieron cargar las notificaciones.';
+                emptyMsg.hidden = renderedIds.size > 0;
+            } finally {
+                loading = false;
+                moreBtn.disabled = false;
+            }
+        }
+
+        // Cada vez que se abre el menú se recarga desde la primera página,
+        // así siempre refleja el estado actual del servidor.
+        function openMenu() {
+            list.innerHTML = '';
+            renderedIds.clear();
+            nextOffset = 0;
+            emptyMsg.textContent = 'No hay notificaciones.';
+            emptyMsg.hidden = true;
+            moreBtn.hidden = true;
+            menu.classList.add('is-open');
+            bellBtn.classList.add('is-open');
+            bellBtn.setAttribute('aria-expanded', 'true');
+            loadMore();
+        }
+
+        function closeMenu() {
+            menu.classList.remove('is-open');
+            bellBtn.classList.remove('is-open');
+            bellBtn.setAttribute('aria-expanded', 'false');
+        }
+
+        bellBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.contains('is-open') ? closeMenu() : openMenu();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!center.contains(e.target)) closeMenu();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && menu.classList.contains('is-open')) {
+                closeMenu();
+                bellBtn.focus();
+            }
+        });
+
+        moreBtn.addEventListener('click', loadMore);
+
+        list.addEventListener('click', async (e) => {
+            const item = e.target.closest('.notif-item');
+            if (!item || !item.classList.contains('is-unread')) return;
+            try {
+                const data = await postJson(readUrlTemplate.replace('/0/', '/' + item.dataset.id + '/'));
+                item.classList.remove('is-unread');
+                setBadge(data.unread_count);
+            } catch (err) {
+                console.error('No se pudo marcar la notificación como leída:', err);
+            }
+        });
+
+        markAllBtn.addEventListener('click', async () => {
+            try {
+                const data = await postJson(readAllUrl);
+                list.querySelectorAll('.notif-item.is-unread').forEach((el) => el.classList.remove('is-unread'));
+                setBadge(data.unread_count);
+            } catch (err) {
+                console.error('No se pudieron marcar las notificaciones como leídas:', err);
+            }
+        });
+    })();
+    </script>
+    <!-- ===== Fin Centro de Notificaciones ===== -->
+
 </body>
 </html>

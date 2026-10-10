@@ -59,6 +59,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'authentication.context_processors.auth_roles',
                 'customers.context_processors.active_customer',
+                'rates.context_processors.unread_notifications',
             ],
 
         },

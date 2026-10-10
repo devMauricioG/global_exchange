@@ -55,4 +55,15 @@ urlpatterns = [
     path('api/limits/', views.OperationLimitListApiView.as_view(), name='api_limits'),
     path('api/limits/validate/', views.ValidateOperationLimitApiView.as_view(), name='api_limits_validate'),
     path('api/limits/<str:segment>/<str:currency_code>/', views.OperationLimitDetailApiView.as_view(), name='api_limit_detail'),
+
+    # Centro de Notificaciones (SCRUM-100)
+    path('api/notifications/', views.NotificationListApiView.as_view(), name='api_notifications'),
+    path('api/notifications/read-all/', views.NotificationMarkReadApiView.as_view(), name='api_notifications_read_all'),
+    path('api/notifications/<int:pk>/read/', views.NotificationMarkReadApiView.as_view(), name='api_notification_read'),
+
+        # Suscripciones a Alertas de Cotización (SCRUM-100)
+    path('alerts/', views.RateAlertListView.as_view(), name='alert_list'),
+    path('alerts/add/', views.RateAlertCreateView.as_view(), name='alert_create'),
+    path('alerts/<int:pk>/edit/', views.RateAlertUpdateView.as_view(), name='alert_update'),
+    path('alerts/<int:pk>/toggle/', views.RateAlertToggleActiveView.as_view(), name='alert_toggle'),
 ]
