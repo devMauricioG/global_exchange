@@ -76,6 +76,13 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
         primary_role = 'Usuario'
         primary_role_code = 'user'
 
+    from django.conf import settings
+    public_url = getattr(settings, 'KEYCLOAK_PUBLIC_URL', 'http://localhost:8080')
+    realm = getattr(settings, 'KEYCLOAK_REALM', 'GlobalExchangeRealm')
+    keycloak_manage_2fa_url = f"{public_url}/realms/{realm}/account/#/security/signing-and-log-in"
+
+    mfa_enabled = getattr(user, 'mfa_enabled', False)
+
     return {
         'user_roles': sorted(list(roles)),
         'is_admin': is_admin,
@@ -83,4 +90,6 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
         'is_user_role': is_user_role,
         'primary_role': primary_role,
         'primary_role_code': primary_role_code,
+        'mfa_enabled': mfa_enabled,
+        'keycloak_manage_2fa_url': keycloak_manage_2fa_url,
     }
