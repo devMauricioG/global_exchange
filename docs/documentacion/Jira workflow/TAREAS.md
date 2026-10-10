@@ -96,7 +96,7 @@ TAREAS
 
 *SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria.*Descripción: Crear las vistas y plantillas para el flujo de pago del cliente (templates/transactions/payment_checkout.html), botón de redirección segura a Stripe y modal para carga de comprobante o referencia SIPAP. *Principal: SCRUM-87.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Finalizado.
 
-*SCRUM-96: Configuración del Realm de Keycloak para OTP/TOTP y mapeo de claims MFA en tokens.*Descripción: Configurar en Keycloak el flujo de autenticación OTP (Google Authenticator/FreeOTP), definir políticas condicionales por rol (obligatorio para administradores/operadores) y mapear el claim amr / otp en el ID Token y Userinfo de OIDC. *Principal: SCRUM-88.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-97.*Estado: Por Hacer.
+*SCRUM-96: Configuración del Realm de Keycloak para OTP/TOTP y mapeo de claims MFA en tokens.*Descripción: Configurar en Keycloak el flujo de autenticación OTP (Google Authenticator/FreeOTP), definir políticas condicionales por rol (obligatorio para administradores/operadores) y mapear el claim amr / otp en el ID Token y Userinfo de OIDC. *Principal: SCRUM-88.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-97.*Estado: Finalizado.
 
 *SCRUM-97: Integración de claims MFA en backend de Django y panel de perfil de usuario.*Descripción: Modificar el backend de autenticación OIDC en authentication/ para leer los claims de MFA, sincronizar el estado mfa_enabled en el modelo de usuario y desplegar en profile.html el badge de estado 2FA con enlace de configuración directa en Keycloak. *Principal: SCRUM-88.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Por Hacer.
 
