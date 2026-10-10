@@ -964,7 +964,13 @@
                         </li>
                     {% endif %}
                     
-                     <!-- Opción Visible para usuarios autenticados: Documentación Técnica -->
+                    <!-- Opción Visible para usuarios autenticados: Perfil y Documentación -->
+                    <li>
+                        <a href="{% url 'authentication:profile' %}" class="nav-link {% if '/auth/profile/' in request.path %}active{% endif %}">
+                            👤 Perfil
+                        </a>
+                    </li>
+
                     <li>
                         <a href="{% url 'sphinx_docs' path='' %}" class="nav-link" target="_blank" rel="noopener">
                             📚 Documentación
@@ -1059,10 +1065,10 @@
                 </div>
                 <!-- ===== Fin Centro de Notificaciones ===== -->
 
-                <span class="user-pill">
+                <a href="{% url 'authentication:profile' %}" class="user-pill" title="Ver mi Perfil y Seguridad 2FA" style="text-decoration: none;">
                     <span class="user-dot"></span>
                     {{ user.first_name|default:user.username }}
-                </span>
+                </a>
                 <a href="{% url 'authentication:logout' %}" class="btn btn-sm btn-secondary" title="Cerrar sesión SSO">Cerrar Sesión</a>
             {% else %}
                 <a href="/oidc/authenticate/" class="btn btn-sm btn-primary">Iniciar Sesión</a>

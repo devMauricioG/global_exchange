@@ -529,3 +529,71 @@ class KeycloakRealmOTPConfigTests(TestCase):
         self.assertEqual(otp_mapper.get('config', {}).get('claim.name'), 'otp')
         self.assertEqual(otp_mapper.get('config', {}).get('userinfo.token.claim'), 'true')
 
+
+class MFAClaimsAndProfileViewTests(TestCase):
+    """
+    Suite de pruebas para validar la sincronización de claims MFA (amr, otp, mfa_enabled)
+    en el backend OIDC y la renderización del perfil de usuario y el badge de seguridad 2FA.
+    """
+
+    def setUp(self):
+        from authentication.backends import KeycloakOIDCAuthenticationBackend
+        self.backend = KeycloakOIDCAuthenticationBackend()
+        self.user = User.objects.create_user(
+            username='mfa_test_user',
+            email='mfa.test@globalexchange.com',
+            password='Password123!',
+        )
+        self.client = Client()
+
+    def test_extract_mfa_enabled_from_amr_claim(self):
+        """Verifica que _extract_mfa_enabled reconozca los valores de amr."""
+        claims_with_otp = {'sub': 'sub-001', 'email': 'user@test.com', 'amr': ['pwd', 'otp']}
+        self.assertTrue(self.backend._extract_mfa_enabled(claims_with_otp))
+
+        claims_with_totp = {'sub': 'sub-002', 'email': 'user2@test.com', 'amr': ['totp']}
+        self.assertTrue(self.backend._extract_mfa_enabled(claims_with_totp))
+
+        claims_pwd_only = {'sub': 'sub-003', 'email': 'user3@test.com', 'amr': ['pwd']}
+        self.assertFalse(self.backend._extract_mfa_enabled(claims_pwd_only))
+
+    def test_extract_mfa_enabled_from_otp_and_mfa_claims(self):
+        """Verifica que _extract_mfa_enabled reconozca las claims otp o mfa_enabled."""
+        claims_otp_bool = {'sub': 'sub-004', 'otp': True}
+        self.assertTrue(self.backend._extract_mfa_enabled(claims_otp_bool))
+
+        claims_mfa_str = {'sub': 'sub-005', 'mfa_enabled': 'true'}
+        self.assertTrue(self.backend._extract_mfa_enabled(claims_mfa_str))
+
+        claims_none = {'sub': 'sub-006'}
+        self.assertFalse(self.backend._extract_mfa_enabled(claims_none))
+
+    def test_update_user_syncs_mfa_enabled(self):
+        """Verifica que update_user asigne mfa_enabled al usuario."""
+        claims_mfa = {
+            'sub': 'sub-007',
+            'email': 'mfa.test@globalexchange.com',
+            'preferred_username': 'mfa_test_user',
+            'amr': ['pwd', 'otp'],
+            'realm_roles': ['user'],
+        }
+        updated_user = self.backend.update_user(self.user, claims_mfa)
+        self.assertTrue(getattr(updated_user, 'mfa_enabled', False))
+
+    def test_profile_view_unauthenticated_redirects(self):
+        """Verifica que /auth/profile/ redirija a usuarios no autenticados."""
+        response = self.client.get(reverse('authentication:profile'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_profile_view_authenticated_renders_badge_and_keycloak_link(self):
+        """Verifica que un usuario autenticado acceda a /auth/profile/ y vea el badge 2FA y enlace a Keycloak."""
+        self.user.mfa_enabled = True
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('authentication:profile'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'mfaStatusBadge')
+        self.assertContains(response, 'btnManageKeycloak2FA')
+        self.assertContains(response, 'Keycloak')
+
+
