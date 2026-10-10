@@ -8,6 +8,7 @@ y la renderización condicional de la barra de navegación y el dashboard princi
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Group
+from django.http import HttpResponse
 from django.template import Context, Template
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -595,5 +596,143 @@ class MFAClaimsAndProfileViewTests(TestCase):
         self.assertContains(response, 'mfaStatusBadge')
         self.assertContains(response, 'btnManageKeycloak2FA')
         self.assertContains(response, 'Keycloak')
+
+
+class RBACPermissionsModuleTests(TestCase):
+    """
+    Suite de pruebas para validar el módulo de permisos RBAC (authentication.permissions y customers.permissions).
+    Valida las funciones helper, los decoradores @role_required, @active_customer_required, @customer_ownership_required,
+    y los Mixins RoleRequiredMixin, ActiveCustomerRequiredMixin y CustomerOwnershipRequiredMixin.
+    """
+
+    def setUp(self):
+        from customers.models import Cliente, CustomerUserAssignment
+
+        self.group_admin, _ = Group.objects.get_or_create(name='admin')
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+
+        self.admin_user = User.objects.create_superuser(
+            username='rbac_admin',
+            email='admin.rbac@test.com',
+            password='Password123!',
+        )
+        self.op_user = User.objects.create_user(
+            username='rbac_op',
+            email='op.rbac@test.com',
+            password='Password123!',
+            is_staff=True,
+        )
+        self.op_user.groups.add(self.group_operator)
+
+        self.std_user = User.objects.create_user(
+            username='rbac_user',
+            email='user.rbac@test.com',
+            password='Password123!',
+        )
+        self.std_user.groups.add(self.group_user)
+
+        self.cliente_1 = Cliente.objects.create(
+            nombre='Empresa RBAC 1',
+            documento_ruc='RBAC-001',
+            correo='contacto.rbac1@test.com',
+        )
+        self.cliente_2 = Cliente.objects.create(
+            nombre='Empresa RBAC 2',
+            documento_ruc='RBAC-002',
+            correo='contacto.rbac2@test.com',
+        )
+
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_1,
+            user=self.std_user,
+            is_primary_representative=True,
+            is_active=True,
+        )
+
+    def test_normalize_roles(self):
+        """Verifica que normalize_roles transforme listas o cadenas separadas por comas."""
+        from authentication.permissions import normalize_roles
+        self.assertEqual(normalize_roles("admin, operator"), {"admin", "operator"})
+        self.assertEqual(normalize_roles(["USER", "Admin"]), {"user", "admin"})
+
+    def test_has_role_evaluations(self):
+        """Verifica la lógica de evaluación de roles para superusuarios, staff y usuarios estándar."""
+        from authentication.permissions import has_role
+
+        self.assertTrue(has_role(self.admin_user, "admin"))
+        self.assertTrue(has_role(self.admin_user, "operator"))
+        self.assertTrue(has_role(self.admin_user, "user"))
+
+        self.assertFalse(has_role(self.op_user, "admin"))
+        self.assertTrue(has_role(self.op_user, "operator"))
+
+        self.assertFalse(has_role(self.std_user, "admin"))
+        self.assertFalse(has_role(self.std_user, "operator"))
+        self.assertTrue(has_role(self.std_user, "user"))
+
+    def test_verify_customer_ownership(self):
+        """Verifica el aislamiento multi-inquilino en la verificación de pertenencia."""
+        from authentication.permissions import verify_customer_ownership
+
+        # Admin y Operadores pueden acceder a cualquier cliente
+        self.assertTrue(verify_customer_ownership(self.admin_user, self.cliente_1))
+        self.assertTrue(verify_customer_ownership(self.op_user, self.cliente_2))
+
+        # Usuario estándar solo accede a cliente_1 (asignado), no a cliente_2
+        self.assertTrue(verify_customer_ownership(self.std_user, self.cliente_1))
+        self.assertFalse(verify_customer_ownership(self.std_user, self.cliente_2))
+
+    def test_role_required_decorator(self):
+        """Verifica el decorador @role_required en vistas basadas en función."""
+        from authentication.permissions import role_required
+        from django.test import RequestFactory
+        from django.core.exceptions import PermissionDenied
+
+        factory = RequestFactory()
+
+        @role_required("admin", raise_exception=True)
+        def dummy_admin_view(request):
+            return HttpResponse("OK Admin")
+
+        # Petición de usuario admin
+        req_admin = factory.get('/')
+        req_admin.user = self.admin_user
+        res_admin = dummy_admin_view(req_admin)
+        self.assertEqual(res_admin.content.decode(), "OK Admin")
+
+        # Petición de usuario no autorizado debe lanzar PermissionDenied
+        req_user = factory.get('/')
+        req_user.user = self.std_user
+        with self.assertRaises(PermissionDenied):
+            dummy_admin_view(req_user)
+
+    def test_role_required_mixin(self):
+        """Verifica el mixin RoleRequiredMixin en vistas basadas en clases."""
+        from authentication.permissions import RoleRequiredMixin
+        from django.views.generic import View
+        from django.test import RequestFactory
+        from django.core.exceptions import PermissionDenied
+
+        class DummyCBV(RoleRequiredMixin, View):
+            allowed_roles = ["operator", "admin"]
+            raise_exception = True
+
+            def get(self, request):
+                return HttpResponse("OK CBV Operator")
+
+        factory = RequestFactory()
+        cbv = DummyCBV.as_view()
+
+        req_op = factory.get('/')
+        req_op.user = self.op_user
+        res_op = cbv(req_op)
+        self.assertEqual(res_op.content.decode(), "OK CBV Operator")
+
+        req_std = factory.get('/')
+        req_std.user = self.std_user
+        with self.assertRaises(PermissionDenied):
+            cbv(req_std)
+
 
 
