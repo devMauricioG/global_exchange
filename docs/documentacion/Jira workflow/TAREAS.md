@@ -106,7 +106,7 @@ TAREAS
 
 *SCRUM-100: Interfaz gráfica para Centro de Notificaciones y configuración de alertas de tasa.*Descripción: Desarrollar el componente interactivo de campana en la barra de navegación superior (badge con contador de no leídas), menú desplegable AJAX para marcar como leídas y plantilla para crear/editar suscripciones de alertas de tasas. *Principal: SCRUM-89.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-104.*Estado: Por Hacer.
 
-*SCRUM-101: Definición de módulo de permisos RBAC, decoradores y Mixins en Django.*Descripción: Crear en apps/customers/permissions.py o authentication/permissions.py los decoradores y mixins @role_required, RoleRequiredMixin y verificación de pertenencia de cliente activo para blindar el acceso a nivel de clase y función. *Principal: SCRUM-90.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-102.*Estado: Por Hacer.
+*SCRUM-101: Definición de módulo de permisos RBAC, decoradores y Mixins en Django.*Descripción: Crear en apps/customers/permissions.py o authentication/permissions.py los decoradores y mixins @role_required, RoleRequiredMixin y verificación de pertenencia de cliente activo para blindar el acceso a nivel de clase y función. *Principal: SCRUM-90.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-102.*Estado: Finalizado.
 
 *SCRUM-102: Refactorización y blindaje de vistas en transactions, rates y payments con permisos estrictos.*Descripción: Aplicar los mixins y decoradores RBAC a todas las vistas de transacciones, medios de pago y tasas de cambio, asegurando aislamiento absoluto entre clientes y restringiendo accesos administrativos únicamente a operadores y admins. *Principal: SCRUM-90.*Sprint: SCRUM Sprint 4. *Bloquea: SCRUM-103, SCRUM-104.*Estado: Por Hacer.
 
