@@ -463,3 +463,69 @@ class KeycloakLogoutIntegrationTests(TestCase):
         self.assertIn('https://keycloak.example.test/logout?', response.url)
         self.assertIn('client_id=global-exchange-test', response.url)
         self.assertNotIn('_auth_user_id', client.session)
+
+
+class KeycloakRealmOTPConfigTests(TestCase):
+    """
+    Suite de pruebas para verificar la configuración del Realm de Keycloak (realm-export.json).
+    Valida las políticas de OTP/TOTP, los flujos condicionales por rol y los mapeos de claims MFA.
+    """
+
+    def setUp(self):
+        import json
+        import os
+        from django.conf import settings
+
+        self.realm_path = os.path.join(settings.BASE_DIR, 'keycloak', 'imports', 'realm-export.json')
+        self.assertTrue(os.path.exists(self.realm_path), "El archivo realm-export.json debe existir.")
+        with open(self.realm_path, 'r', encoding='utf-8') as f:
+            self.realm_data = json.load(f)
+
+    def test_realm_otp_policy_configuration(self):
+        """Verifica las políticas globales de OTP/TOTP en el realm."""
+        self.assertEqual(self.realm_data.get('otpPolicyType'), 'totp')
+        self.assertEqual(self.realm_data.get('otpPolicyAlgorithm'), 'HmacSHA1')
+        self.assertEqual(self.realm_data.get('otpPolicyDigits'), 6)
+        supported_apps = self.realm_data.get('otpSupportedApplications', [])
+        self.assertIn('Google Authenticator', supported_apps)
+        self.assertIn('FreeOTP', supported_apps)
+
+    def test_totp_required_action_enabled(self):
+        """Verifica que la acción requerida CONFIGURE_TOTP esté habilitada en el realm."""
+        required_actions = self.realm_data.get('requiredActions', [])
+        totp_action = next((act for act in required_actions if act.get('alias') == 'CONFIGURE_TOTP'), None)
+        self.assertIsNotNone(totp_action, "La acción CONFIGURE_TOTP debe estar definida.")
+        self.assertTrue(totp_action.get('enabled'))
+
+    def test_conditional_otp_flow_and_authenticator_config(self):
+        """Verifica que el flujo de autenticación condicional esté configurado para admin u operator."""
+        auth_configs = self.realm_data.get('authenticatorConfig', [])
+        role_config = next((cfg for cfg in auth_configs if cfg.get('alias') == 'role-conditional-otp-config'), None)
+        self.assertIsNotNone(role_config, "Debe existir la configuración role-conditional-otp-config.")
+        cond_roles = role_config.get('config', {}).get('condUserRole', '')
+        self.assertIn('admin', cond_roles)
+        self.assertIn('operator', cond_roles)
+
+        flows = self.realm_data.get('authenticationFlows', [])
+        conditional_otp_flow = next((f for f in flows if f.get('alias') == 'conditional-otp'), None)
+        self.assertIsNotNone(conditional_otp_flow, "El flujo conditional-otp debe estar configurado.")
+
+    def test_mfa_claim_mappers_in_clients(self):
+        """Verifica que los clientes OIDC incluyan mappers para claims amr y otp."""
+        clients = self.realm_data.get('clients', [])
+        django_client = next((c for c in clients if c.get('clientId') == 'django-app'), None)
+        self.assertIsNotNone(django_client)
+
+        mappers = django_client.get('protocolMappers', [])
+        mapper_names = [m.get('name') for m in mappers]
+        self.assertIn('amr-mapper', mapper_names)
+        self.assertIn('otp-mapper', mapper_names)
+
+        amr_mapper = next(m for m in mappers if m.get('name') == 'amr-mapper')
+        self.assertEqual(amr_mapper.get('config', {}).get('claim.name'), 'amr')
+        self.assertEqual(amr_mapper.get('config', {}).get('id.token.claim'), 'true')
+
+        otp_mapper = next(m for m in mappers if m.get('name') == 'otp-mapper')
+        self.assertEqual(otp_mapper.get('config', {}).get('claim.name'), 'otp')
+        self.assertEqual(otp_mapper.get('config', {}).get('userinfo.token.claim'), 'true')
+
