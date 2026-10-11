@@ -533,8 +533,8 @@ class ClienteKeycloakVinculationTests(TestCase):
         self.assertTrue(cliente.assignments.filter(user=self.user, is_primary_representative=True, is_active=True).exists())
         self.assertEqual(cliente.representante_principal.user, self.user)
 
-    def test_crear_y_vincular_cliente_automatico(self):
-        """Verifica que se cree una nueva ficha de cliente automáticamente si no existía previamente."""
+    def test_usuario_sin_asignacion_administrativa_no_crea_cliente(self):
+        """El autoregistro no puede crear fichas comerciales ni asignaciones."""
         from customers.services import vincular_cliente_keycloak
 
         nuevo_user = User.objects.create_user(
@@ -558,13 +558,7 @@ class ClienteKeycloakVinculationTests(TestCase):
             claims=claims,
         )
 
-        self.assertIsNotNone(cliente)
-        self.assertEqual(cliente.nombre, 'Ana Gómez')
-        self.assertEqual(cliente.correo, 'nuevo.cliente@globalexchange.com')
-        self.assertEqual(cliente.keycloak_id, nuevo_sub)
-        self.assertTrue(cliente.assignments.filter(user=nuevo_user, is_primary_representative=True, is_active=True).exists())
-        self.assertEqual(cliente.representante_principal.user, nuevo_user)
-        self.assertTrue(cliente.is_active)
+        self.assertIsNone(cliente)
 
     def test_signal_keycloak_user_authenticated_dispatched(self):
         """Verifica que al emitir la señal keycloak_user_authenticated se ejecute la vinculación."""
@@ -579,9 +573,7 @@ class ClienteKeycloakVinculationTests(TestCase):
         )
 
         cliente = Cliente.objects.filter(keycloak_id=signal_sub).first()
-        self.assertIsNotNone(cliente)
-        self.assertTrue(cliente.assignments.filter(user=self.user, is_primary_representative=True, is_active=True).exists())
-        self.assertEqual(cliente.representante_principal.user, self.user)
+        self.assertIsNone(cliente)
 
     def test_signal_user_logged_in_triggers_vinculation(self):
         """Verifica que la señal nativa user_logged_in sincronice la ficha existente."""

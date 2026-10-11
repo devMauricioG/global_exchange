@@ -30,6 +30,8 @@ from django.views.generic import (
 )
 
 from customers.models import Cliente
+from authentication.permissions import ActiveCustomerRequiredMixin, role_required
+from rates.services import get_active_customer
 from .forms import PaymentMethodFilterForm, PaymentMethodForm, ReceivingMethodForm
 from .models import (
     EntidadFinanciera,
@@ -59,41 +61,7 @@ def get_current_cliente(request: HttpRequest) -> Optional[Cliente]:
     :return: Instancia del cliente asociado o None si no se localiza ninguna ficha.
     :rtype: customers.models.Cliente or None
     """
-    if not request.user.is_authenticated:
-        return None
-
-    # 1. Atributo inyectado en middleware
-    if hasattr(request, 'active_customer') and request.active_customer:
-        return request.active_customer
-
-    # 2. Clave en sesión
-    session_customer_id = request.session.get('active_customer_id')
-    if session_customer_id:
-        c = Cliente.objects.filter(id=session_customer_id).first()
-        if c:
-            return c
-
-    # 3. Asignación en CustomerUserAssignment
-    if hasattr(request.user, 'customer_assignments'):
-        asig = request.user.customer_assignments.filter(is_active=True).select_related('customer').order_by('-is_primary_representative', '-assigned_at').first()
-        if asig:
-            return asig.customer
-
-    # 4. Consulta por correo institucional o personal
-    if request.user.email:
-        cliente_email = Cliente.objects.filter(correo=request.user.email).first()
-        if cliente_email:
-            return cliente_email
-
-    # 5. Operadores o administradores con selector de cliente
-    if request.user.is_staff or request.user.is_superuser:
-        cliente_id_param = request.GET.get('cliente_id') or request.POST.get('cliente_id')
-        if cliente_id_param:
-            return Cliente.objects.filter(id=cliente_id_param).first()
-        # Fallback al primer cliente activo en el sistema para permitir pruebas y administración
-        return Cliente.objects.filter(is_active=True).first()
-
-    return None
+    return get_active_customer(request)
 
 
 def serialize_payment_method(pm: PaymentMethod) -> Dict[str, Any]:
@@ -131,7 +99,7 @@ def serialize_payment_method(pm: PaymentMethod) -> Dict[str, Any]:
 # VISTAS WEB CBV (HTML)
 # ==============================================================================
 
-class PaymentMethodListView(LoginRequiredMixin, ListView):
+class PaymentMethodListView(ActiveCustomerRequiredMixin, ListView):
     """
     Vista web para el listado interactivo de medios de pago del cliente autenticado.
 
@@ -203,7 +171,7 @@ class PaymentMethodListView(LoginRequiredMixin, ListView):
         return context
 
 
-class PaymentMethodCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class PaymentMethodCreateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, CreateView):
     """
     Vista web para registrar un nuevo medio de pago asociado al cliente activo.
     """
@@ -239,7 +207,7 @@ class PaymentMethodCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateVie
         return context
 
 
-class PaymentMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class PaymentMethodUpdateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, UpdateView):
     """
     Vista web para editar los datos de un medio de pago existente.
 
@@ -260,8 +228,6 @@ class PaymentMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateVie
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self) -> QuerySet[PaymentMethod]:
-        if self.request.user.is_superuser:
-            return PaymentMethod.objects.all()
         return PaymentMethod.objects.filter(cliente=self.cliente)
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
@@ -272,7 +238,7 @@ class PaymentMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateVie
         return context
 
 
-class PaymentMethodDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+class PaymentMethodDeleteView(ActiveCustomerRequiredMixin, SuccessMessageMixin, DeleteView):
     """
     Vista web para eliminar de manera segura un medio de pago con pantalla de confirmación.
 
@@ -291,8 +257,6 @@ class PaymentMethodDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteVie
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self) -> QuerySet[PaymentMethod]:
-        if self.request.user.is_superuser:
-            return PaymentMethod.objects.all()
         return PaymentMethod.objects.filter(cliente=self.cliente)
 
     def delete(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
@@ -305,7 +269,7 @@ class PaymentMethodDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteVie
         return context
 
 
-class PaymentMethodSetDefaultView(LoginRequiredMixin, View):
+class PaymentMethodSetDefaultView(ActiveCustomerRequiredMixin, View):
     """
     Acción POST para marcar un medio de pago como el predeterminado para operaciones del cliente.
     """
@@ -315,7 +279,7 @@ class PaymentMethodSetDefaultView(LoginRequiredMixin, View):
         if not cliente:
             raise PermissionDenied('Acceso no autorizado.')
 
-        qs = PaymentMethod.objects.all() if request.user.is_superuser else PaymentMethod.objects.filter(cliente=cliente)
+        qs = PaymentMethod.objects.filter(cliente=cliente)
         payment_method = get_object_or_404(qs, pk=pk)
 
         payment_method.activo = True
@@ -329,7 +293,7 @@ class PaymentMethodSetDefaultView(LoginRequiredMixin, View):
         return redirect('payments:paymentmethod-list')
 
 
-class PaymentMethodToggleActiveView(LoginRequiredMixin, View):
+class PaymentMethodToggleActiveView(ActiveCustomerRequiredMixin, View):
     """
     Acción POST para alternar el estado activo/inactivo de un medio de pago.
     """
@@ -339,7 +303,7 @@ class PaymentMethodToggleActiveView(LoginRequiredMixin, View):
         if not cliente:
             raise PermissionDenied('Acceso no autorizado.')
 
-        qs = PaymentMethod.objects.all() if request.user.is_superuser else PaymentMethod.objects.filter(cliente=cliente)
+        qs = PaymentMethod.objects.filter(cliente=cliente)
         payment_method = get_object_or_404(qs, pk=pk)
 
         nuevo_estado = not payment_method.activo
@@ -355,7 +319,7 @@ class PaymentMethodToggleActiveView(LoginRequiredMixin, View):
         )
         return redirect('payments:paymentmethod-list')
 
-class ReceivingMethodListView(LoginRequiredMixin, ListView):
+class ReceivingMethodListView(ActiveCustomerRequiredMixin, ListView):
     """
     Vista web para el listado de cuentas de acreditación de fondos del cliente activo.
     """
@@ -382,7 +346,7 @@ class ReceivingMethodListView(LoginRequiredMixin, ListView):
         return context
 
 
-class ReceivingMethodCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class ReceivingMethodCreateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, CreateView):
     """
     Vista web para registrar una nueva cuenta de acreditación de fondos.
     """
@@ -413,7 +377,7 @@ class ReceivingMethodCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateV
         return context
 
 
-class ReceivingMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class ReceivingMethodUpdateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, UpdateView):
     """
     Vista web para editar una cuenta de acreditación existente.
     """
@@ -430,8 +394,6 @@ class ReceivingMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return super().dispatch(request, *args, **kwargs)
 
     def get_queryset(self) -> QuerySet[ReceivingMethod]:
-        if self.request.user.is_superuser:
-            return ReceivingMethod.objects.all()
         return ReceivingMethod.objects.filter(cliente=self.cliente)
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
@@ -442,7 +404,7 @@ class ReceivingMethodUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateV
         return context
 
 
-class ReceivingMethodToggleActiveView(LoginRequiredMixin, View):
+class ReceivingMethodToggleActiveView(ActiveCustomerRequiredMixin, View):
     """
     Acción POST para el borrado lógico (activar/desactivar) de una cuenta de acreditación.
     """
@@ -451,7 +413,7 @@ class ReceivingMethodToggleActiveView(LoginRequiredMixin, View):
         if not cliente:
             raise PermissionDenied('Acceso no autorizado.')
 
-        qs = ReceivingMethod.objects.all() if request.user.is_superuser else ReceivingMethod.objects.filter(cliente=cliente)
+        qs = ReceivingMethod.objects.filter(cliente=cliente)
         rm = get_object_or_404(qs, pk=pk)
 
         nuevo_estado = not rm.activo
@@ -465,7 +427,7 @@ class ReceivingMethodToggleActiveView(LoginRequiredMixin, View):
         return redirect('payments:receivingmethod-list')
 
 
-class ReceivingMethodSetDefaultView(LoginRequiredMixin, View):
+class ReceivingMethodSetDefaultView(ActiveCustomerRequiredMixin, View):
     """
     Acción POST para marcar una cuenta como predeterminada para acreditaciones.
     """
@@ -474,7 +436,7 @@ class ReceivingMethodSetDefaultView(LoginRequiredMixin, View):
         if not cliente:
             raise PermissionDenied('Acceso no autorizado.')
 
-        qs = ReceivingMethod.objects.all() if request.user.is_superuser else ReceivingMethod.objects.filter(cliente=cliente)
+        qs = ReceivingMethod.objects.filter(cliente=cliente)
         rm = get_object_or_404(qs, pk=pk)
 
         rm.activo = True
@@ -490,7 +452,7 @@ class ReceivingMethodSetDefaultView(LoginRequiredMixin, View):
 # ENDPOINTS API REST (JSON)
 # ==============================================================================
 
-class PaymentMethodListCreateAPIView(LoginRequiredMixin, View):
+class PaymentMethodListCreateAPIView(ActiveCustomerRequiredMixin, View):
     """
     Endpoint REST para listar (GET) y dar de alta (POST) medios de pago en formato JSON.
     """
@@ -541,7 +503,7 @@ class PaymentMethodListCreateAPIView(LoginRequiredMixin, View):
         return JsonResponse({'errors': form.errors}, status=400)
 
 
-class PaymentMethodDetailAPIView(LoginRequiredMixin, View):
+class PaymentMethodDetailAPIView(ActiveCustomerRequiredMixin, View):
     """
     Endpoint REST para consultar detalle (GET), actualizar (PUT/PATCH) o eliminar (DELETE) un medio de pago.
     """
@@ -550,7 +512,7 @@ class PaymentMethodDetailAPIView(LoginRequiredMixin, View):
         cliente = get_current_cliente(request)
         if not cliente:
             raise Http404('Cliente no asociado.')
-        qs = PaymentMethod.objects.all() if request.user.is_superuser else PaymentMethod.objects.filter(cliente=cliente)
+        qs = PaymentMethod.objects.filter(cliente=cliente)
         return get_object_or_404(qs, pk=pk)
 
     def get(self, request: HttpRequest, pk: int, *args: Any, **kwargs: Any) -> JsonResponse:
@@ -654,7 +616,7 @@ def stripe_webhook(request: HttpRequest) -> HttpResponse:
         return JsonResponse({'error': f'Error al procesar evento de webhook: {str(exc)}'}, status=500)
 
 
-class StripeCreateCheckoutSessionView(LoginRequiredMixin, View):
+class StripeCreateCheckoutSessionView(ActiveCustomerRequiredMixin, View):
     """
     Vista controladora para iniciar el flujo de pago con Stripe Checkout (SCRUM-92 / SCRUM-95).
 
@@ -711,6 +673,7 @@ class StripeCreateCheckoutSessionView(LoginRequiredMixin, View):
 # ==============================================================================
 
 @csrf_exempt
+@role_required(('admin', 'operator'), raise_exception=True)
 def sipap_confirm_deposit(request: HttpRequest) -> HttpResponse:
     """
     Endpoint HTTP para la confirmación y conciliación automática de depósitos SIPAP (SCRUM-93).
@@ -769,6 +732,7 @@ def sipap_confirm_deposit(request: HttpRequest) -> HttpResponse:
 
 
 @csrf_exempt
+@role_required(('admin', 'operator'), raise_exception=True)
 def sipap_simulate_transfer(request: HttpRequest) -> HttpResponse:
     """
     Endpoint HTTP para generar y simular transferencias bancarias en la red SIPAP (SCRUM-93).
@@ -841,6 +805,7 @@ def sipap_simulate_transfer(request: HttpRequest) -> HttpResponse:
         return JsonResponse({'error': f'Error al simular transferencia SIPAP: {str(exc)}'}, status=500)
 
 
+@role_required(('admin', 'operator'), raise_exception=True)
 def sipap_query_status(request: HttpRequest, codigo: str) -> HttpResponse:
     """
     Endpoint HTTP GET para consultar el estado operativo de una transferencia SIPAP (SCRUM-93).
@@ -878,6 +843,7 @@ def sipap_query_status(request: HttpRequest, codigo: str) -> HttpResponse:
 
 
 @csrf_exempt
+@role_required(('admin', 'operator'), raise_exception=True)
 def sipap_reject_transfer(request: HttpRequest) -> HttpResponse:
     """
     Endpoint HTTP POST para registrar el rechazo de una transferencia SIPAP (SCRUM-93 / SCRUM-87).

@@ -22,6 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import DetailView, ListView, TemplateView
 from django.db.models import Q
 from django.utils.dateparse import parse_date
+from authentication.permissions import ActiveCustomerRequiredMixin
 from django.utils.dateparse import parse_date
 from customers.models import Cliente
 from payments.models import PaymentMethod, ReceivingMethod
@@ -38,7 +39,7 @@ from transactions.services import TransactionService
 logger = logging.getLogger(__name__)
 
 
-class TransactionCreateView(LoginRequiredMixin, View):
+class TransactionCreateView(ActiveCustomerRequiredMixin, View):
     """
     Vista GET para la pantalla de registro y selección de medios de pago/acreditación
     para una orden de compra o venta de divisas.
@@ -49,7 +50,7 @@ class TransactionCreateView(LoginRequiredMixin, View):
         cliente = get_active_customer(request)
         if not cliente:
             messages.error(request, 'No tenés una ficha de cliente activa vinculada para operar.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         token = request.GET.get('token', '').strip()
         base_code = request.GET.get('base', 'USD').strip().upper()
@@ -86,7 +87,7 @@ class TransactionCreateView(LoginRequiredMixin, View):
 
         if not quote_data:
             messages.error(request, error_msg or 'No se pudo cargar los datos de la cotización.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         # Buscar medios de pago predeterminados para inicializar el formulario
         default_payment = PaymentMethod.objects.filter(cliente=cliente, activo=True, es_predeterminado=True).first()
@@ -119,7 +120,7 @@ class TransactionCreateView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 
-class TransactionConfirmView(LoginRequiredMixin, View):
+class TransactionConfirmView(ActiveCustomerRequiredMixin, View):
     """
     Vista POST para procesar el formulario de confirmación de orden y crear
     la transacción en estado PENDIENTE.
@@ -130,7 +131,7 @@ class TransactionConfirmView(LoginRequiredMixin, View):
         cliente = get_active_customer(request)
         if not cliente:
             messages.error(request, 'No se pudo verificar el cliente activo para esta transacción.')
-            return redirect('rates:calculator')
+            return redirect('rates:rate_calculator')
 
         form = TransactionOrderForm(request.POST, cliente=cliente)
         token = request.POST.get('token_congelamiento', '').strip()
@@ -553,7 +554,7 @@ class TransactionListView(LoginRequiredMixin, ListView):
         return context
 
 
-class TransactionCancelView(LoginRequiredMixin, View):
+class TransactionCancelView(ActiveCustomerRequiredMixin, View):
     """
     Vista POST para la anulación manual de una transacción pendiente por parte del cliente.
     """

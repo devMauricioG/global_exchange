@@ -52,11 +52,14 @@ def get_active_customer(request: HttpRequest) -> Optional[Cliente]:
     if hasattr(request, 'active_customer') and request.active_customer:
         return request.active_customer
 
-    # 2. Clave en sesión
+    # 2. Clave en sesión, únicamente si continúa siendo una representación válida.
     if hasattr(request, 'session') and request.session:
         session_customer_id = request.session.get('active_customer_id')
         if session_customer_id:
-            c = Cliente.objects.filter(id=session_customer_id, is_active=True).first()
+            c = Cliente.objects.filter(
+                id=session_customer_id, is_active=True,
+                assignments__user=request.user, assignments__is_active=True,
+            ).first()
             if c:
                 return c
 
@@ -70,19 +73,6 @@ def get_active_customer(request: HttpRequest) -> Optional[Cliente]:
         )
         if asig:
             return asig.customer
-
-    # 4. Consulta por correo
-    if request.user.email:
-        cliente_email = Cliente.objects.filter(correo__iexact=request.user.email, is_active=True).first()
-        if cliente_email:
-            return cliente_email
-
-    # 5. Parámetro explícito para administradores o personal staff
-    if request.user.is_staff or request.user.is_superuser:
-        cliente_id_param = request.GET.get('cliente_id') or request.POST.get('cliente_id')
-        if cliente_id_param:
-            return Cliente.objects.filter(id=cliente_id_param, is_active=True).first()
-        return Cliente.objects.filter(is_active=True).first()
 
     return None
 
@@ -608,6 +598,18 @@ class RateCalculationService:
             'operation_type': op_type,
             'operation_label': 'Compra de Divisas' if op_type == 'BUY' else 'Venta de Divisas',
             'is_source_base': is_source_base,
+            # Preserve the value entered by the user.  It is needed when an
+            # order is created from a live quote: ``base_amount`` is a derived
+            # value whenever the input was expressed in the target currency.
+            'input_amount': dec_amount,
+            # Keep this JSON-serializable because the same calculation powers
+            # the web UI, frozen quotes and the REST endpoint.
+            'input_currency': {
+                'code': (base_curr if is_source_base else target_curr).code,
+                'name': (base_curr if is_source_base else target_curr).name,
+                'symbol': (base_curr if is_source_base else target_curr).symbol,
+                'decimal_places': base_decimals if is_source_base else target_decimals,
+            },
             'segment': {
                 'code': segment_code,
                 'name': segment_display,

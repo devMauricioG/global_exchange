@@ -36,6 +36,7 @@ from django.views.generic import (
 from django.views.generic import TemplateView
 
 from customers.models import Cliente
+from authentication.permissions import ActiveCustomerRequiredMixin, RoleRequiredMixin, has_role
 from .forms import (
     CurrencyFilterForm,
     CurrencyForm,
@@ -63,7 +64,8 @@ logger = logging.getLogger(__name__)
 # CURRENCY VIEWS (SCRUM-51)
 # ==============================================================================
 
-class CurrencyListView(LoginRequiredMixin, ListView):
+class CurrencyListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado para el catálogo de monedas internacionales.
     """
@@ -107,7 +109,8 @@ class CurrencyListView(LoginRequiredMixin, ListView):
         return context
 
 
-class CurrencyCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class CurrencyCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para crear una nueva moneda en el catálogo.
     """
@@ -125,7 +128,8 @@ class CurrencyCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
         return context
 
 
-class CurrencyUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class CurrencyUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para actualizar una moneda existente.
     """
@@ -143,7 +147,8 @@ class CurrencyUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
         return context
 
 
-class CurrencyToggleStatusView(LoginRequiredMixin, View):
+class CurrencyToggleStatusView(RoleRequiredMixin, View):
+    allowed_roles = ('admin',)
     """
     Controlador para activar o desactivar una moneda.
     """
@@ -162,7 +167,8 @@ class CurrencyToggleStatusView(LoginRequiredMixin, View):
 # EXCHANGE RATE VIEWS (SCRUM-51)
 # ==============================================================================
 
-class ExchangeRateListView(LoginRequiredMixin, ListView):
+class ExchangeRateListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado para las cotizaciones y tasas de cambio vigentes.
     """
@@ -205,7 +211,8 @@ class ExchangeRateListView(LoginRequiredMixin, ListView):
         return context
 
 
-class ExchangeRateCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class ExchangeRateCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para registrar una nueva tasa de cambio.
     """
@@ -227,7 +234,8 @@ class ExchangeRateCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView
         return super().form_valid(form)
 
 
-class ExchangeRateUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class ExchangeRateUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una cotización existente.
     """
@@ -249,7 +257,8 @@ class ExchangeRateUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView
         return super().form_valid(form)
 
 
-class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
+class ExchangeRateToggleStatusView(RoleRequiredMixin, View):
+    allowed_roles = ('admin',)
     """
     Controlador para cambiar el estado de una cotización.
     """
@@ -269,7 +278,8 @@ class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
 # DASHBOARD DE COTIZACIONES HISTÓRICAS (SCRUM-52)
 # ==============================================================================
 
-class ExchangeRateDashboardView(LoginRequiredMixin, TemplateView):
+class ExchangeRateDashboardView(RoleRequiredMixin, TemplateView):
+    allowed_roles = ('admin', 'operator', 'user')
     """Muestra el tablero de cotizaciones y sus indicadores operativos actuales."""
 
     template_name = 'rates/exchange_rate_dashboard.html'
@@ -316,7 +326,8 @@ class ExchangeRateDashboardView(LoginRequiredMixin, TemplateView):
         return context
 
 
-class ExchangeRateHistoryApiView(LoginRequiredMixin, View):
+class ExchangeRateHistoryApiView(RoleRequiredMixin, View):
+    allowed_roles = ('admin', 'operator', 'user')
     """Entrega las series históricas de compra y venta para el gráfico de cotizaciones."""
 
     PERIOD_DAYS = {'7d': 7, '30d': 30, '90d': 90, '1y': 365}
@@ -384,7 +395,8 @@ def _serialize_commission_rule(rule: SegmentCommission) -> Dict[str, Any]:
     }
 
 
-class SegmentCommissionListView(LoginRequiredMixin, ListView):
+class SegmentCommissionListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado administrativo para las reglas de comisión por segmento de cliente.
     """
@@ -427,7 +439,8 @@ class SegmentCommissionListView(LoginRequiredMixin, ListView):
         return context
 
 
-class SegmentCommissionCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class SegmentCommissionCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para parametrizar una nueva regla tarifaria por segmento.
     """
@@ -445,7 +458,8 @@ class SegmentCommissionCreateView(LoginRequiredMixin, SuccessMessageMixin, Creat
         return context
 
 
-class SegmentCommissionUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class SegmentCommissionUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una regla de comisión existente.
     """
@@ -463,7 +477,8 @@ class SegmentCommissionUpdateView(LoginRequiredMixin, SuccessMessageMixin, Updat
         return context
 
 
-class SegmentCommissionDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+class SegmentCommissionDeleteView(RoleRequiredMixin, SuccessMessageMixin, DeleteView):
+    allowed_roles = ('admin',)
     """
     Vista de confirmación para dar de baja o eliminar una regla tarifaria.
     """
@@ -480,7 +495,8 @@ class SegmentCommissionDeleteView(LoginRequiredMixin, SuccessMessageMixin, Delet
         return super().delete(request, *args, **kwargs)
 
 
-class SegmentCommissionDetailView(LoginRequiredMixin, DetailView):
+class SegmentCommissionDetailView(RoleRequiredMixin, DetailView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista analítica de detalle para una regla de comisión con simulaciones de impacto financiero.
     """
@@ -770,6 +786,11 @@ class FreezeQuoteApiView(View):
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
+        active_customer = get_active_customer(request)
+        if not active_customer:
+            return JsonResponse({'success': False, 'error': 'Debe seleccionar un cliente activo para congelar una cotización.'}, status=403)
         params = {}
         if request.content_type == 'application/json' and request.body:
             try:
@@ -807,18 +828,9 @@ class FreezeQuoteApiView(View):
                     status=404,
                 )
 
-            active_customer = get_active_customer(request)
-            cliente_id = params.get('cliente_id')
-            segment = params.get('segment')
-
-            segment_target = segment
-            if not segment_target and cliente_id:
-                c = Cliente.objects.filter(id=cliente_id, is_active=True).first()
-                if c:
-                    segment_target = c.segmentacion
-
-            if not segment_target and active_customer:
-                segment_target = active_customer.segmentacion
+            # El segmento pertenece al cliente activo; el cliente_id recibido no
+            # puede sustituir el contexto autorizado de la sesión.
+            segment_target = active_customer.segmentacion
 
             amount_raw = params.get('amount', '100.00')
             op_type = str(params.get('operation_type', 'BUY')).upper()
@@ -866,6 +878,8 @@ class GetFrozenQuoteApiView(View):
     """
 
     def get(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
         token = request.GET.get('token')
         frozen_data = QuoteFreezeService.get_frozen_quote(request, token=token)
 
@@ -897,6 +911,8 @@ class UnfreezeQuoteApiView(View):
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
         token = None
         if request.content_type == 'application/json' and request.body:
             try:
@@ -947,7 +963,8 @@ def _serialize_operation_limit(limit: OperationLimit) -> Dict[str, Any]:
     }
 
 
-class OperationLimitListView(LoginRequiredMixin, ListView):
+class OperationLimitListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado administrativo para las reglas de límites operativos por segmento y divisa.
     """
@@ -988,7 +1005,8 @@ class OperationLimitListView(LoginRequiredMixin, ListView):
         return context
 
 
-class OperationLimitCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class OperationLimitCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para parametrizar una nueva regla de límites operativos por segmento y divisa.
     """
@@ -1006,7 +1024,8 @@ class OperationLimitCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateVi
         return context
 
 
-class OperationLimitUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class OperationLimitUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una regla de límites operativos existente.
     """
@@ -1024,7 +1043,8 @@ class OperationLimitUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateVi
         return context
 
 
-class OperationLimitDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+class OperationLimitDeleteView(RoleRequiredMixin, SuccessMessageMixin, DeleteView):
+    allowed_roles = ('admin',)
     """
     Vista de confirmación para dar de baja o eliminar una regla de límites operativos.
     """
@@ -1041,7 +1061,8 @@ class OperationLimitDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteVi
         return super().delete(request, *args, **kwargs)
 
 
-class OperationLimitDetailView(LoginRequiredMixin, DetailView):
+class OperationLimitDetailView(RoleRequiredMixin, DetailView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista analítica de detalle para una regla de límites con simulaciones de transacciones.
     """

@@ -17,6 +17,7 @@ import json
 
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.exceptions import ValidationError
@@ -229,8 +230,8 @@ class ExchangeRateModelTest(TestCase):
             sell_rate=Decimal('7500.000000'),
         )
         self.assertIn('USD/PYG', str(rate))
-        self.assertIn('Compra: 7400.000000', str(rate))
-        self.assertIn('Venta: 7500.000000', str(rate))
+        self.assertIn('Compra: 7400', str(rate))
+        self.assertIn('Venta: 7500', str(rate))
 
 
 class SegmentCommissionModelTest(TestCase):
@@ -600,16 +601,17 @@ class ActiveCustomerResolutionTest(TestCase):
         self.assertEqual(get_active_customer(request), self.cliente)
 
     def test_session_active_customer_id_resolution(self):
+        CustomerUserAssignment.objects.create(user=self.user, customer=self.cliente, is_primary_representative=True)
         request = self.factory.get('/')
         request.user = self.user
         request.session = {'active_customer_id': self.cliente.id}
         self.assertEqual(get_active_customer(request), self.cliente)
 
-    def test_email_matching_resolution(self):
+    def test_email_matching_does_not_grant_customer_access(self):
         request = self.factory.get('/')
         request.user = self.user
         request.session = {}
-        self.assertEqual(get_active_customer(request), self.cliente)
+        self.assertIsNone(get_active_customer(request))
 
 
 # ==============================================================================
@@ -701,6 +703,7 @@ class RatesViewsAndApiTest(TestCase):
             password='Password123!',
         )
         self.client.force_login(self.user)
+        self.user.groups.add(Group.objects.get_or_create(name='admin')[0])
 
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
         self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
@@ -1043,7 +1046,7 @@ class AdditionalModelAndServiceCoverageTest(TestCase):
         request = self.factory.get(f'/?cliente_id={c.id}')
         request.user = self.admin_user
         resolved = get_active_customer(request)
-        self.assertEqual(resolved, c)
+        self.assertIsNone(resolved)
 
     def test_rate_calculation_invalid_amount_string(self):
         with self.assertRaises(ValidationError):
@@ -1060,6 +1063,7 @@ class CurrencyAndExchangeRateViewsTest(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='operador_crud', email='op@test.com', password='Password123!')
+        self.user.groups.add(Group.objects.get_or_create(name='admin')[0])
         self.client.force_login(self.user)
         self.usd = Currency.objects.create(code='USD', name='Dólar Estadounidense', symbol='$', decimals=2)
         self.pyg = Currency.objects.create(code='PYG', name='Guaraní Paraguayo', symbol='₲', decimals=0)
@@ -1180,6 +1184,8 @@ class ExchangeRateDashboardTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('dashboard_user', password='Password123!')
         self.client.force_login(self.user)
+        self.cliente = Cliente.objects.create(nombre='Cliente API', documento_ruc='API-001', correo='api@test.com')
+        CustomerUserAssignment.objects.create(user=self.user, customer=self.cliente, is_primary_representative=True)
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
         self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
         now = timezone.now()
@@ -1362,6 +1368,8 @@ class QuoteFreezeApiTests(TestCase):
             password='Password123!',
         )
         self.client.force_login(self.user)
+        self.cliente = Cliente.objects.create(nombre='Cliente Freeze', documento_ruc='FREEZE-001', correo='freeze@test.com')
+        CustomerUserAssignment.objects.create(user=self.user, customer=self.cliente, is_primary_representative=True)
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
         self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
         self.rate = ExchangeRate.objects.create(
@@ -1457,6 +1465,8 @@ class RateCalculatorInteractiveViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='calc_user', password='Password123!')
         self.client.force_login(self.user)
+        self.cliente = Cliente.objects.create(nombre='Cliente Calculadora', documento_ruc='CALC-001', correo='calc@test.com')
+        CustomerUserAssignment.objects.create(user=self.user, customer=self.cliente, is_primary_representative=True)
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
         self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
         self.rate = ExchangeRate.objects.create(
@@ -1857,6 +1867,7 @@ class OperationLimitViewsTest(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='admin_user', password='password123', is_staff=True)
+        self.user.groups.add(Group.objects.get_or_create(name='admin')[0])
         self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
         self.limit = OperationLimit.objects.create(
             segment=Cliente.Segmentacion.MINORISTA,

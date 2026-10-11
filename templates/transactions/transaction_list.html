@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load currency_filters %}
 
 {% block title %}Registro de Transacciones — Global Exchange{% endblock %}
 
@@ -136,7 +137,7 @@
                                     {{ tx.monto_destino|floatformat:2 }} {{ tx.moneda_destino.code }}
                                 </td>
                                 <td style="padding: 0.875rem 1rem;">
-                                    {{ tx.tasa_neta|floatformat:4 }}
+                                    {{ tx.tasa_neta|format_rate:tx.target_currency.decimal_places }}
                                 </td>
                                 <td style="padding: 0.875rem 1rem;">
                                     {% if tx.estado == 'PENDIENTE' %}
