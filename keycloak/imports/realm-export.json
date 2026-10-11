@@ -100,28 +100,28 @@
           "requirement": "ALTERNATIVE",
           "priority": 10,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         },
         {
           "authenticator": "auth-spnego",
           "requirement": "DISABLED",
           "priority": 20,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         },
         {
           "authenticator": "identity-provider-redirector",
           "requirement": "ALTERNATIVE",
           "priority": 30,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         },
         {
           "requirement": "ALTERNATIVE",
           "priority": 40,
           "flowAlias": "forms",
           "userSetupAllowed": false,
-          "autheFlow": true
+          "authenticatorFlow": true
         }
       ]
     },
@@ -137,14 +137,14 @@
           "requirement": "REQUIRED",
           "priority": 10,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         },
         {
           "requirement": "CONDITIONAL",
           "priority": 20,
           "flowAlias": "conditional-otp",
           "userSetupAllowed": false,
-          "autheFlow": true
+          "authenticatorFlow": true
         }
       ]
     },
@@ -161,14 +161,14 @@
           "requirement": "REQUIRED",
           "priority": 10,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         },
         {
           "authenticator": "auth-otp-form",
           "requirement": "REQUIRED",
           "priority": 20,
           "userSetupAllowed": false,
-          "autheFlow": false
+          "authenticatorFlow": false
         }
       ]
     }

@@ -32,9 +32,8 @@ def vincular_cliente_keycloak(
     2. Si no se encuentra por ``keycloak_id`` y se dispone de un ``email``, busca por coincidencia exacta
        (insensible a mayúsculas/minúsculas) en el campo ``correo``. Si existe la ficha, le asigna el
        ``keycloak_id`` y crea o reactiva la asignación del usuario.
-    3. Si no existe ninguna ficha previa, crea una nueva entidad :class:`~customers.models.Cliente`
-       utilizando los datos extraídos de las claims de Keycloak (``nombre``, ``correo``, ``keycloak_id``, etc.)
-       y registra la asignación de representación principal para el usuario.
+    3. Si no existe una ficha previa, no crea ninguna. La asociación de identidades
+       con clientes es una atribución administrativa (RN03 del ERS).
 
     :param user: Instancia del usuario autenticado en Django.
     :type user: django.contrib.auth.models.AbstractBaseUser
@@ -120,50 +119,9 @@ def vincular_cliente_keycloak(
             _asegurar_asignacion(cliente, es_principal=True)
             return cliente
 
-    # 3. Si no existe ficha previa, crear automáticamente un nuevo Cliente
-    nombre_completo = ""
-    given_name = claims.get("given_name", "")
-    family_name = claims.get("family_name", "")
-    if given_name or family_name:
-        nombre_completo = f"{given_name} {family_name}".strip()
-    elif hasattr(user, "get_full_name") and user.get_full_name():
-        nombre_completo = user.get_full_name()
-    elif claims.get("name"):
-        nombre_completo = claims.get("name")
-    elif claims.get("preferred_username"):
-        nombre_completo = claims.get("preferred_username")
-    else:
-        nombre_completo = getattr(user, "username", "Cliente")
-
-    # Documento/RUC generado a partir de claims o clave única
-    documento_ruc = claims.get("documento_ruc") or claims.get("document_id") or claims.get("ruc")
-    if not documento_ruc:
-        if sub:
-            documento_ruc = f"KC-{sub[:8]}".upper()
-        else:
-            documento_ruc = f"DOC-{user.pk}"
-
-    # Evitar colisión de documento_ruc si ya existiera
-    base_doc = documento_ruc
-    counter = 1
-    while Cliente.objects.filter(documento_ruc=documento_ruc).exists():
-        documento_ruc = f"{base_doc}-{counter}"
-        counter += 1
-
-    cliente = Cliente.objects.create(
-        nombre=nombre_completo,
-        documento_ruc=documento_ruc,
-        correo=correo or f"{getattr(user, 'username', 'user')}@globalexchange.local",
-        keycloak_id=sub,
-        segmentacion=Cliente.Segmentacion.MINORISTA,
-        is_active=True,
-    )
-    _asegurar_asignacion(cliente, es_principal=True)
     logger.info(
-        "Nueva ficha de Cliente #%s creada y asignada automáticamente con Keycloak (sub=%s) para el usuario %s.",
-        cliente.id,
-        sub,
+        "El usuario %s no tiene una ficha de cliente asignada todavía.",
         getattr(user, "username", str(user)),
     )
-    return cliente
+    return None
 

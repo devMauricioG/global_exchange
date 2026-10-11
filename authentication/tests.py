@@ -253,8 +253,8 @@ class KeycloakBackendVinculationTests(TestCase):
         from authentication.backends import KeycloakOIDCAuthenticationBackend
         self.backend = KeycloakOIDCAuthenticationBackend()
 
-    def test_create_user_links_cliente(self):
-        """Verifica que al invocar create_user con claims OIDC se cree y vincule el Cliente."""
+    def test_create_user_without_administrative_assignment_has_no_cliente(self):
+        """El registro OIDC no crea una ficha de cliente sin asignación administrativa."""
         from customers.models import Cliente
 
         claims = {
@@ -271,11 +271,7 @@ class KeycloakBackendVinculationTests(TestCase):
         self.assertEqual(user.username, 'oidc_user')
 
         cliente = Cliente.objects.filter(keycloak_id='oidc-backend-sub-001').first()
-        self.assertIsNotNone(cliente)
-        self.assertTrue(cliente.assignments.filter(user=user, is_primary_representative=True, is_active=True).exists())
-        self.assertEqual(cliente.representante_principal.user, user)
-        self.assertEqual(cliente.correo, 'oidc.user@globalexchange.com')
-        self.assertEqual(cliente.nombre, 'Juan OIDC')
+        self.assertIsNone(cliente)
 
     def test_update_user_syncs_cliente(self):
         """Verifica que al actualizar usuario con update_user se sincronice la vinculación de Cliente."""
@@ -302,9 +298,7 @@ class KeycloakBackendVinculationTests(TestCase):
         self.backend.update_user(user, claims_updated)
 
         cliente = Cliente.objects.filter(keycloak_id='oidc-backend-sub-002').first()
-        self.assertIsNotNone(cliente)
-        self.assertTrue(cliente.assignments.filter(user=user, is_active=True).exists())
-        self.assertEqual(cliente.representante_principal.user, user)
+        self.assertIsNone(cliente)
 
 
 

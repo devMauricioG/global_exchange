@@ -19,6 +19,7 @@ import re
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -1453,6 +1454,8 @@ class SipapEndpointsTestCase(StripeTestBaseMixin, TestCase):
 
     def setUp(self):
         super().setUp()
+        self.user.groups.add(Group.objects.get_or_create(name='operator')[0])
+        self.client.force_login(self.user)
         self.transaccion_sipap = Transaction.objects.create(
             codigo_referencia='TX-SIPAP-HTTP-001',
             cliente=self.cliente,
