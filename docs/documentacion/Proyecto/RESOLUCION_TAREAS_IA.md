@@ -25,6 +25,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-94** | Orquestación en TransactionService para Transición Atómica de Pago y Liquidación | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-95** | Vistas e Interfaces de Usuario para Pago en Línea y Confirmación Bancaria | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-104** | Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-105** | Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4 | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -468,6 +469,37 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `rates/tests.py`
   * `transactions/tests.py`
   * `docs/documentacion/SCRUM-104.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 18. SCRUM-105: Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4
+
+* **Objetivo:** Actualizar los documentos formales de ingeniería: diagrama de clases (`DIS_CLA_01`), diagrama de paquetes (`DIS_PAQ_01`), casos de prueba (`DIS_CPR_01`) y especificación ERS incorporando los módulos de pasarelas de pago, MFA, alertas y RBAC.
+* **Aportes y Solución con IA:**
+  * **Especificación de Requerimientos de Software (ERS v3.4 - `EQUIPO_08_A_ERS.md`):**
+    * Incorporación de definiciones formales de Stripe, SIPAP (BCP), MFA/TOTP, Webhooks e Idempotencia.
+    * Formalización de Requerimientos Funcionales RF-39 (Stripe Checkout y Webhooks), RF-40 (Conciliación Bancaria Local SIPAP), RF-41 (Orquestación Transaccional y Liquidación Atómica), RF-42 (Vistas de Checkout y Pago en Línea), RF-43 (Autenticación Multifactor MFA), RF-44 (Alertas de Cotización y Centro de Notificaciones) y RF-45 (Módulo de Permisos RBAC y Menú Dinámico).
+    * Incorporación de Requerimientos No Funcionales RNF-SEC-05 (Firma criptográfica en webhooks), RNF-SEC-06 (Idempotencia estricta en pagos) y RNF-SEC-07 (Principio de menor privilegio y bloqueo HTTP 403).
+    * Registro formal en el historial de cambios (versión 3.4 fechada al 12/10/2026).
+  * **Diagrama de Clases UML (`DIS_CLA_01` - `EQUIPO_88_B_DIS_CLA_01.md`):**
+    * Documentación detallada de atributos, métodos y multiplicidades para `PaymentWebhookEvent`, `PaymentGatewayRecord`, `SipapTransferRecord`, `StripeService`, `SipapService`, `ExchangeAlert`, `NotificationService`, decoradores RBAC y claims MFA.
+    * Actualización del modelo `Transaction` con campos de pago (`fecha_pago`, `referencia_externa_pago`, `pasarela_pago`).
+    * Diagrama Mermaid integral actualizado reflejando todas las entidades de dominio y servicios del Sprint 4.
+  * **Diagrama de Paquetes y Arquitectura (`DIS_PAQ_01` - `EQUIPO_88_B_DIS_PAQ_01.md`):**
+    * Actualización de responsabilidades y componentes de `apps.payments`, `apps.transactions`, `apps.rates` y `apps.authentication`.
+    * Ampliación del catálogo de interfaces expuestas (endpoints webhook, conciliación/simulación SIPAP, checkout interactivo, alertas de cambio y perfil MFA).
+  * **Casos de Prueba Formales (`DIS_CPR_01` - `EQUIPO_88_B_DIS_CPR_01.md`):**
+    * Incorporación de 31 nuevos casos de prueba estructurados: Módulo 16 CPR-STR (Stripe y Webhooks), Módulo 17 CPR-SIP (SIPAP), Módulo 18 CPR-ALT (Alertas y Notificaciones), Módulo 19 CPR-RBC (RBAC y MFA) y Módulo 20 CPR-ORQ (Orquestación atómica de pagos).
+  * **Documento Específico de Tarea:**
+    * Creación de `docs/documentacion/SCRUM-105.md` con trazabilidad completa de los artefactos intervenidos.
+* **Archivos intervenidos:**
+  * `docs/documentacion/Proyecto/EQUIPO_08_A_ERS.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CLA_01.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_PAQ_01.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CPR_01.md`
+  * `docs/documentacion/SCRUM-105.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
 
