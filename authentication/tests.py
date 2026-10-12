@@ -729,4 +729,151 @@ class RBACPermissionsModuleTests(TestCase):
             cbv(req_std)
 
 
+class DynamicNavMenuActiveCustomerTests(TestCase):
+    """
+    SCRUM-103 – Menú de navegación dinámico y condicional según roles y cliente activo.
 
+    Verifica que:
+    - Transacciones, Medios de Pago y Medios de Acreditación sean visibles
+      únicamente cuando existe un cliente activo en sesión **o** el usuario
+      tiene rol operator/admin.
+    - Cotizador, Alertas y Cotizaciones sean siempre visibles para cualquier
+      usuario autenticado (independientemente del cliente activo).
+    - Los accesos exclusivos a roles (Clientes, Comisiones, Límites, Panel Admin)
+      se mantienen condicionados al rol del usuario.
+    """
+
+    def setUp(self):
+        """Configura usuarios y un cliente para las pruebas de navegación condicional."""
+        from customers.models import Cliente, CustomerUserAssignment
+
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+
+        # Usuario estándar SIN cliente activo
+        self.user_no_client = User.objects.create_user(
+            username='nav103_noclient',
+            email='nav103_noclient@test.com',
+            password='Password123!',
+        )
+        self.user_no_client.groups.add(self.group_user)
+        self.client_no_client = Client()
+        self.client_no_client.force_login(self.user_no_client)
+
+        # Usuario estándar CON cliente activo (asignado y seleccionado en sesión)
+        self.user_with_client = User.objects.create_user(
+            username='nav103_withclient',
+            email='nav103_withclient@test.com',
+            password='Password123!',
+        )
+        self.user_with_client.groups.add(self.group_user)
+        self.cliente = Cliente.objects.create(
+            nombre='Empresa Nav103',
+            documento_ruc='NAV103-001',
+            correo='nav103@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente,
+            user=self.user_with_client,
+            is_primary_representative=True,
+            is_active=True,
+        )
+        self.client_with_client = Client()
+        self.client_with_client.force_login(self.user_with_client)
+        # Inyectar cliente activo en sesión
+        session = self.client_with_client.session
+        session['active_customer_id'] = self.cliente.id
+        session.save()
+
+        # Operador (sin cliente activo pero con rol privilegiado)
+        self.op_user = User.objects.create_user(
+            username='nav103_op',
+            email='nav103_op@test.com',
+            password='Password123!',
+            is_staff=True,
+        )
+        self.op_user.groups.add(self.group_operator)
+        self.client_operator = Client()
+        self.client_operator.force_login(self.op_user)
+
+        # Administrador
+        self.admin_user = User.objects.create_superuser(
+            username='nav103_admin',
+            email='nav103_admin@test.com',
+            password='Password123!',
+        )
+        self.client_admin = Client()
+        self.client_admin.force_login(self.admin_user)
+
+    # ─── Usuario sin cliente activo ───────────────────────────────────────────
+
+    def test_user_without_active_client_does_not_see_transactional_items(self):
+        """Un usuario estándar SIN cliente activo no ve el enlace nav a Transacciones ni Medios de Pago."""
+        response = self.client_no_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        # Verificamos ausencia del href del ítem de nav (no texto libre que puede aparecer en el footer)
+        self.assertNotContains(response, 'href="/transactions/"')
+        self.assertNotContains(response, 'href="/payments/"')
+        self.assertNotContains(response, 'href="/payments/acreditacion/"')
+
+    def test_user_without_active_client_sees_common_items(self):
+        """Un usuario estándar SIN cliente activo sí ve Cotizador, Alertas y Cotizaciones."""
+        response = self.client_no_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Cotizador')
+        self.assertContains(response, 'Alertas')
+        self.assertContains(response, 'Cotizaciones')
+
+    def test_user_without_active_client_does_not_see_role_restricted_items(self):
+        """Un usuario estándar SIN cliente activo no ve Clientes, Comisiones ni Panel Admin."""
+        response = self.client_no_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Panel Admin')
+        self.assertNotContains(response, 'href="/rates/commissions/"')
+
+    # ─── Usuario con cliente activo ───────────────────────────────────────────
+
+    def test_user_with_active_client_sees_transactional_items(self):
+        """Un usuario estándar CON cliente activo ve Transacciones, Medios de Pago y Acreditación."""
+        response = self.client_with_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/transactions/"')
+        self.assertContains(response, 'href="/payments/"')
+        self.assertContains(response, 'href="/payments/acreditacion/"')
+
+    def test_user_with_active_client_does_not_see_admin_only_items(self):
+        """Un usuario estándar CON cliente activo no ve Panel Admin ni Comisiones en el menú nav."""
+        response = self.client_with_client.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Panel Admin')
+        self.assertNotContains(response, 'href="/rates/commissions/"')
+
+    # ─── Operador (sin cliente activo, rol privilegiado) ─────────────────────
+
+    def test_operator_sees_transactional_items_without_active_client(self):
+        """Un operador ve Transacciones y Medios de Pago aunque no tenga cliente activo."""
+        response = self.client_operator.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/transactions/"')
+        self.assertContains(response, 'href="/payments/"')
+        self.assertContains(response, 'href="/payments/acreditacion/"')
+
+    def test_operator_sees_clients_commissions_and_limits(self):
+        """Un operador ve Clientes, Comisiones y Límites en el menú."""
+        response = self.client_operator.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Clientes')
+        self.assertContains(response, 'href="/rates/commissions/"')
+        self.assertNotContains(response, 'Panel Admin')
+
+    # ─── Administrador ────────────────────────────────────────────────────────
+
+    def test_admin_sees_all_menu_items_including_admin_panel(self):
+        """Un administrador ve todos los ítems de menú incluido Panel Admin."""
+        response = self.client_admin.get(reverse('home'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Panel Admin')
+        self.assertContains(response, 'Clientes')
+        self.assertContains(response, 'href="/transactions/"')
+        self.assertContains(response, 'href="/rates/commissions/"')
+        self.assertContains(response, 'Cotizador')
