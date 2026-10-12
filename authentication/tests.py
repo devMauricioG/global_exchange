@@ -877,3 +877,231 @@ class DynamicNavMenuActiveCustomerTests(TestCase):
         self.assertContains(response, 'href="/transactions/"')
         self.assertContains(response, 'href="/rates/commissions/"')
         self.assertContains(response, 'Cotizador')
+
+
+# ==============================================================================
+# SCRUM-104: VERIFICACIÓN CRUZADA HTTP 403 EN VISTAS PROTEGIDAS POR RBAC
+# ==============================================================================
+
+class CrossAppRBAC403VerificationTests(TestCase):
+    """
+    Suite de pruebas SCRUM-104 para verificar que las vistas protegidas por RBAC
+    en payments, transactions y rates retornen HTTP 403 o redirección para
+    usuarios no autorizados.
+    """
+
+    def setUp(self):
+        from customers.models import Cliente, CustomerUserAssignment
+        from rates.models import Currency
+
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+
+        self.std_user = User.objects.create_user(
+            username='cross_rbac_user', email='cross_rbac@test.com', password='Password123!',
+        )
+        self.std_user.groups.add(self.group_user)
+
+        self.op_user = User.objects.create_user(
+            username='cross_rbac_op', email='cross_op@test.com', password='Password123!',
+            is_staff=True,
+        )
+        self.op_user.groups.add(self.group_operator)
+
+        self.admin_user = User.objects.create_superuser(
+            username='cross_rbac_admin', email='cross_admin@test.com', password='AdminPwd123!',
+        )
+
+        self.usd = Currency.objects.create(code='USD', name='Dolar', symbol='$', decimals=2, is_active=True)
+        self.pyg = Currency.objects.create(code='PYG', name='Guarani', symbol='Gs', decimals=0, is_active=True)
+
+        self.cliente_a = Cliente.objects.create(
+            nombre='Empresa A', documento_ruc='RBAC-A-001', correo='a@test.com',
+        )
+        self.cliente_b = Cliente.objects.create(
+            nombre='Empresa B', documento_ruc='RBAC-B-001', correo='b@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_a, user=self.std_user,
+            is_primary_representative=True, is_active=True,
+        )
+
+    def test_sipap_simulate_forbidden_for_standard_user(self):
+        """Un usuario estandar (rol 'user') recibe 403 al intentar simular transferencia SIPAP."""
+        self.client.force_login(self.std_user)
+        response = self.client.post(
+            reverse('payments:sipap-simulate-transfer'),
+            data='{"monto": "1000000", "moneda": "PYG"}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_sipap_confirm_forbidden_for_standard_user(self):
+        """Un usuario estandar recibe 403 al intentar confirmar deposito SIPAP."""
+        self.client.force_login(self.std_user)
+        response = self.client.post(
+            reverse('payments:sipap-confirm-deposit'),
+            data='{"codigo_transferencia": "SIPAP-TEST"}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_sipap_reject_forbidden_for_standard_user(self):
+        """Un usuario estandar recibe 403 al intentar rechazar transferencia SIPAP."""
+        self.client.force_login(self.std_user)
+        response = self.client.post(
+            reverse('payments:sipap-reject-transfer'),
+            data='{"codigo_transferencia": "SIPAP-TEST", "motivo": "test"}',
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_sipap_simulate_allowed_for_operator(self):
+        """Un operador puede acceder al endpoint de simulacion SIPAP."""
+        self.client.force_login(self.op_user)
+        response = self.client.post(
+            reverse('payments:sipap-simulate-transfer'),
+            data='{"monto": "1000000", "moneda": "PYG", "banco_origen": "Banco Test", "cuenta_origen": "12345", "titular_origen": "Test"}',
+            content_type='application/json',
+        )
+        self.assertIn(response.status_code, [200, 201])
+
+    def test_unauthenticated_user_redirected_from_transactions(self):
+        """Un usuario no autenticado es redirigido al intentar acceder a transacciones."""
+        response = self.client.get(reverse('transactions:list'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/oidc/authenticate/', response.url)
+
+    def test_unauthenticated_user_redirected_from_payment_methods(self):
+        """Un usuario no autenticado es redirigido al intentar acceder a medios de pago."""
+        response = self.client.get(reverse('payments:paymentmethod-list'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_currency_admin_views_forbidden_for_user_role(self):
+        """Un usuario con rol 'user' no puede acceder a vistas admin de monedas."""
+        self.client.force_login(self.std_user)
+        response = self.client.get(reverse('rates:currency-create'))
+        self.assertIn(response.status_code, [302, 403],
+                      'Deberia redirigir o denegar acceso a usuario estandar')
+
+    def test_admin_can_access_sipap_endpoints(self):
+        """Un admin puede acceder a todos los endpoints SIPAP."""
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse('payments:sipap-simulate-transfer'),
+            data='{"monto": "500000", "moneda": "PYG", "banco_origen": "Test", "cuenta_origen": "999", "titular_origen": "Admin"}',
+            content_type='application/json',
+        )
+        self.assertIn(response.status_code, [200, 201])
+
+
+class ActiveCustomerRequiredDecoratorTest(TestCase):
+    """
+    Pruebas SCRUM-104 para el decorador @active_customer_required.
+
+    Verifica que vistas protegidas rechacen peticiones de usuarios sin cliente activo.
+    """
+
+    def setUp(self):
+        from customers.models import Cliente, CustomerUserAssignment
+
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+        self.user_with_customer = User.objects.create_user(
+            username='has_customer', email='hascust@test.com', password='Password123!',
+        )
+        self.user_with_customer.groups.add(self.group_user)
+
+        self.user_without_customer = User.objects.create_user(
+            username='no_customer', email='nocust@test.com', password='Password123!',
+        )
+        self.user_without_customer.groups.add(self.group_user)
+
+        self.cliente = Cliente.objects.create(
+            nombre='Cliente Decorator Test', documento_ruc='DEC-001', correo='dec@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente, user=self.user_with_customer,
+            is_primary_representative=True, is_active=True,
+        )
+
+    def test_user_without_customer_redirected_from_transaction_create(self):
+        """Un usuario sin cliente activo es redirigido al intentar crear transacciones."""
+        self.client.force_login(self.user_without_customer)
+        response = self.client.get(reverse('transactions:create'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_user_with_customer_can_access_transaction_create(self):
+        """Un usuario con cliente activo puede acceder a la creacion de transacciones."""
+        self.client.force_login(self.user_with_customer)
+        response = self.client.get(reverse('transactions:create'))
+        self.assertNotEqual(response.status_code, 403)
+
+
+class CustomerOwnershipIsolationTests(TestCase):
+    """
+    Pruebas SCRUM-104 para verificar el aislamiento de ownership entre clientes.
+    """
+
+    def setUp(self):
+        from customers.models import Cliente, CustomerUserAssignment
+        from authentication.permissions import verify_customer_ownership
+
+        self.verify = verify_customer_ownership
+
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+        self.user_a = User.objects.create_user(
+            username='owner_a', email='ownera@test.com', password='Password123!',
+        )
+        self.user_a.groups.add(self.group_user)
+        self.user_b = User.objects.create_user(
+            username='owner_b', email='ownerb@test.com', password='Password123!',
+        )
+        self.user_b.groups.add(self.group_user)
+
+        self.cliente_a = Cliente.objects.create(
+            nombre='Owner A Corp', documento_ruc='OWN-A-001', correo='owna@test.com',
+        )
+        self.cliente_b = Cliente.objects.create(
+            nombre='Owner B Corp', documento_ruc='OWN-B-001', correo='ownb@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_a, user=self.user_a,
+            is_primary_representative=True, is_active=True,
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente_b, user=self.user_b,
+            is_primary_representative=True, is_active=True,
+        )
+
+    def test_user_can_access_own_customer_by_instance(self):
+        """verify_customer_ownership retorna True con la instancia del propio cliente."""
+        self.assertTrue(self.verify(self.user_a, self.cliente_a))
+
+    def test_user_can_access_own_customer_by_id(self):
+        """verify_customer_ownership retorna True con el ID numerico del propio cliente."""
+        self.assertTrue(self.verify(self.user_a, self.cliente_a.id))
+
+    def test_user_cannot_access_other_customer_by_instance(self):
+        """verify_customer_ownership retorna False para un cliente ajeno."""
+        self.assertFalse(self.verify(self.user_a, self.cliente_b))
+
+    def test_user_cannot_access_other_customer_by_id(self):
+        """verify_customer_ownership retorna False para un ID de cliente ajeno."""
+        self.assertFalse(self.verify(self.user_a, self.cliente_b.id))
+
+    def test_anonymous_user_always_denied(self):
+        """Un usuario anonimo no pasa la verificacion de ownership."""
+        self.assertFalse(self.verify(AnonymousUser(), self.cliente_a))
+
+    def test_admin_can_access_any_customer(self):
+        """Un superusuario puede acceder a cualquier cliente."""
+        admin = User.objects.create_superuser(
+            username='owner_admin', email='ownadmin@test.com', password='AdminPwd123!',
+        )
+        self.assertTrue(self.verify(admin, self.cliente_a))
+        self.assertTrue(self.verify(admin, self.cliente_b))
+
+    def test_string_id_ownership(self):
+        """verify_customer_ownership funciona con IDs en formato string."""
+        self.assertTrue(self.verify(self.user_a, str(self.cliente_a.id)))
+        self.assertFalse(self.verify(self.user_a, str(self.cliente_b.id)))

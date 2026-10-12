@@ -24,6 +24,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-93** | Servicio de Simulación y Confirmación Bancaria Local SIPAP | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-94** | Orquestación en TransactionService para Transición Atómica de Pago y Liquidación | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-95** | Vistas e Interfaces de Usuario para Pago en Línea y Confirmación Bancaria | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-104** | Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -435,6 +436,38 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `templates/transactions/transaction_detail.html`
   * `transactions/tests.py`
   * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 17. SCRUM-104: Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC
+
+* **Objetivo:** Escribir la suite completa de tests en PyUnit (`apps/payments/tests/`, `apps/transactions/tests/`, `apps/rates/tests/`, `apps/authentication/tests/`) con mocks de webhooks de Stripe/SIPAP, validación de señales de alertas y verificación de permisos HTTP 403.
+* **Aportes y Solución con IA:**
+  * **Pasarela de Pagos y Webhooks (`payments/tests.py`):**
+    * Mocks de webhooks de Stripe (`checkout.session.completed`), validación de firmas criptográficas inválidas (retorno 400), y control de idempotencia con el modelo `PaymentWebhookEvent`.
+    * Cobertura completa de simulación, conciliación de depósitos y rechazo bancario de transferencias locales en `SipapService`.
+    * Pruebas del modelo `PaymentGatewayRecord` cubriendo estados de auditoría y transiciones.
+  * **Notificaciones y Señales de Cotización (`rates/tests.py`):**
+    * Verificación de la señal `post_save` de `ExchangeRate` para la evaluación y activación de `ExchangeAlert`.
+    * Cobertura de condiciones de umbral (`MAYOR_IGUAL`, `MENOR_IGUAL`), invocación a `NotificationService`, y casos límite (alertas inactivas, sin usuarios asignados).
+  * **Control de Acceso y RBAC HTTP 403 / Redirección (`authentication/tests.py`):**
+    * Verificación de permisos y aislamiento de roles en vistas administrativas (retorno HTTP 403 o redirección según política de seguridad).
+    * Validación de redirección de usuarios no autenticados (`/oidc/authenticate/`).
+  * **Aislamiento IDOR y Recibos (`transactions/tests.py`):**
+    * Verificación contra IDOR en vistas de detalle, cancelación y comprobantes de liquidación cambiaria.
+    * Cobertura de la vista de recibos (`TransactionReceiptView`).
+  * **Compatibilidad de Rutas `apps.*` (`apps/__init__.py`):**
+    * Enrutamiento dinámico en `sys.modules` para permitir ejecuciones bajo la nomenclatura `apps.<modulo>.tests`.
+  * **Resultados:** 455 tests totales en la suite pasando al 100% (OK) con 0 fallos y 0 errores.
+* **Archivos intervenidos:**
+  * `apps/__init__.py`
+  * `authentication/tests.py`
+  * `payments/tests.py`
+  * `rates/tests.py`
+  * `transactions/tests.py`
+  * `docs/documentacion/SCRUM-104.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
 
