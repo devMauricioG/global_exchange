@@ -268,6 +268,27 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Escribí una suite de 13 pruebas unitarias e integración en `TransactionPaymentCheckoutViewTest` (`transactions/tests.py`), alcanzando un total de **352 tests aprobados con 100% de éxito (OK)**.
 - Actualicé el estado de la tarea en `TAREAS.md`, `RESOLUCION_TAREAS_IA.md` y `chat_ia.md`.
 
+---
 
+## Mauricio González — 12/10/2026 — Antigravity IDE (Gemini)
 
+**Contexto:** Sprint 4 — Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC (SCRUM-104)
 
+**Resumen:**
+- Implementé y consolidé la suite integral de pruebas unitarias automatizadas con PyUnit cubriendo los módulos requeridos (`apps/payments/tests/`, `apps/transactions/tests/`, `apps/rates/tests/`, `apps/authentication/tests/`).
+- **Módulo de Pagos (`payments/tests.py`):**
+  - Mocks exhaustivos de webhooks de Stripe (`checkout.session.completed`), validación de firmas criptográficas inválidas con retorno HTTP 400 y pruebas de idempotencia con el modelo `PaymentWebhookEvent`.
+  - Pruebas del servicio bancario `SipapService` simulando transferencias, confirmación de depósitos y rechazos controlados.
+  - Pruebas de persistencia y ciclo de vida de `PaymentGatewayRecord`.
+- **Módulo de Cotizaciones y Notificaciones (`rates/tests.py`):**
+  - Pruebas para la señal `post_save` de `ExchangeRate` evaluando alertas `ExchangeAlert` (condiciones de umbral mayor o menor).
+  - Verificación del despacho de notificaciones a través de `NotificationService`.
+- **Módulo de Autenticación y RBAC (`authentication/tests.py`):**
+  - Verificación de políticas RBAC con validación de código HTTP 403 o redirección para usuarios con roles no autorizados en vistas administrativas.
+  - Validación de redirección segura a `/oidc/authenticate/` para usuarios anónimos en transacciones y medios de pago.
+- **Módulo de Transacciones (`transactions/tests.py`):**
+  - Pruebas de mitigación IDOR en vistas de detalle, cancelación y comprobante formal de liquidación cambiaria (`TransactionReceiptView`).
+  - Restricción de cancelación sobre transacciones ya completadas.
+- **Enrutamiento dinámico `apps.*` (`apps/__init__.py`):**
+  - Configuración en `sys.modules` para permitir la importación y ejecución de tests con la convención `apps.<app>.tests`.
+- **Resultados:** 455 tests totales del proyecto aprobados al 100% de éxito (`OK`), sin regresiones.

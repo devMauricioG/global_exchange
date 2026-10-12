@@ -1159,3 +1159,183 @@ class TransactionPaymentCheckoutViewTest(TransactionTestMixin, TestCase):
         self.assertContains(response, 'Stripe')
         self.assertContains(response, 'cs_test_checkout_888')
 
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE AISLAMIENTO IDOR Y RBAC EN TRANSACCIONES
+# ==============================================================================
+
+class TransactionIDORIsolationTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para verificar el aislamiento IDOR entre clientes
+    en las vistas de transacciones.
+
+    Un usuario solo puede acceder a las transacciones de su propio cliente.
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.my_tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+        # Transaccion de otro cliente
+        self.other_tx = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+
+    def test_user_can_view_own_transaction_detail(self):
+        """Un usuario puede ver el detalle de su propia transaccion."""
+        url = reverse('transactions:detail', kwargs={'pk': self.my_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_cannot_view_other_client_transaction_detail(self):
+        """Un usuario no puede ver la transaccion de otro cliente (404)."""
+        url = reverse('transactions:detail', kwargs={'pk': self.other_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_user_transaction_list_only_shows_own(self):
+        """El listado de transacciones solo muestra las del cliente propio."""
+        url = reverse('transactions:list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.my_tx.codigo_referencia)
+        self.assertNotContains(response, self.other_tx.codigo_referencia)
+
+    def test_user_cannot_cancel_other_client_transaction(self):
+        """Un usuario no puede cancelar la transaccion de otro cliente."""
+        url = reverse('transactions:cancel', kwargs={'pk': self.other_tx.pk})
+        response = self.client.post(url)
+        # Deberia redirigir o negar
+        self.other_tx.refresh_from_db()
+        self.assertEqual(self.other_tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_admin_can_view_any_transaction(self):
+        """Un superusuario puede ver las transacciones de cualquier cliente."""
+        admin = User.objects.create_superuser(
+            username='tx_idor_admin', email='txadmin@test.com', password='AdminPwd123!',
+        )
+        self.client.force_login(admin)
+        url = reverse('transactions:detail', kwargs={'pk': self.other_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+
+class TransactionUnauthenticatedAccessTest(TestCase):
+    """
+    Pruebas SCRUM-104 para verificar que todas las vistas de transacciones
+    redirijan a usuarios no autenticados.
+    """
+
+    def test_transaction_list_redirects_unauthenticated(self):
+        """GET /transactions/ redirige a login."""
+        response = self.client.get(reverse('transactions:list'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/oidc/authenticate/', response.url)
+
+    def test_transaction_detail_redirects_unauthenticated(self):
+        """GET /transactions/<pk>/ redirige a login."""
+        response = self.client.get(reverse('transactions:detail', kwargs={'pk': 9999}))
+        self.assertEqual(response.status_code, 302)
+
+    def test_transaction_create_redirects_unauthenticated(self):
+        """GET /transactions/create/ redirige a login."""
+        response = self.client.get(reverse('transactions:create'))
+        self.assertEqual(response.status_code, 302)
+
+
+class TransactionServiceExtendedTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas extendidas SCRUM-104 para TransactionService.
+
+    Cubre escenarios de borde en la orquestacion de pagos.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_check_and_cancel_single_does_not_cancel_fresh_transaction(self):
+        """check_and_cancel_single no cancela una transaccion recien creada (<5 min)."""
+        TransactionService.check_and_cancel_single(self.tx)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_check_and_cancel_single_cancels_expired_transaction(self):
+        """check_and_cancel_single cancela una transaccion expirada (>5 min)."""
+        past = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past)
+        self.tx.refresh_from_db()
+
+        TransactionService.check_and_cancel_single(self.tx)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_is_transaction_expired_returns_false_for_fresh(self):
+        """is_transaction_expired retorna False para una transaccion recien creada."""
+        self.assertFalse(TransactionService.is_transaction_expired(self.tx))
+
+    def test_is_transaction_expired_returns_true_for_old(self):
+        """is_transaction_expired retorna True para una transaccion de mas de 5 minutos."""
+        past = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past)
+        self.tx.refresh_from_db()
+        self.assertTrue(TransactionService.is_transaction_expired(self.tx))
+
+    def test_cancel_transaction_by_customer_prevents_idor(self):
+        """cancel_transaction_by_customer rechaza cancelar la transaccion de otro cliente."""
+        with self.assertRaises(ValidationError):
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=self.tx.id,
+                cliente=self.otro_cliente,
+                usuario=self.otro_user,
+                motivo='Intento IDOR',
+            )
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_with_transaction_id(self):
+        """process_payment_confirmation acepta un ID entero de transaccion."""
+        completed_tx = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx.id,
+            gateway='SIPAP',
+            referencia_externa='SIPAP-ID-TEST-001',
+            monto_pagado=self.tx.monto_origen,
+            moneda_pagada=self.tx.moneda_origen.code,
+        )
+        self.assertEqual(completed_tx.estado, Transaction.Estado.COMPLETADA)
+
+    def test_completed_transaction_cannot_be_cancelled(self):
+        """Una transaccion completada no puede cancelarse."""
+        self.tx.mark_as_completed()
+        with self.assertRaises(ValidationError):
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=self.tx.id,
+                cliente=self.cliente,
+                usuario=self.user,
+                motivo='Intento post-completada',
+            )
+
+
+class TransactionReceiptViewTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para la vista de comprobante de transaccion.
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_receipt_view_accessible_for_owner(self):
+        """Un usuario puede acceder al comprobante de su transaccion."""
+        url = reverse('transactions:receipt', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_receipt_view_unauthenticated_redirects(self):
+        """Un usuario no autenticado es redirigido al intentar ver el comprobante."""
+        self.client.logout()
+        url = reverse('transactions:receipt', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)

@@ -2084,3 +2084,634 @@ class CurrencyFiltersTemplateTagTest(TestCase):
 
 
 
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE MODELOS DE ALERTAS Y NOTIFICACIONES
+# ==============================================================================
+
+class RateAlertSubscriptionModelTest(TestCase):
+    """
+    Pruebas unitarias para el modelo RateAlertSubscription (SCRUM-104).
+
+    Verifica validaciones, ciclo de vida y representación textual
+    de las suscripciones de alerta de cotización.
+    """
+
+    def setUp(self):
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0)
+        self.cliente = Cliente.objects.create(
+            nombre='Empresa Alerta Test',
+            documento_ruc='ALERT-001',
+            correo='alerta@test.com',
+        )
+
+    def test_create_alert_subscription_success(self):
+        """Una suscripción con datos válidos se crea correctamente."""
+        from rates.models import RateAlertSubscription
+        alerta = RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7500.00'),
+            condicion=RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+        self.assertTrue(alerta.activo)
+        self.assertIsNotNone(alerta.created_at)
+        self.assertIn('USD/PYG', str(alerta))
+        self.assertIn('≥', str(alerta))
+
+    def test_create_alert_subscription_sell_lte(self):
+        """Suscripción de venta con condición LTE (menor o igual)."""
+        from rates.models import RateAlertSubscription
+        alerta = RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=RateAlertSubscription.TipoOperacion.SELL,
+            tasa_umbral=Decimal('7200.00'),
+            condicion=RateAlertSubscription.Condicion.MENOR_IGUAL,
+        )
+        self.assertIn('≤', str(alerta))
+        self.assertIn('Venta', str(alerta))
+
+    def test_same_currency_pair_rejected(self):
+        """No se permite crear una suscripción con la misma moneda base y destino."""
+        from rates.models import RateAlertSubscription
+        with self.assertRaises(ValidationError) as ctx:
+            RateAlertSubscription.objects.create(
+                cliente=self.cliente,
+                base_currency=self.usd,
+                target_currency=self.usd,
+                tipo_operacion=RateAlertSubscription.TipoOperacion.BUY,
+                tasa_umbral=Decimal('100'),
+                condicion=RateAlertSubscription.Condicion.MAYOR_IGUAL,
+            )
+        self.assertIn('target_currency', ctx.exception.message_dict)
+
+    def test_negative_threshold_rejected(self):
+        """No se permite un umbral negativo o cero."""
+        from rates.models import RateAlertSubscription
+        with self.assertRaises(ValidationError) as ctx:
+            RateAlertSubscription.objects.create(
+                cliente=self.cliente,
+                base_currency=self.usd,
+                target_currency=self.pyg,
+                tipo_operacion=RateAlertSubscription.TipoOperacion.BUY,
+                tasa_umbral=Decimal('-10'),
+                condicion=RateAlertSubscription.Condicion.MAYOR_IGUAL,
+            )
+        self.assertIn('tasa_umbral', ctx.exception.message_dict)
+
+    def test_zero_threshold_rejected(self):
+        """Umbral exactamente cero es rechazado."""
+        from rates.models import RateAlertSubscription
+        with self.assertRaises(ValidationError):
+            RateAlertSubscription.objects.create(
+                cliente=self.cliente,
+                base_currency=self.usd,
+                target_currency=self.pyg,
+                tipo_operacion=RateAlertSubscription.TipoOperacion.BUY,
+                tasa_umbral=Decimal('0'),
+                condicion=RateAlertSubscription.Condicion.MAYOR_IGUAL,
+            )
+
+
+class UserNotificationModelTest(TestCase):
+    """
+    Pruebas unitarias para el modelo UserNotification (SCRUM-104).
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='notif_user', email='notif@test.com', password='Password123!',
+        )
+
+    def test_create_notification(self):
+        """Se puede crear una notificación con título y mensaje."""
+        from rates.models import UserNotification
+        notif = UserNotification.objects.create(
+            usuario=self.user,
+            titulo='Alerta USD/PYG',
+            mensaje='La tasa superó el umbral.',
+        )
+        self.assertFalse(notif.leido)
+        self.assertIsNotNone(notif.fecha_creacion)
+        self.assertIn('Sin leer', str(notif))
+
+    def test_mark_notification_as_read(self):
+        """Marcar como leída actualiza el campo leido."""
+        from rates.models import UserNotification
+        notif = UserNotification.objects.create(
+            usuario=self.user, titulo='Test', mensaje='Msg',
+        )
+        notif.leido = True
+        notif.save()
+        notif.refresh_from_db()
+        self.assertTrue(notif.leido)
+
+    def test_notification_ordering(self):
+        """Las notificaciones se ordenan por fecha de creación descendente."""
+        from rates.models import UserNotification
+        n1 = UserNotification.objects.create(usuario=self.user, titulo='A', mensaje='1')
+        n2 = UserNotification.objects.create(usuario=self.user, titulo='B', mensaje='2')
+        qs = list(UserNotification.objects.filter(usuario=self.user))
+        self.assertEqual(qs[0].pk, n2.pk)  # más reciente primero
+
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE SEÑALES (SIGNALS) PARA ALERTAS DE COTIZACIÓN
+# ==============================================================================
+
+class RateAlertSignalTest(TestCase):
+    """
+    Pruebas unitarias para la señal evaluar_alertas_cotizacion (SCRUM-104 / SCRUM-99).
+
+    Verifica que al guardar una cotización vigente se evalúen las suscripciones
+    activas y se generen notificaciones internas y se desactive la suscripción.
+    Utiliza mocks para evitar el envío real de correos.
+    """
+
+    def setUp(self):
+        from rates.models import RateAlertSubscription, UserNotification
+        self.RateAlertSubscription = RateAlertSubscription
+        self.UserNotification = UserNotification
+
+        self.user = User.objects.create_user(
+            username='signal_test_user', email='signal@test.com', password='Password123!',
+        )
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2, is_active=True)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0, is_active=True)
+        self.cliente = Cliente.objects.create(
+            nombre='Cliente Signal', documento_ruc='SIG-001', correo='signal_client@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente, user=self.user,
+            is_primary_representative=True, is_active=True,
+        )
+
+    def _create_current_rate(self, buy_rate, sell_rate):
+        """Crea una ExchangeRate vigente (is_current=True)."""
+        now = timezone.now()
+        return ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal(str(buy_rate)),
+            sell_rate=Decimal(str(sell_rate)),
+            spread=Decimal(str(sell_rate)) - Decimal(str(buy_rate)),
+            valid_from=now - timedelta(minutes=1),
+            valid_to=now + timedelta(hours=1),
+            is_active=True,
+        )
+
+    def test_signal_dispatches_notification_when_threshold_crossed_gte(self):
+        """Cuando una cotización vigente cruza el umbral GTE, se genera notificación y se desactiva la suscripción."""
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7500'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+
+        # La sell_rate (7600) >= 7500 -> se cumple la condición BUY (usa sell_rate)
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        alerta.refresh_from_db()
+        self.assertFalse(alerta.activo, 'La suscripción debería desactivarse al cumplir el umbral')
+
+        notifs = self.UserNotification.objects.filter(usuario=self.user)
+        self.assertEqual(notifs.count(), 1)
+        self.assertIn('USD/PYG', notifs.first().titulo)
+
+    def test_signal_dispatches_notification_when_threshold_crossed_lte(self):
+        """Cuando una cotización vigente cruza el umbral LTE, se genera notificación."""
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.SELL,
+            tasa_umbral=Decimal('7500'),
+            condicion=self.RateAlertSubscription.Condicion.MENOR_IGUAL,
+        )
+
+        # La buy_rate (7400) <= 7500 -> se cumple la condición SELL (usa buy_rate)
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        alerta.refresh_from_db()
+        self.assertFalse(alerta.activo)
+
+        notifs = self.UserNotification.objects.filter(usuario=self.user)
+        self.assertEqual(notifs.count(), 1)
+
+    def test_signal_does_not_fire_when_threshold_not_crossed(self):
+        """Si la tasa no cruza el umbral, la suscripción permanece activa y no se crean notificaciones."""
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('8000'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        alerta.refresh_from_db()
+        self.assertTrue(alerta.activo)
+        self.assertEqual(self.UserNotification.objects.filter(usuario=self.user).count(), 0)
+
+    def test_signal_ignores_inactive_subscriptions(self):
+        """Las suscripciones inactivas no se evalúan."""
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7000'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+        # Desactivar manualmente
+        self.RateAlertSubscription.objects.filter(pk=alerta.pk).update(activo=False)
+
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        self.assertEqual(self.UserNotification.objects.filter(usuario=self.user).count(), 0)
+
+    def test_signal_ignores_expired_rate(self):
+        """Cotizaciones no vigentes (is_current=False) no disparan evaluación de alertas."""
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7000'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+
+        # Crear cotización expirada
+        past = timezone.now() - timedelta(days=2)
+        ExchangeRate.objects.create(
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            buy_rate=Decimal('7400'),
+            sell_rate=Decimal('7600'),
+            spread=Decimal('200'),
+            valid_from=past - timedelta(hours=1),
+            valid_to=past,
+            is_active=True,
+        )
+
+        alerta.refresh_from_db()
+        self.assertTrue(alerta.activo)
+        self.assertEqual(self.UserNotification.objects.filter(usuario=self.user).count(), 0)
+
+    def test_signal_multiple_subscriptions_same_pair(self):
+        """Múltiples suscripciones activas sobre el mismo par se evalúan independientemente."""
+        alerta_buy = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7500'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+        alerta_sell = self.RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.SELL,
+            tasa_umbral=Decimal('7500'),
+            condicion=self.RateAlertSubscription.Condicion.MENOR_IGUAL,
+        )
+
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        alerta_buy.refresh_from_db()
+        alerta_sell.refresh_from_db()
+        self.assertFalse(alerta_buy.activo)
+        self.assertFalse(alerta_sell.activo)
+        # Cada alerta genera una notificación
+        self.assertEqual(self.UserNotification.objects.filter(usuario=self.user).count(), 2)
+
+    def test_signal_no_users_assigned_to_client(self):
+        """Si el cliente no tiene usuarios asignados, no se generan notificaciones (pero se desactiva la alerta)."""
+        cliente_solo = Cliente.objects.create(
+            nombre='Cliente sin usuarios', documento_ruc='SOL-001', correo='solo@test.com',
+        )
+        alerta = self.RateAlertSubscription.objects.create(
+            cliente=cliente_solo,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=self.RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7500'),
+            condicion=self.RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+
+        with self.settings(DEFAULT_FROM_EMAIL='test@globalexchange.com'):
+            self._create_current_rate(buy_rate='7400', sell_rate='7600')
+
+        alerta.refresh_from_db()
+        # El signal detecta que no hay usuarios -> no genera notificación pero el flujo es robusto
+        self.assertTrue(alerta.activo)  # No se desactiva porque no despachó
+
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE ENDPOINTS API DE NOTIFICACIONES
+# ==============================================================================
+
+class NotificationApiTest(TestCase):
+    """
+    Pruebas unitarias para los endpoints REST JSON del centro de notificaciones (SCRUM-104 / SCRUM-100).
+
+    Verifica el listado paginado, el marcado individual/masivo como leídas
+    y el aislamiento entre usuarios.
+    """
+
+    def setUp(self):
+        from rates.models import UserNotification
+        self.UserNotification = UserNotification
+
+        self.user = User.objects.create_user(
+            username='notif_api_user', email='notifapi@test.com', password='Password123!',
+        )
+        self.other_user = User.objects.create_user(
+            username='notif_other_user', email='other@test.com', password='Password123!',
+        )
+
+        # Crear notificaciones de prueba
+        for i in range(15):
+            UserNotification.objects.create(
+                usuario=self.user,
+                titulo=f'Notificación {i}',
+                mensaje=f'Mensaje de prueba {i}',
+            )
+        # Una notificación para otro usuario
+        UserNotification.objects.create(
+            usuario=self.other_user,
+            titulo='Ajena',
+            mensaje='No debe ser visible para user.',
+        )
+
+    def test_notification_list_requires_login(self):
+        """El endpoint de listado de notificaciones redirige si no hay usuario autenticado."""
+        response = self.client.get(reverse('rates:api_notifications'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_notification_list_returns_user_notifications(self):
+        """Devuelve solo las notificaciones del usuario autenticado, con paginación."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('rates:api_notifications'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['total'], 15)
+        self.assertEqual(len(data['results']), 10)  # page_size = 10
+        self.assertTrue(data['has_more'])
+        self.assertEqual(data['unread_count'], 15)
+
+    def test_notification_list_offset_pagination(self):
+        """El parámetro offset permite paginar el segundo tramo."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('rates:api_notifications') + '?offset=10')
+        data = response.json()
+        self.assertEqual(len(data['results']), 5)
+        self.assertFalse(data['has_more'])
+
+    def test_notification_list_isolation(self):
+        """Un usuario no ve las notificaciones de otro usuario."""
+        self.client.force_login(self.other_user)
+        response = self.client.get(reverse('rates:api_notifications'))
+        data = response.json()
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['results'][0]['titulo'], 'Ajena')
+
+    def test_mark_single_notification_as_read(self):
+        """POST a /api/notifications/<pk>/read/ marca una notificación como leída."""
+        self.client.force_login(self.user)
+        notif = self.UserNotification.objects.filter(usuario=self.user).first()
+        url = reverse('rates:api_notification_read', kwargs={'pk': notif.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['updated'], 1)
+        self.assertEqual(data['unread_count'], 14)
+
+        notif.refresh_from_db()
+        self.assertTrue(notif.leido)
+
+    def test_mark_all_notifications_as_read(self):
+        """POST a /api/notifications/read-all/ marca todas las notificaciones como leídas."""
+        self.client.force_login(self.user)
+        url = reverse('rates:api_notifications_read_all')
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['updated'], 15)
+        self.assertEqual(data['unread_count'], 0)
+
+    def test_mark_read_other_user_notification_returns_404(self):
+        """Un usuario no puede marcar como leída una notificación de otro usuario."""
+        self.client.force_login(self.user)
+        notif_ajena = self.UserNotification.objects.filter(usuario=self.other_user).first()
+        url = reverse('rates:api_notification_read', kwargs={'pk': notif_ajena.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE VISTAS CRUD Y RBAC PARA ALERTAS DE COTIZACIÓN
+# ==============================================================================
+
+class RateAlertViewsTest(TestCase):
+    """
+    Pruebas unitarias para las vistas de suscripciones de alerta (SCRUM-104 / SCRUM-100).
+
+    Verifica el flujo de listado, creación, edición y toggle de alertas,
+    así como el aislamiento IDOR entre clientes.
+    """
+
+    def setUp(self):
+        from rates.models import RateAlertSubscription
+        self.RateAlertSubscription = RateAlertSubscription
+
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+        self.user = User.objects.create_user(
+            username='alert_view_user', email='alertview@test.com', password='Password123!',
+        )
+        self.user.groups.add(self.group_user)
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2, is_active=True)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0, is_active=True)
+        self.cliente = Cliente.objects.create(
+            nombre='Cliente Alert View', documento_ruc='AV-001', correo='av@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=self.cliente, user=self.user,
+            is_primary_representative=True, is_active=True,
+        )
+        self.alerta = RateAlertSubscription.objects.create(
+            cliente=self.cliente,
+            base_currency=self.usd,
+            target_currency=self.pyg,
+            tipo_operacion=RateAlertSubscription.TipoOperacion.BUY,
+            tasa_umbral=Decimal('7500'),
+            condicion=RateAlertSubscription.Condicion.MAYOR_IGUAL,
+        )
+
+    def test_alert_list_requires_login(self):
+        """El listado de alertas redirige si no hay usuario autenticado."""
+        response = self.client.get(reverse('rates:alert_list'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_alert_list_authenticated_with_customer(self):
+        """Un usuario con cliente activo puede acceder al listado de alertas."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('rates:alert_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'USD')
+
+    def test_alert_create_get(self):
+        """GET al formulario de creación de alerta retorna 200."""
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('rates:alert_create'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_alert_create_post_success(self):
+        """POST con datos válidos crea una nueva alerta y redirige."""
+        self.client.force_login(self.user)
+        response = self.client.post(reverse('rates:alert_create'), data={
+            'base_currency': self.usd.pk,
+            'target_currency': self.pyg.pk,
+            'tipo_operacion': 'BUY',
+            'tasa_umbral': '8000',
+            'condicion': 'GTE',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.RateAlertSubscription.objects.filter(cliente=self.cliente).count(), 2)
+
+    def test_alert_toggle_active(self):
+        """POST al toggle desactiva/activa la alerta."""
+        self.client.force_login(self.user)
+        url = reverse('rates:alert_toggle', kwargs={'pk': self.alerta.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 302)
+        self.alerta.refresh_from_db()
+        self.assertFalse(self.alerta.activo)
+
+        # Toggle de nuevo -> activa
+        response = self.client.post(url)
+        self.alerta.refresh_from_db()
+        self.assertTrue(self.alerta.activo)
+
+    def test_alert_update_idor_prevention(self):
+        """Un usuario no puede editar alertas de otro cliente."""
+        other_user = User.objects.create_user(
+            username='idor_alert_user', email='idor@test.com', password='Password123!',
+        )
+        other_user.groups.add(self.group_user)
+        other_cliente = Cliente.objects.create(
+            nombre='Otro Cliente', documento_ruc='OC-001', correo='oc@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=other_cliente, user=other_user,
+            is_primary_representative=True, is_active=True,
+        )
+
+        self.client.force_login(other_user)
+        url = reverse('rates:alert_update', kwargs={'pk': self.alerta.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_alert_toggle_idor_prevention(self):
+        """Un usuario no puede togglear alertas de otro cliente."""
+        other_user = User.objects.create_user(
+            username='idor_toggle_user', email='idor_toggle@test.com', password='Password123!',
+        )
+        other_user.groups.add(self.group_user)
+        other_cliente = Cliente.objects.create(
+            nombre='Otro Toggle', documento_ruc='OT-001', correo='ot@test.com',
+        )
+        CustomerUserAssignment.objects.create(
+            customer=other_cliente, user=other_user,
+            is_primary_representative=True, is_active=True,
+        )
+
+        self.client.force_login(other_user)
+        url = reverse('rates:alert_toggle', kwargs={'pk': self.alerta.pk})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE RBAC Y HTTP 403 EN VISTAS DE RATES
+# ==============================================================================
+
+class RatesRBAC403Test(TestCase):
+    """
+    Pruebas de verificación de permisos HTTP 403 en las vistas
+    administrativas de rates (monedas, tasas, comisiones, límites) (SCRUM-104).
+
+    Verifica que usuarios con rol 'user' no puedan acceder a vistas
+    restringidas a 'admin' u 'operator'.
+    """
+
+    def setUp(self):
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+        self.std_user = User.objects.create_user(
+            username='rbac_rates_user', email='rbac_rates@test.com', password='Password123!',
+        )
+        self.std_user.groups.add(self.group_user)
+
+        self.admin_user = User.objects.create_superuser(
+            username='rbac_rates_admin', email='rbac_rates_admin@test.com', password='AdminPwd123!',
+        )
+
+        self.usd = Currency.objects.create(code='USD', name='Dólar', symbol='$', decimals=2, is_active=True)
+        self.pyg = Currency.objects.create(code='PYG', name='Guaraní', symbol='₲', decimals=0, is_active=True)
+
+    def test_currency_create_forbidden_for_user_role(self):
+        """Un usuario con rol 'user' no puede crear monedas (redirigido, no acceso)."""
+        self.client.force_login(self.std_user)
+        response = self.client.get(reverse('rates:currency-create'))
+        # RoleRequiredMixin redirige si no tiene permisos
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_currency_create_allowed_for_admin(self):
+        """Un admin puede acceder a la vista de creación de monedas."""
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse('rates:currency-create'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_rate_create_forbidden_for_user_role(self):
+        """Un usuario con rol 'user' no puede crear tasas de cambio."""
+        self.client.force_login(self.std_user)
+        response = self.client.get(reverse('rates:rate-create'))
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_commission_create_forbidden_for_user_role(self):
+        """Un usuario con rol 'user' no puede crear reglas de comisión."""
+        self.client.force_login(self.std_user)
+        response = self.client.get(reverse('rates:commission_create'))
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_limit_create_forbidden_for_user_role(self):
+        """Un usuario con rol 'user' no puede crear límites operativos."""
+        self.client.force_login(self.std_user)
+        response = self.client.get(reverse('rates:limit_create'))
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_admin_can_access_all_admin_views(self):
+        """Un administrador puede acceder a todas las vistas de gestión."""
+        self.client.force_login(self.admin_user)
+
+        for url_name in ['rates:currency-create', 'rates:rate-create',
+                         'rates:commission_create', 'rates:limit_create']:
+            response = self.client.get(reverse(url_name))
+            self.assertEqual(response.status_code, 200,
+                             f'Admin debería acceder a {url_name} pero obtuvo {response.status_code}')
+

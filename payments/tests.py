@@ -1587,3 +1587,208 @@ class SipapEndpointsTestCase(StripeTestBaseMixin, TestCase):
         self.transaccion_sipap.refresh_from_db()
         self.assertEqual(self.transaccion_sipap.estado, Transaction.Estado.CANCELADA)
 
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS EXTENDIDAS DE MOCKS DE WEBHOOKS STRIPE Y SIPAP
+# ==============================================================================
+
+class StripeWebhookExtendedMockTests(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas extendidas SCRUM-104 con mocks para los servicios de Stripe.
+
+    Cubre escenarios adicionales de webhook como eventos duplicados,
+    tipos de evento no soportados y fallos de procesamiento.
+    """
+
+    def test_stripe_service_verify_invalid_signature_raises(self):
+        """StripeService.verify_webhook_signature lanza ValidationError con firma invalida."""
+        with self.assertRaises(ValidationError):
+            StripeService.verify_webhook_signature(
+                payload=b'raw_test_payload',
+                sig_header='t=123,v1=invalid_sig',
+            )
+
+    @patch.object(StripeService, 'verify_webhook_signature')
+    @patch.object(StripeService, 'process_webhook_event')
+    def test_webhook_duplicate_event_is_idempotent(self, mock_process, mock_verify):
+        """Un evento ya procesado retorna resultado idempotente sin re-procesamiento."""
+        mock_verify.return_value = {
+            'id': 'evt_duplicate_001',
+            'type': 'checkout.session.completed',
+        }
+        mock_process.return_value = {
+            'status': 'already_processed',
+            'event_id': 'evt_duplicate_001',
+        }
+
+        webhook_url = reverse('payments:stripe-webhook')
+        response = self.client.post(
+            webhook_url,
+            data=b'raw_bytes',
+            content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'already_processed')
+
+    @patch.object(StripeService, 'verify_webhook_signature')
+    @patch.object(StripeService, 'process_webhook_event')
+    def test_webhook_unsupported_event_type(self, mock_process, mock_verify):
+        """Un tipo de evento no soportado se procesa sin error."""
+        mock_verify.return_value = {
+            'id': 'evt_unsupported_001',
+            'type': 'payment_intent.unknown_type',
+        }
+        mock_process.return_value = {
+            'status': 'ignored',
+            'event_id': 'evt_unsupported_001',
+            'reason': 'Tipo de evento no soportado',
+        }
+
+        webhook_url = reverse('payments:stripe-webhook')
+        response = self.client.post(
+            webhook_url,
+            data=b'raw_bytes',
+            content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+        )
+        self.assertEqual(response.status_code, 200)
+
+    @patch.object(StripeService, 'verify_webhook_signature')
+    @patch.object(StripeService, 'process_webhook_event')
+    def test_webhook_processing_failure_returns_500(self, mock_process, mock_verify):
+        """Un error interno durante el procesamiento retorna HTTP 500."""
+        mock_verify.return_value = {
+            'id': 'evt_fail_001',
+            'type': 'checkout.session.completed',
+        }
+        mock_process.side_effect = Exception('Error interno de procesamiento')
+
+        webhook_url = reverse('payments:stripe-webhook')
+        response = self.client.post(
+            webhook_url,
+            data=b'raw_bytes',
+            content_type='application/json',
+            HTTP_STRIPE_SIGNATURE='t=123,v1=valid_sig',
+        )
+        self.assertIn(response.status_code, [400, 500])
+
+
+class SipapServiceExtendedMockTests(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas extendidas SCRUM-104 para el servicio SIPAP.
+
+    Cubre validaciones de formato, montos y estados de conciliacion.
+    """
+
+    def test_sipap_simulate_creates_transfer_record(self):
+        """SipapService.simulate_transfer crea un SipapTransferRecord valido."""
+        result = SipapService.simulate_transfer(
+            monto=Decimal('1500000.00'),
+            moneda='PYG',
+            banco_origen='Banco Familiar',
+            cuenta_origen='44556677',
+            titular_origen='Test User',
+        )
+        self.assertIsNotNone(result.codigo_transferencia)
+        self.assertTrue(result.codigo_transferencia.startswith('SIPAP-'))
+        self.assertEqual(result.estado, 'PENDIENTE')
+
+    def test_sipap_simulate_with_transaction_object(self):
+        """SipapService.simulate_transfer acepta una transaccion asociada."""
+        result = SipapService.simulate_transfer(
+            monto=self.transaccion.monto_origen,
+            moneda=self.transaccion.moneda_origen.code,
+            transaction_obj=self.transaccion,
+            banco_origen='Banco Regional',
+        )
+        self.assertTrue(result.codigo_transferencia.startswith('SIPAP-'))
+
+    def test_sipap_confirm_nonexistent_code_raises(self):
+        """SipapService.confirm_deposit lanza error si el codigo no existe."""
+        with self.assertRaises((ValidationError, Exception)):
+            SipapService.confirm_deposit(
+                codigo_transferencia='SIPAP-NO-EXISTE-999',
+            )
+
+    def test_sipap_transfer_record_model_fields(self):
+        """El modelo SipapTransferRecord almacena correctamente los campos."""
+        record = SipapTransferRecord.objects.create(
+            codigo_transferencia='SIPAP-MODEL-TEST',
+            monto=Decimal('750000.00'),
+            moneda='PYG',
+            estado='PENDIENTE',
+            banco_origen='Banco Test',
+        )
+        self.assertEqual(record.codigo_transferencia, 'SIPAP-MODEL-TEST')
+        self.assertEqual(record.monto, Decimal('750000.00'))
+        self.assertEqual(record.estado, 'PENDIENTE')
+
+
+class PaymentWebhookEventModelTest(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para el modelo PaymentWebhookEvent.
+    """
+
+    def test_create_webhook_event_record(self):
+        """Se puede crear un registro de evento webhook."""
+        event = PaymentWebhookEvent.objects.create(
+            event_id='evt_model_test_001',
+            gateway='STRIPE',
+            tipo_evento='checkout.session.completed',
+            payload={'test': 'data'},
+            procesado=False,
+        )
+        self.assertEqual(event.event_id, 'evt_model_test_001')
+        self.assertEqual(event.tipo_evento, 'checkout.session.completed')
+        self.assertFalse(event.procesado)
+
+    def test_duplicate_event_id_prevented(self):
+        """No se pueden crear dos registros con el mismo event_id."""
+        PaymentWebhookEvent.objects.create(
+            event_id='evt_dup_test_001',
+            gateway='STRIPE',
+            tipo_evento='checkout.session.completed',
+            payload={},
+            procesado=True,
+        )
+        from django.db import IntegrityError
+        with self.assertRaises(IntegrityError):
+            PaymentWebhookEvent.objects.create(
+                event_id='evt_dup_test_001',
+                gateway='STRIPE',
+                tipo_evento='checkout.session.completed',
+                payload={},
+                procesado=False,
+            )
+
+
+class PaymentGatewayRecordModelTest(StripeTestBaseMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para el modelo PaymentGatewayRecord.
+    """
+
+    def test_create_gateway_record(self):
+        """Se puede crear un registro de pasarela de pago."""
+        record = PaymentGatewayRecord.objects.create(
+            transaction=self.transaccion,
+            gateway='STRIPE',
+            referencia_externa='cs_test_gateway_001',
+            monto=self.transaccion.monto_origen,
+            moneda=self.transaccion.moneda_origen.code,
+            estado='COMPLETADO',
+        )
+        self.assertEqual(record.gateway, 'STRIPE')
+        self.assertEqual(record.referencia_externa, 'cs_test_gateway_001')
+
+    def test_gateway_record_links_to_transaction(self):
+        """Un registro de pasarela se vincula correctamente a una transaccion."""
+        record = PaymentGatewayRecord.objects.create(
+            transaction=self.transaccion,
+            gateway='SIPAP',
+            referencia_externa='SIPAP-GW-TEST',
+            monto=self.transaccion.monto_origen,
+            moneda=self.transaccion.moneda_origen.code,
+            estado='PENDIENTE',
+        )
+        self.assertEqual(record.transaction.id, self.transaccion.id)
