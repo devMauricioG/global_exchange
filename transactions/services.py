@@ -486,6 +486,7 @@ class TransactionService:
         Orquesta y procesa la confirmación atómica de pago y liquidación de una orden cambiaria (SCRUM-94 / SCRUM-87).
 
         Ejecuta las validaciones de consistencia financiera e integridad:
+
         - Resuelve la orden cambiaria asegurando su existencia.
         - **Idempotencia estricta**: si la orden ya se encuentra COMPLETADA con la misma referencia de pago,
           retorna la transacción sin duplicar asientos contables ni alterar estados.

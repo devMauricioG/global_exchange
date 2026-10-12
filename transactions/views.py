@@ -286,6 +286,7 @@ class TransactionPaymentCheckoutView(LoginRequiredMixin, DetailView):
     Vista web interactiva para el flujo de pago y conciliación bancaria de una transacción (SCRUM-95).
 
     Permite al cliente:
+
     1. Visualizar el resumen financiero y desglose de liquidación de la orden con temporizador de congelamiento.
     2. Iniciar el pago en línea con tarjeta internacional mediante redirección segura a Stripe Checkout.
     3. Visualizar los datos de la cuenta recaudadora SIPAP de Global Exchange e ingresar el código de comprobante

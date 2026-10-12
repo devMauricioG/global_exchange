@@ -426,9 +426,9 @@ class PaymentGatewayRecord(models.Model):
     :vartype transaction: transactions.models.Transaction
     :ivar gateway: Identificador de la pasarela de pago ('STRIPE' o 'SIPAP').
     :vartype gateway: str
-    :ivar session_id: Identificador de sesión de Stripe Checkout (ej. cs_test_...).
+    :ivar session_id: Identificador de sesión de Stripe Checkout (ej. ``cs_test_...``).
     :vartype session_id: str
-    :ivar payment_intent_id: Identificador del PaymentIntent en Stripe (ej. pi_...).
+    :ivar payment_intent_id: Identificador del PaymentIntent en Stripe (ej. ``pi_...``).
     :vartype payment_intent_id: str
     :ivar monto: Monto monetario involucrado en la operación.
     :vartype monto: decimal.Decimal

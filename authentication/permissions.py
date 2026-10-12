@@ -3,9 +3,10 @@ Módulo de permisos RBAC, decoradores y Mixins para el control de acceso en Djan
 
 Provee mecanismos declarativos de control de acceso basado en roles (RBAC)
 y verificación de pertenencia / aislamiento multi-inquilino de cliente activo:
-  - Funciones auxiliares: :func:`has_role`, :func:`has_any_role`, :func:`verify_customer_ownership`, :func:`get_active_customer_from_request`.
-  - Decoradores para vistas basadas en función (FBVs): :func:`role_required`, :func:`active_customer_required`, :func:`customer_ownership_required`.
-  - Mixins para vistas basadas en clases (CBVs): :class:`RoleRequiredMixin`, :class:`ActiveCustomerRequiredMixin`, :class:`CustomerOwnershipRequiredMixin`.
+
+- Funciones auxiliares: :func:`has_role`, :func:`has_any_role`, :func:`verify_customer_ownership`, :func:`get_active_customer_from_request`.
+- Decoradores para vistas basadas en función (FBVs): :func:`role_required`, :func:`active_customer_required`, :func:`customer_ownership_required`.
+- Mixins para vistas basadas en clases (CBVs): :class:`RoleRequiredMixin`, :class:`ActiveCustomerRequiredMixin`, :class:`CustomerOwnershipRequiredMixin`.
 """
 
 from functools import wraps
@@ -30,8 +31,9 @@ def normalize_roles(roles_input: Union[str, Iterable[str]]) -> Set[str]:
     Normaliza el argumento de roles a un conjunto de cadenas en minúsculas.
 
     Soporta:
-      - Cadena única o separada por comas: ``"admin,operator"`` -> ``{"admin", "operator"}``.
-      - Colección (lista/tupla/set): ``["admin", "operator"]`` -> ``{"admin", "operator"}``.
+
+    - Cadena única o separada por comas: ``"admin,operator"`` -> ``{"admin", "operator"}``.
+    - Colección (lista/tupla/set): ``["admin", "operator"]`` -> ``{"admin", "operator"}``.
 
     :param roles_input: Roles especificadas en formato texto o colección.
     :type roles_input: str or Iterable[str]
@@ -50,9 +52,10 @@ def has_role(user: Any, allowed_roles: Union[str, Iterable[str]]) -> bool:
     Verifica si el usuario autenticado cuenta con al menos uno de los roles autorizados.
 
     Jerarquía y equivalencias de roles:
-      - ``is_superuser`` otorga implícitamente los roles ``admin`` y ``operator``.
-      - ``is_staff`` otorga implícitamente el rol ``operator``.
-      - Los roles de grupo Django asignados (``admin``, ``operator``, ``user``) se evalúan de forma directa.
+
+    - ``is_superuser`` otorga implícitamente los roles ``admin`` y ``operator``.
+    - ``is_staff`` otorga implícitamente el rol ``operator``.
+    - Los roles de grupo Django asignados (``admin``, ``operator``, ``user``) se evalúan de forma directa.
 
     :param user: Instancia del usuario en Django (o AnonymousUser).
     :type user: django.contrib.auth.models.AbstractBaseUser
@@ -140,9 +143,10 @@ def verify_customer_ownership(user: Any, customer_or_id: Union[Any, int, str]) -
     Verifica si un usuario tiene permisos de acceso sobre una ficha de cliente específica.
 
     Reglas de aislamiento:
-      - Administradores y Operadores pueden acceder a cualquier cliente activo.
-      - Usuarios estándar ('user') solo pueden acceder a los clientes donde tengan una asignación
-        activa en :class:`~customers.models.CustomerUserAssignment`.
+
+    - Administradores y Operadores pueden acceder a cualquier cliente activo.
+    - Usuarios estándar ('user') solo pueden acceder a los clientes donde tengan una asignación
+      activa en :class:`~customers.models.CustomerUserAssignment`.
 
     :param user: Usuario autenticado.
     :param customer_or_id: Instancia de Cliente o su ID numérico/Keycloak ID.
@@ -296,10 +300,11 @@ class RoleRequiredMixin(AccessMixin):
     Mixin para Vistas Basadas en Clases (CBVs) que exige roles específicos.
 
     Atributos configurables:
-      - ``allowed_roles`` (*str | list[str]*): Roles autorizados (ej. ``['admin', 'operator']``).
-      - ``redirect_url`` (*str*): Nombre de ruta a redirigir en caso de denegación (opcional).
-      - ``raise_exception`` (*bool*): Lanzar HTTP 403 si es True.
-      - ``permission_denied_message`` (*str*): Mensaje explicativo.
+
+    - ``allowed_roles`` (*str | list[str]*): Roles autorizados (ej. ``['admin', 'operator']``).
+    - ``redirect_url`` (*str*): Nombre de ruta a redirigir en caso de denegación (opcional).
+    - ``raise_exception`` (*bool*): Lanzar HTTP 403 si es True.
+    - ``permission_denied_message`` (*str*): Mensaje explicativo.
     """
     allowed_roles: Union[str, Iterable[str]] = []
     redirect_url: Optional[str] = None
