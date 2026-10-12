@@ -6,9 +6,10 @@ para la administración y registro seguro de cuentas bancarias, billeteras digit
 y otros instrumentos financieros asociados a los clientes en Global Exchange.
 """
 import re
+from datetime import date
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from datetime import date
+from django.utils import timezone
 
 class EntidadFinanciera(models.Model):
     """
@@ -409,3 +410,416 @@ class ReceivingMethod(models.Model):
                     es_predeterminado=True,
                 ).exclude(pk=self.pk).update(es_predeterminado=False)
             super().save(*args, **kwargs)
+
+
+class PaymentGatewayRecord(models.Model):
+    """
+    Modelo que registra transacciones y sesiones procesadas a través de pasarelas de pago externas.
+
+    Almacena las referencias de sesiones de Stripe Checkout, PaymentIntents o transferencias
+    SIPAP vinculadas a una orden cambiaria (:class:`transactions.models.Transaction`), permitiendo
+    auditoría, trazabilidad y conciliación financiera en tiempo real.
+
+    :ivar cliente: Cliente titular asociado a la operación de pago.
+    :vartype cliente: customers.models.Cliente
+    :ivar transaction: Transacción cambiaria asociada a la liquidación.
+    :vartype transaction: transactions.models.Transaction
+    :ivar gateway: Identificador de la pasarela de pago ('STRIPE' o 'SIPAP').
+    :vartype gateway: str
+    :ivar session_id: Identificador de sesión de Stripe Checkout (ej. ``cs_test_...``).
+    :vartype session_id: str
+    :ivar payment_intent_id: Identificador del PaymentIntent en Stripe (ej. ``pi_...``).
+    :vartype payment_intent_id: str
+    :ivar monto: Monto monetario involucrado en la operación.
+    :vartype monto: decimal.Decimal
+    :ivar moneda: Código ISO de la moneda en la que se efectúa el cobro.
+    :vartype moneda: str
+    :ivar estado: Estado del cobro ('PENDIENTE', 'COMPLETADO', 'FALLIDO', 'CANCELADO', 'REEMBOLSADO').
+    :vartype estado: str
+    :ivar checkout_url: Enlace directo generado por Stripe Checkout para redirección del cliente.
+    :vartype checkout_url: str
+    :ivar referencia_externa: Referencia devuelta por la pasarela o comprobante de pago.
+    :vartype referencia_externa: str
+    :ivar datos_evento: Metadatos o carga útil JSON retornada por el servicio.
+    :vartype datos_evento: dict
+    :ivar error_mensaje: Detalle del error en caso de fallo de procesamiento.
+    :vartype error_mensaje: str
+    :ivar created_at: Marca temporal de creación del registro.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Marca temporal de última modificación.
+    :vartype updated_at: datetime.datetime
+    """
+
+    class Gateway(models.TextChoices):
+        STRIPE = 'STRIPE', 'Stripe Checkout / Cards'
+        SIPAP = 'SIPAP', 'Transferencia Bancaria SIPAP'
+
+    class Estado(models.TextChoices):
+        PENDIENTE = 'PENDIENTE', 'Pendiente de Pago'
+        COMPLETADO = 'COMPLETADO', 'Completado / Pagado'
+        FALLIDO = 'FALLIDO', 'Fallido / Rechazado'
+        CANCELADO = 'CANCELADO', 'Cancelado / Expirado'
+        REEMBOLSADO = 'REEMBOLSADO', 'Reembolsado'
+
+    cliente = models.ForeignKey(
+        'customers.Cliente',
+        on_delete=models.CASCADE,
+        related_name='gateway_records',
+        null=True,
+        blank=True,
+        verbose_name='Cliente',
+        help_text='Cliente titular al cual pertenece esta operación de pasarela.',
+    )
+    transaction = models.ForeignKey(
+        'transactions.Transaction',
+        on_delete=models.SET_NULL,
+        related_name='gateway_records',
+        null=True,
+        blank=True,
+        verbose_name='Transacción Cambiaria',
+        help_text='Transacción de cambio asociada a este intento de pago.',
+    )
+    gateway = models.CharField(
+        max_length=20,
+        choices=Gateway.choices,
+        default=Gateway.STRIPE,
+        verbose_name='Pasarela de Pago',
+        help_text='Proveedor o pasarela tecnológica utilizada para el cobro.',
+    )
+    session_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name='ID de Sesión (Checkout)',
+        help_text='Identificador único de la sesión de Stripe Checkout (cs_test_...).',
+    )
+    payment_intent_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name='ID de PaymentIntent',
+        help_text='Identificador del PaymentIntent asociado en Stripe (pi_...).',
+    )
+    monto = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        verbose_name='Monto de Operación',
+        help_text='Monto cobrado o a procesar a través de la pasarela.',
+    )
+    moneda = models.CharField(
+        max_length=10,
+        default='USD',
+        verbose_name='Moneda',
+        help_text='Código de moneda de la operación en la pasarela (ej. USD, PYG).',
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+        db_index=True,
+        verbose_name='Estado del Pago',
+        help_text='Estado actual del cobro en la pasarela externa.',
+    )
+    checkout_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        verbose_name='URL de Stripe Checkout',
+        help_text='URL de redirección al formulario seguro hospedado por Stripe.',
+    )
+    referencia_externa = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name='Referencia Externa',
+        help_text='Código de referencia o ID devuelto por el proveedor de pago.',
+    )
+    datos_evento = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='Datos de Evento / Metadatos',
+        help_text='Carga útil o metadatos JSON suministrados por la pasarela.',
+    )
+    error_mensaje = models.TextField(
+        blank=True,
+        verbose_name='Mensaje de Error',
+        help_text='Detalle o causa del fallo si la transacción no pudo completarse.',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Creación',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+    )
+
+    class Meta:
+        verbose_name = 'Registro de Pasarela de Pago'
+        verbose_name_plural = 'Registros de Pasarela de Pago'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['session_id']),
+            models.Index(fields=['payment_intent_id']),
+            models.Index(fields=['gateway', 'estado']),
+        ]
+
+    def __str__(self) -> str:
+        ref = self.session_id or self.payment_intent_id or f'ID-{self.id}'
+        return f'{self.get_gateway_display()} — {self.moneda} {self.monto} [{self.get_estado_display()}] ({ref})'
+
+    @property
+    def is_paid(self) -> bool:
+        """Indica si el pago fue acreditado y liquidado con éxito."""
+        return self.estado == self.Estado.COMPLETADO
+
+
+class PaymentWebhookEvent(models.Model):
+    """
+    Registro inmutable de eventos recibidos vía Webhook para garantizar idempotencia.
+
+    Almacena los identificadores únicos emitidos por Stripe o SIPAP para evitar
+    el doble procesamiento de eventos duplicados o reintentos de red.
+
+    :ivar event_id: Identificador único del evento emitido por la pasarela (ej. evt_1Nz...).
+    :vartype event_id: str
+    :ivar gateway: Pasarela emisora del evento ('STRIPE' o 'SIPAP').
+    :vartype gateway: str
+    :ivar tipo_evento: Tipo o nombre del evento recibido (ej. 'checkout.session.completed').
+    :vartype tipo_evento: str
+    :ivar payload: Carga útil completa en formato JSON del webhook.
+    :vartype payload: dict
+    :ivar procesado: Bandera que indica si el evento ya fue ejecutado exitosamente.
+    :vartype procesado: bool
+    :ivar error_mensaje: Registro de errores si el procesamiento falló.
+    :vartype error_mensaje: str
+    :ivar created_at: Marca temporal de recepción del evento.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Marca temporal de procesamiento.
+    :vartype updated_at: datetime.datetime
+    """
+
+    event_id = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        verbose_name='ID de Evento',
+        help_text='Identificador único emitido por la pasarela (ej. evt_...).',
+    )
+    gateway = models.CharField(
+        max_length=20,
+        default='STRIPE',
+        verbose_name='Pasarela',
+        help_text='Pasarela de origen del webhook.',
+    )
+    tipo_evento = models.CharField(
+        max_length=100,
+        verbose_name='Tipo de Evento',
+        help_text='Clasificación del evento notificado (ej. payment_intent.succeeded).',
+    )
+    payload = models.JSONField(
+        default=dict,
+        verbose_name='Carga Útil JSON',
+        help_text='Cuerpo completo recibido en la petición del webhook.',
+    )
+    procesado = models.BooleanField(
+        default=False,
+        verbose_name='Procesado',
+        help_text='Indica si la lógica de negocio correspondiente ya fue ejecutada.',
+    )
+    error_mensaje = models.TextField(
+        blank=True,
+        verbose_name='Mensaje de Error',
+        help_text='Detalle de error si ocurrió una excepción durante el procesamiento.',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Recepción',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Fecha de Procesamiento',
+    )
+
+    class Meta:
+        verbose_name = 'Evento de Webhook de Pago'
+        verbose_name_plural = 'Eventos de Webhooks de Pago'
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:
+        proc = 'Procesado' if self.procesado else 'Pendiente'
+        return f'{self.gateway} — {self.tipo_evento} ({self.event_id}) [{proc}]'
+
+
+class SipapTransferRecord(models.Model):
+    """
+    Modelo representativo de una Transferencia Bancaria Interbancaria SIPAP (SCRUM-93 / SCRUM-87).
+
+    Almacena las transferencias entrantes del Sistema de Pagos del Paraguay (SIPAP),
+    incluyendo código de transferencia único, entidad financiera de origen y destino,
+    cuentas involucradas, monto, titularidad y estado de conciliación.
+
+    :ivar codigo_transferencia: Identificador único de la transferencia bancaria (ej. SIPAP-20261008-001234).
+    :vartype codigo_transferencia: str
+    :ivar transaction: Orden cambiaria asociada para conciliación (:class:`transactions.models.Transaction`).
+    :vartype transaction: transactions.models.Transaction
+    :ivar gateway_record: Registro de pasarela asociado (:class:`PaymentGatewayRecord`).
+    :vartype gateway_record: PaymentGatewayRecord
+    :ivar banco_origen: Entidad bancaria o financiera remitente.
+    :vartype banco_origen: str
+    :ivar cuenta_origen: Número de cuenta bancaria remitente.
+    :vartype cuenta_origen: str
+    :ivar titular_origen: Nombre o razón social del titular que transfiere los fondos.
+    :vartype titular_origen: str
+    :ivar documento_origen: Cédula de identidad o RUC del titular remitente.
+    :vartype documento_origen: str
+    :ivar banco_destino: Entidad bancaria receptora (cuenta recaudadora de la casa de cambio).
+    :vartype banco_destino: str
+    :ivar cuenta_destino: Número de cuenta bancaria recaudadora receptora.
+    :vartype cuenta_destino: str
+    :ivar monto: Monto acreditado o transferido.
+    :vartype monto: decimal.Decimal
+    :ivar moneda: Código ISO de la moneda transferida (ej. 'PYG', 'USD').
+    :vartype moneda: str
+    :ivar estado: Estado de la transferencia ('PENDIENTE', 'CONFIRMADA', 'RECHAZADA', 'REVERTIDA').
+    :vartype estado: str
+    :ivar motivo_rechazo: Detalle o motivo en caso de rechazo o disconformidad en la conciliación.
+    :vartype motivo_rechazo: str
+    :ivar fecha_transferencia: Marca temporal informada de la transferencia bancaria.
+    :vartype fecha_transferencia: datetime.datetime
+    :ivar fecha_conciliacion: Marca temporal de conciliación en el sistema.
+    :vartype fecha_conciliacion: datetime.datetime
+    :ivar metadata: Carga útil adicional con metadatos de la compensación interbancaria.
+    :vartype metadata: dict
+    :ivar created_at: Timestamp de registro en el sistema.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Timestamp de última actualización.
+    :vartype updated_at: datetime.datetime
+    """
+
+    class Estado(models.TextChoices):
+        PENDIENTE = 'PENDIENTE', 'Pendiente de Conciliación'
+        CONFIRMADA = 'CONFIRMADA', 'Confirmada / Acreditada'
+        RECHAZADA = 'RECHAZADA', 'Rechazada'
+        REVERTIDA = 'REVERTIDA', 'Revertida'
+
+    codigo_transferencia = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name='Código de Transferencia SIPAP',
+        help_text='Número de comprobante o referencia interbancaria única (ej. SIPAP-20261008-001234).',
+    )
+    transaction = models.ForeignKey(
+        'transactions.Transaction',
+        on_delete=models.SET_NULL,
+        related_name='sipap_transfers',
+        null=True,
+        blank=True,
+        verbose_name='Transacción Cambiaria',
+        help_text='Transacción asociada para liquidación automática.',
+    )
+    gateway_record = models.ForeignKey(
+        'PaymentGatewayRecord',
+        on_delete=models.SET_NULL,
+        related_name='sipap_transfers',
+        null=True,
+        blank=True,
+        verbose_name='Registro de Pasarela',
+        help_text='Registro general de pasarela de pago vinculado.',
+    )
+    banco_origen = models.CharField(
+        max_length=100,
+        verbose_name='Banco / Entidad de Origen',
+        help_text='Entidad bancaria desde la cual se remitieron los fondos.',
+    )
+    cuenta_origen = models.CharField(
+        max_length=50,
+        verbose_name='Cuenta de Origen',
+        help_text='Número de cuenta bancaria del cliente remitente.',
+    )
+    titular_origen = models.CharField(
+        max_length=150,
+        verbose_name='Titular de Origen',
+        help_text='Nombre completo o razón social del titular remitente.',
+    )
+    documento_origen = models.CharField(
+        max_length=30,
+        blank=True,
+        verbose_name='Documento / RUC de Origen',
+        help_text='Documento de identidad o RUC del titular remitente.',
+    )
+    banco_destino = models.CharField(
+        max_length=100,
+        default='Banco Itaú Paraguay',
+        verbose_name='Banco de Destino',
+        help_text='Entidad bancaria recaudadora de Global Exchange.',
+    )
+    cuenta_destino = models.CharField(
+        max_length=50,
+        default='900-1234567-01',
+        verbose_name='Cuenta de Destino',
+        help_text='Número de cuenta recaudadora oficial.',
+    )
+    monto = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        verbose_name='Monto Transferido',
+        help_text='Monto exacto transferido en la operación SIPAP.',
+    )
+    moneda = models.CharField(
+        max_length=10,
+        default='PYG',
+        verbose_name='Moneda',
+        help_text='Código de moneda de la transferencia (ej. PYG, USD).',
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+        db_index=True,
+        verbose_name='Estado de la Transferencia',
+        help_text='Estado actual de la conciliación bancaria.',
+    )
+    motivo_rechazo = models.TextField(
+        blank=True,
+        verbose_name='Motivo de Rechazo',
+        help_text='Razón documentada en caso de no poder conciliar la transferencia.',
+    )
+    fecha_transferencia = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Fecha de Transferencia',
+        help_text='Timestamp informado por la entidad bancaria.',
+    )
+    fecha_conciliacion = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Fecha de Conciliación',
+        help_text='Timestamp en que el sistema confirmó el depósito.',
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='Metadatos SIPAP',
+        help_text='Información complementaria devuelta por la red SIPAP.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de Creación')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Última Actualización')
+
+    class Meta:
+        verbose_name = 'Registro de Transferencia SIPAP'
+        verbose_name_plural = 'Registros de Transferencias SIPAP'
+        ordering = ['-fecha_transferencia']
+        indexes = [
+            models.Index(fields=['codigo_transferencia']),
+            models.Index(fields=['estado', 'fecha_transferencia']),
+        ]
+
+    def __str__(self) -> str:
+        return f'SIPAP {self.codigo_transferencia} — {self.moneda} {self.monto} [{self.get_estado_display()}]'
+
+    @property
+    def is_confirmed(self) -> bool:
+        """Indica si la transferencia fue confirmada y conciliada exitosamente."""
+        return self.estado == self.Estado.CONFIRMADA

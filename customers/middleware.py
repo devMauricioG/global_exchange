@@ -33,3 +33,6 @@ class ActiveCustomerMiddleware(MiddlewareMixin):
         if active_id not in valid_ids:
             default = assignments.filter(is_primary_representative=True).first() or assignments.first()
             request.session['active_customer_id'] = default.customer_id if default else None
+            request.active_customer = default.customer if default else None
+        else:
+            request.active_customer = assignments.filter(customer_id=active_id).first().customer

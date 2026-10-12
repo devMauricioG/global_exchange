@@ -1,6 +1,6 @@
 # Detalle de la Infraestructura de Producción — EQUIPO 88 B DIS CPR 01
 
-> Última actualización: Hito 5 (SCRUM-85) — incorpora los casos de prueba para Entidades Financieras (CPR-ENT), Medios de Cobro (CPR-REC), Límites Operativos (CPR-LIM), Filtros de Formato de Moneda (CPR-FLT), Transacciones Cambiarias y Orquestación (CPR-TXN), Expiración y Cancelación (CPR-EXP), Comprobante de Transacción (CPR-RCP) y Sembrado Idempotente (CPR-SED), derivados de RF-32 a RF-38 y RN-19 a RN-26 de la ERS v3.3.
+> Última actualización: Sprint 4 (SCRUM-105) — incorpora los casos de prueba para Pasarelas de Pago Stripe (CPR-STR), Transferencias SIPAP (CPR-SIP), Alertas y Notificaciones (CPR-ALT), Control de Acceso RBAC y Claims MFA (CPR-RBC) y Orquestación Atómica de Pagos (CPR-ORQ), derivados de RF-39 a RF-45 y RNF-SEC-05 a 07 de la ERS v3.4.
 
 ## 1. Descripción general
 
@@ -1365,10 +1365,78 @@ Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funciona
 
 ---
 
+## 28.16. Módulo 16: Pruebas de Pasarela de Pagos Stripe y Webhooks (`payments` y `StripeService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-STR-001** | Creación de Stripe Checkout Session | Transacción pendiente válida | Invocar `StripeService.create_checkout_session(tx, ...)` | Retorna sesión de Stripe con URL de redirección segura e ID de sesión (`cs_test_...`) | Crítica |
+| **CPR-STR-002** | Webhook Stripe procesado exitosamente | Evento `checkout.session.completed` firmado | Enviar POST a `/payments/webhook/stripe/` con cabecera `HTTP_STRIPE_SIGNATURE` válida | Respuesta 200 OK, transacción transiciona a `COMPLETADA`, evento registrado en `PaymentWebhookEvent` | Crítica |
+| **CPR-STR-003** | Webhook con firma criptográfica inválida | Firma falsa o ausente | Enviar POST a `/payments/webhook/stripe/` con firma adulterada | Respuesta 400 Bad Request (`SignatureVerificationError`), payload no ejecutado | Crítica |
+| **CPR-STR-004** | Idempotencia estricta en Webhook repetido | Evento ya procesado previamente | Reenviar el mismo payload con idéntico `event_id` | Respuesta 200 OK con indicador de idempotencia; la orden no sufre doble acreditación | Crítica |
+| **CPR-STR-005** | Modelo `PaymentWebhookEvent` persistencia | Base de datos activa | Crear `PaymentWebhookEvent` con payload JSON | Registro persistido correctamente; unicidad de `event_id` previene duplicados (`IntegrityError`) | Alta |
+| **CPR-STR-006** | Registro de auditoría `PaymentGatewayRecord` | Pago confirmado | Consultar `PaymentGatewayRecord` vinculado a la orden | Estado `COMPLETED`, pasarela `STRIPE` y referencia externa registradas | Alta |
+
+---
+
+## 28.17. Módulo 17: Pruebas de Transferencias Interbancarias SIPAP (`payments` y `SipapService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-SIP-001** | Simulación de transferencia SIPAP | Transacción en moneda `PYG` | Invocar `SipapService.simulate_transfer(monto, moneda, ...)` | Genera `SipapTransferRecord` con código unívoco `SIPAP-...` en estado `PENDIENTE` | Alta |
+| **CPR-SIP-002** | Confirmación y conciliación de depósito SIPAP | Registro SIPAP pendiente | Invocar `SipapService.confirm_deposit(codigo_transferencia)` | Estado transiciona a `CONFIRMADO` y la transacción asociada pasa a `COMPLETADA` | Crítica |
+| **CPR-SIP-003** | Rechazo controlado de transferencia SIPAP | Registro SIPAP pendiente | Invocar `SipapService.reject_transfer(codigo, motivo='Fondos insuficientes')` | Estado pasa a `RECHAZADO`, motivo guardado en observaciones y orden cancelada | Alta |
+| **CPR-SIP-004** | Conciliación de código SIPAP inexistente | Código no registrado | Intentar confirmar depósito con código inválido | Lanza excepción controlada `ValidationError`, sin impacto en la base de datos | Alta |
+| **CPR-SIP-005** | Consulta de estado de transferencia SIPAP | Registro SIPAP existente | Enviar GET a `/payments/sipap/consultar/<codigo>/` | Respuesta 200 con JSON exponiendo estado, monto y banco origen | Media |
+| **CPR-SIP-006** | Validación de pertenencia de cuenta bancaria | Cliente A autenticado | Intentar conciliar con cuenta bancaria perteneciente a cliente B | Denegación por validación de seguridad multi-inquilino | Crítica |
+
+---
+
+## 28.18. Módulo 18: Pruebas de Alertas de Cotización y Notificaciones (`rates`, `ExchangeAlert` y `NotificationService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-ALT-001** | Disparo de alerta por umbral superado (`MAYOR_IGUAL`)| Alerta activa con umbral 7.500 USD/PYG | Actualizar `ExchangeRate` a 7.600 disparando señal `post_save` | Alerta evaluada, marcada como `is_triggered=True`, se genera notificación en el sistema | Crítica |
+| **CPR-ALT-002** | Disparo de alerta por umbral inferior (`MENOR_IGUAL`) | Alerta activa con umbral 7.200 USD/PYG | Actualizar `ExchangeRate` a 7.100 disparando señal `post_save` | Alerta marcada como disparada y notificación creada | Crítica |
+| **CPR-ALT-003** | Prevención de disparos sucesivos duplicados | Alerta ya disparada (`is_triggered=True`) | Actualizar nuevamente la cotización en la misma dirección | La alerta no vuelve a dispararse ni a duplicar notificaciones | Alta |
+| **CPR-ALT-004** | No disparo ante alerta inactiva | Alerta con `is_active=False` | Actualizar cotización cumpliendo la condición matemática | La alerta inactiva es ignorada por el despachador | Alta |
+| **CPR-ALT-005** | Despacho a usuarios del cliente titular | Cliente con dos usuarios asociados | Disparar alerta de cotización | `NotificationService` crea notificaciones para ambos usuarios representativos | Alta |
+| **CPR-ALT-006** | Monedas no coincidentes | Alerta para EUR/PYG | Actualizar cotización de USD/PYG | La alerta para EUR/PYG permanece inalterada y no se dispara | Media |
+
+---
+
+## 28.19. Módulo 19: Pruebas de Control de Acceso RBAC y Claims MFA (`authentication`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-RBC-001** | Denegación HTTP 403 / Redirect a vistas admin | Usuario con rol estándar (`user`) | Intentar acceder a vistas de creación de monedas (`rates:currency-create`)| Respuesta 403 Forbidden o redirección bloqueante | Crítica |
+| **CPR-RBC-002** | Acceso autorizado con rol administrativo | Usuario con rol `admin` | Acceder a `/rates/currencies/create/` y endpoints SIPAP | Respuesta 200 OK con acceso completo a las funciones operativas | Crítica |
+| **CPR-RBC-003** | Redirección forzada de usuarios anónimos | Petición sin sesión activa | Intentar acceder a `/transactions/` o `/payments/` | Respuesta 302 redirigiendo a la pantalla de login OIDC (`/oidc/authenticate/`) | Crítica |
+| **CPR-RBC-004** | Mixin `RoleRequiredMixin` en vistas CBV | Vista protegida con rol `auditor` | Petición desde usuario con rol `operator` | Retorno 403 Forbidden impidiendo ejecución | Alta |
+| **CPR-RBC-005** | Renderizado condicional de menú por rol | Usuario logueado con rol `cliente` | Renderizar `base.html` | Enlaces administrativos ocultos en la barra de navegación | Alta |
+| **CPR-RBC-006** | Verificación de Claims MFA en token JWT | Token JWT con claim `amr: ['pwd', 'otp']` | Validar perfil de usuario en `/auth/profile/` | Interfaz exhibe indicador de seguridad "MFA Activo" | Media |
+| **CPR-RBC-007** | Aislamiento IDOR en checkout y transacciones | Cliente A autenticado | Intentar acceder a `/transactions/<id_B>/pago/` | Respuesta 404 Not Found o 403 Forbidden impidiendo IDOR horizontal | Crítica |
+
+---
+
+## 28.20. Módulo 20: Pruebas de Orquestación Atómica de Pagos (`transactions` y `TransactionService`)
+
+| ID Caso | Nombre del Caso de Prueba | Precondiciones | Pasos de Ejecución | Resultado Esperado | Prioridad |
+|---|---|---|---|---|:---:|
+| **CPR-ORQ-001** | Transición atómica a COMPLETADA | Transacción `PENDIENTE` | Invocar `process_payment_confirmation` con monto y moneda correctos | Estado pasa a `COMPLETADA`, asienta `fecha_pago`, `referencia_externa_pago` y `pasarela_pago` | Crítica |
+| **CPR-ORQ-002** | Rechazo por discrepancia de importe | Transacción de 100 USD | Intentar confirmar pago informando 90 USD | Lanza `ValidationError` por inconsistencia financiera; orden permanece pendiente | Crítica |
+| **CPR-ORQ-003** | Rechazo por discrepancia de divisa | Transacción en USD | Intentar confirmar pago informando moneda PYG | Lanza `ValidationError` por inconsistencia de divisa | Crítica |
+| **CPR-ORQ-004** | Bloqueo de confirmación en orden cancelada | Transacción en estado `CANCELADA` | Intentar procesar confirmación de pago | Rechazo de la operación con error descriptivo | Crítica |
+| **CPR-ORQ-005** | Anulación atómica por fallo en pasarela | Transacción `PENDIENTE` | Invocar `reject_payment_and_cancel(tx, motivo='Tarjeta declinada')` | Transición a `CANCELADA`, registro de auditoría en observaciones | Alta |
+| **CPR-ORQ-006** | Cancelación bloqueada post-liquidación | Transacción en estado `COMPLETADA` | Intentar cancelar mediante `cancel_transaction_by_customer` | Lanza `ValidationError`; no se permite anular una orden ya liquidada | Crítica |
+
+---
+
 ## 29. Criterios de Aprobación
 
 - Todos los casos críticos y altos deben aprobar antes de integrar cada Sprint.
 - Los cálculos deben comparar objetos `Decimal` o valores serializados equivalentes, sin tolerancias de punto flotante.
 - Los casos de aislamiento deben ejecutarse con dos clientes y dos usuarios para demostrar que no hay fuga horizontal de datos.
 - Las pruebas de API deben comprobar código HTTP, forma del JSON y ausencia de efectos persistentes en los escenarios de error.
+- Las suites automatizadas de PyUnit deben arrojar 100% de éxito (`OK`) con cero fallos y cero errores en todos los módulos (`payments`, `transactions`, `rates`, `authentication`).
+
 

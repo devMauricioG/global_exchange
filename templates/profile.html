@@ -1,0 +1,305 @@
+{% extends 'base.html' %}
+{% load auth_tags %}
+
+{% block title %}Perfil de Usuario y Seguridad 2FA - Global Exchange{% endblock %}
+
+{% block extra_head %}
+<style>
+    .profile-container {
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .profile-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9));
+        border: 1px solid var(--border-color);
+        border-radius: 1.25rem;
+        box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(12px);
+        overflow: hidden;
+        margin-bottom: 2rem;
+    }
+
+    .profile-header-hero {
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(37, 99, 235, 0.15));
+        border-bottom: 1px solid var(--border-color);
+        padding: 2.5rem 2rem;
+        display: flex;
+        align-items: center;
+        gap: 1.75rem;
+    }
+
+    .profile-avatar-large {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #0284c7, #38bdf8);
+        color: #082f49;
+        font-size: 2.25rem;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
+        border: 3px solid rgba(255, 255, 255, 0.2);
+        flex-shrink: 0;
+    }
+
+    .profile-title-group {
+        flex: 1;
+    }
+
+    .profile-user-name {
+        font-size: 1.75rem;
+        font-weight: 800;
+        color: var(--text-main);
+        margin: 0 0 0.4rem 0;
+        line-height: 1.2;
+    }
+
+    .profile-user-email {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .profile-body {
+        padding: 2rem;
+    }
+
+    /* 2FA Security Section */
+    .mfa-section-card {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 1rem;
+        padding: 1.75rem;
+        margin-bottom: 2rem;
+        transition: all 0.3s ease;
+    }
+
+    .mfa-section-card.mfa-active {
+        border-color: rgba(16, 185, 129, 0.4);
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(15, 23, 42, 0.7));
+    }
+
+    .mfa-section-card.mfa-inactive {
+        border-color: rgba(245, 158, 11, 0.4);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(15, 23, 42, 0.7));
+    }
+
+    .mfa-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .mfa-title-flex {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .mfa-icon {
+        font-size: 1.5rem;
+    }
+
+    .mfa-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: var(--text-main);
+        margin: 0;
+    }
+
+    .mfa-status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 1rem;
+        border-radius: 9999px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+    }
+
+    .mfa-status-badge.status-enabled {
+        background-color: var(--success-bg);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.4);
+        box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+    }
+
+    .mfa-status-badge.status-disabled {
+        background-color: var(--warning-bg);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .mfa-description {
+        font-size: 0.925rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin-bottom: 1.5rem;
+    }
+
+    .mfa-actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    /* Details Grid */
+    .details-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.25rem;
+    }
+
+    .detail-item {
+        background: rgba(15, 23, 42, 0.4);
+        border: 1px solid rgba(51, 65, 85, 0.4);
+        border-radius: 0.75rem;
+        padding: 1.1rem 1.25rem;
+    }
+
+    .detail-label {
+        font-size: 0.775rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-subtle);
+        margin-bottom: 0.35rem;
+    }
+
+    .detail-value {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-main);
+        word-break: break-word;
+    }
+
+    @media (max-width: 640px) {
+        .profile-header-hero {
+            flex-direction: column;
+            text-align: center;
+        }
+        .profile-user-email {
+            justify-content: center;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <div class="profile-card">
+        <!-- Hero Header -->
+        <div class="profile-header-hero">
+            <div class="profile-avatar-large">
+                {% if user.first_name %}
+                    {{ user.first_name|slice:":1"|upper }}{{ user.last_name|slice:":1"|upper }}
+                {% else %}
+                    {{ user.username|slice:":2"|upper }}
+                {% endif %}
+            </div>
+            <div class="profile-title-group">
+                <h1 class="profile-user-name">
+                    {% if user.first_name or user.last_name %}
+                        {{ user.first_name }} {{ user.last_name }}
+                    {% else %}
+                        {{ user.username }}
+                    {% endif %}
+                </h1>
+                <div class="profile-user-email">
+                    <span>✉️ {{ user.email|default:"Sin correo registrado" }}</span>
+                    <span style="opacity: 0.5;">•</span>
+                    {% user_role_badge user %}
+                </div>
+            </div>
+        </div>
+
+        <div class="profile-body">
+            <!-- 2FA / MFA Security Card (SCRUM-97) -->
+            <div class="mfa-section-card {% if mfa_enabled %}mfa-active{% else %}mfa-inactive{% endif %}">
+                <div class="mfa-header">
+                    <div class="mfa-title-flex">
+                        <span class="mfa-icon">🛡️</span>
+                        <h2 class="mfa-title">Autenticación de Doble Factor (2FA / TOTP)</h2>
+                    </div>
+
+                    {% if mfa_enabled %}
+                        <span class="mfa-status-badge status-enabled" id="mfaStatusBadge">
+                            <span>✓</span> MFA / 2FA Activado
+                        </span>
+                    {% else %}
+                        <span class="mfa-status-badge status-disabled" id="mfaStatusBadge">
+                            <span>⚠️</span> 2FA Pendiente / No Configurado
+                        </span>
+                    {% endif %}
+                </div>
+
+                <div class="mfa-description">
+                    {% if mfa_enabled %}
+                        Tu cuenta se encuentra protegida con <strong>Autenticación Multifactor (MFA/TOTP)</strong> mediante Keycloak. Cada inicio de sesión requiere un código temporal generado por aplicaciones como Google Authenticator o FreeOTP.
+                    {% else %}
+                        La autenticación multifactor añade una capa extra de seguridad a tu cuenta cambiaria. Es <strong>obligatoria para Administradores y Operadores</strong>. Puedes sincronizar y vincular tu aplicación autenticadora (Google Authenticator / FreeOTP) directamente en Keycloak.
+                    {% endif %}
+                </div>
+
+                <div class="mfa-actions">
+                    <a href="{{ keycloak_account_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="btnManageKeycloak2FA">
+                        🔑 Configurar 2FA en Keycloak
+                    </a>
+                    <a href="{% url 'home' %}" class="btn btn-secondary">
+                        Volver al Inicio
+                    </a>
+                </div>
+            </div>
+
+            <!-- User Account Details -->
+            <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); margin-bottom: 1rem;">
+                📋 Detalles de la Cuenta
+            </h3>
+
+            <div class="details-grid">
+                <div class="detail-item">
+                    <div class="detail-label">Nombre de Usuario</div>
+                    <div class="detail-value">{{ user.username }}</div>
+                </div>
+
+                <div class="detail-item">
+                    <div class="detail-label">Rol Principal</div>
+                    <div class="detail-value">{{ primary_role }}</div>
+                </div>
+
+                <div class="detail-item">
+                    <div class="detail-label">Estado de Cuenta</div>
+                    <div class="detail-value">
+                        {% if user.is_active %}
+                            <span class="badge badge-active">Activa</span>
+                        {% else %}
+                            <span class="badge badge-inactive">Inactiva</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="detail-item">
+                    <div class="detail-label">Cliente Activo Vinculado</div>
+                    <div class="detail-value">
+                        {% if active_customer %}
+                            {{ active_customer.nombre }} ({{ active_customer.documento_ruc }})
+                        {% else %}
+                            <span style="color: var(--text-muted); font-weight: 400;">Sin cliente seleccionado</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

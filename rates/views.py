@@ -36,6 +36,7 @@ from django.views.generic import (
 from django.views.generic import TemplateView
 
 from customers.models import Cliente
+from authentication.permissions import ActiveCustomerRequiredMixin, RoleRequiredMixin, has_role
 from .forms import (
     CurrencyFilterForm,
     CurrencyForm,
@@ -46,8 +47,9 @@ from .forms import (
     RateCalculatorForm,
     SegmentCommissionFilterForm,
     SegmentCommissionForm,
+    RateAlertSubscriptionForm,
 )
-from .models import Currency, ExchangeRate, OperationLimit, SegmentCommission
+from .models import Currency, ExchangeRate, OperationLimit, RateAlertSubscription, SegmentCommission, UserNotification
 from .services import (
     OperationLimitValidationService,
     QuoteFreezeService,
@@ -62,7 +64,8 @@ logger = logging.getLogger(__name__)
 # CURRENCY VIEWS (SCRUM-51)
 # ==============================================================================
 
-class CurrencyListView(LoginRequiredMixin, ListView):
+class CurrencyListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado para el catálogo de monedas internacionales.
     """
@@ -106,7 +109,8 @@ class CurrencyListView(LoginRequiredMixin, ListView):
         return context
 
 
-class CurrencyCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class CurrencyCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para crear una nueva moneda en el catálogo.
     """
@@ -124,7 +128,8 @@ class CurrencyCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
         return context
 
 
-class CurrencyUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class CurrencyUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para actualizar una moneda existente.
     """
@@ -142,7 +147,8 @@ class CurrencyUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
         return context
 
 
-class CurrencyToggleStatusView(LoginRequiredMixin, View):
+class CurrencyToggleStatusView(RoleRequiredMixin, View):
+    allowed_roles = ('admin',)
     """
     Controlador para activar o desactivar una moneda.
     """
@@ -161,7 +167,8 @@ class CurrencyToggleStatusView(LoginRequiredMixin, View):
 # EXCHANGE RATE VIEWS (SCRUM-51)
 # ==============================================================================
 
-class ExchangeRateListView(LoginRequiredMixin, ListView):
+class ExchangeRateListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado para las cotizaciones y tasas de cambio vigentes.
     """
@@ -204,7 +211,8 @@ class ExchangeRateListView(LoginRequiredMixin, ListView):
         return context
 
 
-class ExchangeRateCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class ExchangeRateCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para registrar una nueva tasa de cambio.
     """
@@ -226,7 +234,8 @@ class ExchangeRateCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView
         return super().form_valid(form)
 
 
-class ExchangeRateUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class ExchangeRateUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una cotización existente.
     """
@@ -248,7 +257,8 @@ class ExchangeRateUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView
         return super().form_valid(form)
 
 
-class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
+class ExchangeRateToggleStatusView(RoleRequiredMixin, View):
+    allowed_roles = ('admin',)
     """
     Controlador para cambiar el estado de una cotización.
     """
@@ -268,7 +278,8 @@ class ExchangeRateToggleStatusView(LoginRequiredMixin, View):
 # DASHBOARD DE COTIZACIONES HISTÓRICAS (SCRUM-52)
 # ==============================================================================
 
-class ExchangeRateDashboardView(LoginRequiredMixin, TemplateView):
+class ExchangeRateDashboardView(RoleRequiredMixin, TemplateView):
+    allowed_roles = ('admin', 'operator', 'user')
     """Muestra el tablero de cotizaciones y sus indicadores operativos actuales."""
 
     template_name = 'rates/exchange_rate_dashboard.html'
@@ -315,7 +326,8 @@ class ExchangeRateDashboardView(LoginRequiredMixin, TemplateView):
         return context
 
 
-class ExchangeRateHistoryApiView(LoginRequiredMixin, View):
+class ExchangeRateHistoryApiView(RoleRequiredMixin, View):
+    allowed_roles = ('admin', 'operator', 'user')
     """Entrega las series históricas de compra y venta para el gráfico de cotizaciones."""
 
     PERIOD_DAYS = {'7d': 7, '30d': 30, '90d': 90, '1y': 365}
@@ -383,7 +395,8 @@ def _serialize_commission_rule(rule: SegmentCommission) -> Dict[str, Any]:
     }
 
 
-class SegmentCommissionListView(LoginRequiredMixin, ListView):
+class SegmentCommissionListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado administrativo para las reglas de comisión por segmento de cliente.
     """
@@ -426,7 +439,8 @@ class SegmentCommissionListView(LoginRequiredMixin, ListView):
         return context
 
 
-class SegmentCommissionCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class SegmentCommissionCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para parametrizar una nueva regla tarifaria por segmento.
     """
@@ -444,7 +458,8 @@ class SegmentCommissionCreateView(LoginRequiredMixin, SuccessMessageMixin, Creat
         return context
 
 
-class SegmentCommissionUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class SegmentCommissionUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una regla de comisión existente.
     """
@@ -462,7 +477,8 @@ class SegmentCommissionUpdateView(LoginRequiredMixin, SuccessMessageMixin, Updat
         return context
 
 
-class SegmentCommissionDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+class SegmentCommissionDeleteView(RoleRequiredMixin, SuccessMessageMixin, DeleteView):
+    allowed_roles = ('admin',)
     """
     Vista de confirmación para dar de baja o eliminar una regla tarifaria.
     """
@@ -479,7 +495,8 @@ class SegmentCommissionDeleteView(LoginRequiredMixin, SuccessMessageMixin, Delet
         return super().delete(request, *args, **kwargs)
 
 
-class SegmentCommissionDetailView(LoginRequiredMixin, DetailView):
+class SegmentCommissionDetailView(RoleRequiredMixin, DetailView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista analítica de detalle para una regla de comisión con simulaciones de impacto financiero.
     """
@@ -769,6 +786,11 @@ class FreezeQuoteApiView(View):
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
+        active_customer = get_active_customer(request)
+        if not active_customer:
+            return JsonResponse({'success': False, 'error': 'Debe seleccionar un cliente activo para congelar una cotización.'}, status=403)
         params = {}
         if request.content_type == 'application/json' and request.body:
             try:
@@ -806,18 +828,9 @@ class FreezeQuoteApiView(View):
                     status=404,
                 )
 
-            active_customer = get_active_customer(request)
-            cliente_id = params.get('cliente_id')
-            segment = params.get('segment')
-
-            segment_target = segment
-            if not segment_target and cliente_id:
-                c = Cliente.objects.filter(id=cliente_id, is_active=True).first()
-                if c:
-                    segment_target = c.segmentacion
-
-            if not segment_target and active_customer:
-                segment_target = active_customer.segmentacion
+            # El segmento pertenece al cliente activo; el cliente_id recibido no
+            # puede sustituir el contexto autorizado de la sesión.
+            segment_target = active_customer.segmentacion
 
             amount_raw = params.get('amount', '100.00')
             op_type = str(params.get('operation_type', 'BUY')).upper()
@@ -865,6 +878,8 @@ class GetFrozenQuoteApiView(View):
     """
 
     def get(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
         token = request.GET.get('token')
         frozen_data = QuoteFreezeService.get_frozen_quote(request, token=token)
 
@@ -896,6 +911,8 @@ class UnfreezeQuoteApiView(View):
     """
 
     def post(self, request: HttpRequest) -> JsonResponse:
+        if not request.user.is_authenticated:
+            return JsonResponse({'success': False, 'error': 'Usuario no autenticado.'}, status=401)
         token = None
         if request.content_type == 'application/json' and request.body:
             try:
@@ -946,7 +963,8 @@ def _serialize_operation_limit(limit: OperationLimit) -> Dict[str, Any]:
     }
 
 
-class OperationLimitListView(LoginRequiredMixin, ListView):
+class OperationLimitListView(RoleRequiredMixin, ListView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista de listado administrativo para las reglas de límites operativos por segmento y divisa.
     """
@@ -987,7 +1005,8 @@ class OperationLimitListView(LoginRequiredMixin, ListView):
         return context
 
 
-class OperationLimitCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class OperationLimitCreateView(RoleRequiredMixin, SuccessMessageMixin, CreateView):
+    allowed_roles = ('admin',)
     """
     Vista para parametrizar una nueva regla de límites operativos por segmento y divisa.
     """
@@ -1005,7 +1024,8 @@ class OperationLimitCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateVi
         return context
 
 
-class OperationLimitUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class OperationLimitUpdateView(RoleRequiredMixin, SuccessMessageMixin, UpdateView):
+    allowed_roles = ('admin',)
     """
     Vista para modificar una regla de límites operativos existente.
     """
@@ -1023,7 +1043,8 @@ class OperationLimitUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateVi
         return context
 
 
-class OperationLimitDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteView):
+class OperationLimitDeleteView(RoleRequiredMixin, SuccessMessageMixin, DeleteView):
+    allowed_roles = ('admin',)
     """
     Vista de confirmación para dar de baja o eliminar una regla de límites operativos.
     """
@@ -1040,7 +1061,8 @@ class OperationLimitDeleteView(LoginRequiredMixin, SuccessMessageMixin, DeleteVi
         return super().delete(request, *args, **kwargs)
 
 
-class OperationLimitDetailView(LoginRequiredMixin, DetailView):
+class OperationLimitDetailView(RoleRequiredMixin, DetailView):
+    allowed_roles = ('admin', 'operator')
     """
     Vista analítica de detalle para una regla de límites con simulaciones de transacciones.
     """
@@ -1192,3 +1214,205 @@ class ValidateOperationLimitApiView(View):
         json_friendly = json.loads(json.dumps(validation, default=float))
         return JsonResponse({'success': validation['is_valid'], 'validation': json_friendly}, status=status_code)
 
+# ==============================================================================
+# CENTRO DE NOTIFICACIONES (SCRUM-100)
+# ==============================================================================
+
+class NotificationListApiView(LoginRequiredMixin, View):
+    """
+    Endpoint JSON que lista las notificaciones del usuario autenticado en tramos.
+
+    Ruta: ``/rates/api/notifications/``
+
+    Parámetro de consulta ``offset`` (opcional, por defecto 0): posición desde la cual
+    devolver el siguiente tramo de ``page_size`` notificaciones, de la más reciente
+    a la más antigua. Siempre filtra por el usuario de la sesión, por lo que nadie
+    puede consultar notificaciones ajenas.
+    """
+
+    page_size = 10
+
+    def get(self, request: HttpRequest) -> JsonResponse:
+        """
+        Devuelve un tramo de notificaciones junto con el contador de no leídas.
+
+        :param request: Solicitud HTTP autenticada.
+        :type request: django.http.HttpRequest
+        :return: JSON con ``results``, ``unread_count``, ``total``, ``has_more`` y ``next_offset``.
+        :rtype: django.http.JsonResponse
+        """
+        try:
+            offset = max(0, int(request.GET.get('offset', 0)))
+        except ValueError:
+            offset = 0
+
+        queryset = UserNotification.objects.filter(usuario=request.user).order_by('-fecha_creacion', '-id')
+        total = queryset.count()
+        tramo = list(queryset[offset:offset + self.page_size])
+
+        return JsonResponse({
+            'results': [
+                {
+                    'id': n.id,
+                    'titulo': n.titulo,
+                    'mensaje': n.mensaje,
+                    'leido': n.leido,
+                    'fecha_creacion': n.fecha_creacion.isoformat(),
+                }
+                for n in tramo
+            ],
+            'unread_count': UserNotification.objects.filter(usuario=request.user, leido=False).count(),
+            'total': total,
+            'has_more': offset + len(tramo) < total,
+            'next_offset': offset + len(tramo),
+        })
+
+
+class NotificationMarkReadApiView(LoginRequiredMixin, View):
+    """
+    Endpoint JSON para marcar notificaciones como leídas (acción POST).
+
+    Rutas:
+        * ``/rates/api/notifications/<pk>/read/``: marca una notificación puntual.
+        * ``/rates/api/notifications/read-all/``: marca todas las del usuario.
+
+    Solo opera sobre notificaciones del usuario autenticado; si la notificación
+    indicada no le pertenece responde 404, sin confirmar que existe.
+    """
+
+    def post(self, request: HttpRequest, pk: Optional[int] = None) -> JsonResponse:
+        """
+        Marca como leídas una o todas las notificaciones pendientes del usuario.
+
+        :param request: Solicitud HTTP POST autenticada, con token CSRF.
+        :type request: django.http.HttpRequest
+        :param pk: Identificador de la notificación a marcar; ``None`` para marcar todas.
+        :type pk: int or None
+        :return: JSON con la cantidad actualizada y el nuevo contador de no leídas.
+        :rtype: django.http.JsonResponse
+        """
+        pendientes = UserNotification.objects.filter(usuario=request.user, leido=False)
+        if pk is not None:
+            get_object_or_404(UserNotification, pk=pk, usuario=request.user)
+            pendientes = pendientes.filter(pk=pk)
+
+        actualizadas = pendientes.update(leido=True)
+        return JsonResponse({
+            'updated': actualizadas,
+            'unread_count': UserNotification.objects.filter(usuario=request.user, leido=False).count(),
+        })
+
+# ==============================================================================
+# SUSCRIPCIONES A ALERTAS DE COTIZACIÓN (SCRUM-100)
+# ==============================================================================
+
+class ActiveCustomerRequiredMixin(LoginRequiredMixin):
+    """
+    Exige un usuario autenticado con un cliente activo en sesión.
+
+    Resuelve el cliente con :func:`get_active_customer` y lo expone como
+    ``self.cliente``. Si el usuario no tiene cliente, lo redirige al inicio
+    con un aviso.
+    """
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        self.cliente = get_active_customer(request)
+        if not self.cliente:
+            messages.warning(request, 'Para gestionar alertas de cotización necesita un cliente activo.')
+            return redirect('home')
+        return super().dispatch(request, *args, **kwargs)
+
+
+class RateAlertListView(ActiveCustomerRequiredMixin, ListView):
+    """
+    Listado de las suscripciones de alerta del cliente activo.
+
+    Ruta: ``/rates/alerts/``
+    """
+
+    model = RateAlertSubscription
+    template_name = 'rates/alert_list.html'
+    context_object_name = 'alertas'
+
+    def get_queryset(self) -> QuerySet[RateAlertSubscription]:
+        return (
+            RateAlertSubscription.objects.filter(cliente=self.cliente)
+            .select_related('base_currency', 'target_currency')
+            .order_by('-activo', '-created_at')
+        )
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        context['activas_count'] = self.object_list.filter(activo=True).count()
+        return context
+
+
+class RateAlertCreateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, CreateView):
+    """
+    Alta de una suscripción de alerta para el cliente activo.
+
+    Ruta: ``/rates/alerts/add/``
+    """
+
+    model = RateAlertSubscription
+    form_class = RateAlertSubscriptionForm
+    template_name = 'rates/alert_form.html'
+    success_url = reverse_lazy('rates:alert_list')
+    success_message = 'La alerta de cotización fue creada con éxito.'
+
+    def form_valid(self, form: RateAlertSubscriptionForm) -> HttpResponse:
+        form.instance.cliente = self.cliente
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        context['action'] = 'Crear'
+        context['is_create'] = True
+        return context
+
+
+class RateAlertUpdateView(ActiveCustomerRequiredMixin, SuccessMessageMixin, UpdateView):
+    """
+    Edición de una suscripción de alerta del cliente activo.
+
+    Solo permite editar suscripciones del cliente activo (protección IDOR):
+    si la suscripción es de otro cliente responde 404.
+
+    Ruta: ``/rates/alerts/<pk>/edit/``
+    """
+
+    model = RateAlertSubscription
+    form_class = RateAlertSubscriptionForm
+    template_name = 'rates/alert_form.html'
+    success_url = reverse_lazy('rates:alert_list')
+    success_message = 'La alerta de cotización fue actualizada satisfactoriamente.'
+
+    def get_queryset(self) -> QuerySet[RateAlertSubscription]:
+        return RateAlertSubscription.objects.filter(cliente=self.cliente)
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context['cliente'] = self.cliente
+        context['action'] = 'Actualizar'
+        context['is_create'] = False
+        return context
+
+
+class RateAlertToggleActiveView(ActiveCustomerRequiredMixin, View):
+    """
+    Acción POST para activar o desactivar una suscripción (sin borrado).
+
+    Ruta: ``/rates/alerts/<pk>/toggle/``
+    """
+
+    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        alerta = get_object_or_404(RateAlertSubscription, pk=pk, cliente=self.cliente)
+        alerta.activo = not alerta.activo
+        alerta.save(update_fields=['activo', 'updated_at'])
+        estado = 'activada' if alerta.activo else 'desactivada'
+        messages.info(request, f'La alerta fue {estado} correctamente.')
+        return redirect('rates:alert_list')

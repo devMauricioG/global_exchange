@@ -20,6 +20,14 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-55** | CRUD de Medios de Pago de Clientes (payments) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-50** | Modelos de Datos para Monedas, Tasas de Cambio y Comisiones (rates) | Sprint 2 | Pablo Elizeche | Finalizado |
 | **SCRUM-56** | Suite de Pruebas Unitarias e Integración para Monedas, Cotizaciones, Comisiones, Medios de Pago, Usuarios y Clientes | Sprint 2 | Equipo de Desarrollo | Finalizado |
+| **SCRUM-92** | Modelado de Pasarela y Servicio de Webhook de Stripe en `payments/` | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-93** | Servicio de Simulación y Confirmación Bancaria Local SIPAP | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-94** | Orquestación en TransactionService para Transición Atómica de Pago y Liquidación | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-95** | Vistas e Interfaces de Usuario para Pago en Línea y Confirmación Bancaria | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-104** | Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-105** | Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4 | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-106** | Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4 | Sprint 4 | Mauricio González | Finalizado |
+
 
 ---
 
@@ -285,4 +293,253 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `rates/tests.py`
   * `authentication/tests.py`
   * `docs/documentacion/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 14. SCRUM-92: Modelado de pasarela y servicio de webhook de Stripe en apps/payments/
+
+* **Objetivo:** Implementar en `payments/` el modelo de pasarela externa, el servicio de integración `StripeService` (sesiones de Checkout y PaymentIntent) y el endpoint receptor de webhooks (`stripe_webhook`) con validación criptográfica y procesamiento idempotente.
+* **Aportes y Solución con IA:**
+  * Modelado de datos en `payments/models.py`:
+    * `PaymentGatewayRecord`: seguimiento de órdenes y sesiones de Stripe Checkout / PaymentIntents con estados (`PENDIENTE`, `COMPLETADO`, `FALLIDO`, `CANCELADO`, `REEMBOLSADO`), montos, divisas y URLs de redirección.
+    * `PaymentWebhookEvent`: registro inmutable con `event_id` único para garantizar idempotencia y prevenir dobles acreditaciones ante reintentos de Stripe.
+  * Servicio `StripeService` en `payments/services.py`:
+    * Conversión bidireccional y normalización de montos para divisas estándar (en centavos) y divisas de cero decimales como el guaraní paraguayo (`PYG`).
+    * Creación de sesiones de Stripe Checkout (`create_checkout_session`) y PaymentIntents (`create_payment_intent`).
+    * Verificación de firmas criptográficas HMAC-SHA256 (`verify_webhook_signature`) mediante `stripe.Webhook.construct_event`.
+    * Procesador de eventos (`process_webhook_event`) con soporte para `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed` y `checkout.session.expired`, actualizando transitoriamente el estado de la transacción a `COMPLETADA`.
+  * Controlador y enrutamiento en `payments/views.py` y `payments/urls.py`:
+    * Endpoint `@csrf_exempt` `stripe_webhook` (`/payments/webhook/stripe/`) con validación de cabecera `Stripe-Signature`.
+    * Vista CBV `StripeCreateCheckoutSessionView` (`/payments/stripe/checkout/<int:transaction_id>/`) con validación de cliente activo y control de acceso.
+  * Configuración de entorno en `config/settings/base.py` y `.env.example` (`STRIPE_PUBLIC_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CURRENCY`).
+  * Migración `payments/migrations/0007_paymentwebhookevent_paymentgatewayrecord.py`.
+  * Registro en panel de administración `payments/admin.py` e indexación en Sphinx `docs/sphinx/source/payments.rst`.
+  * Suite de pruebas automatizadas: 24 tests unitarios y de integración en `payments/tests.py` con mocks de la API de Stripe, elevando el total a **313 tests aprobados con 100% de éxito (OK)**.
+* **Archivos intervenidos:**
+  * `payments/models.py`
+  * `payments/services.py`
+  * `payments/views.py`
+  * `payments/urls.py`
+  * `payments/admin.py`
+  * `payments/tests.py`
+  * `payments/migrations/0007_paymentwebhookevent_paymentgatewayrecord.py`
+  * `config/settings/base.py`
+  * `.env.example`
+  * `requirements.txt`
+  * `docs/sphinx/source/payments.rst`
+  * `docs/chat_ia.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+
+---
+
+### 14. SCRUM-93: Servicio de simulación y confirmación bancaria local SIPAP
+
+* **Objetivo:** Implementar en `payments/` el servicio de conciliación interbancaria SIPAP (`SipapService`), modelado del comprobante bancario (`SipapTransferRecord`), validación de códigos de transferencia, cuentas de origen/destino y endpoints de confirmación automática de depósitos con estricta idempotencia y transición a `CANCELADA` ante rechazos (criterio SCRUM-87).
+* **Aportes y Solución con IA:**
+  * Modelado de datos en `payments/models.py`:
+    * `SipapTransferRecord`: entidad representativa de la transferencia interbancaria nacional con campos: `codigo_transferencia` (único, ej. `SIPAP-YYYYMMDD-XXXXXX`), `transaction` (FK opcional a `Transaction`), `gateway_record` (FK a `PaymentGatewayRecord`), `banco_origen`, `cuenta_origen`, `titular_origen`, `documento_origen`, `banco_destino`, `cuenta_destino`, `monto`, `moneda`, `estado` (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`, `REVERTIDA`), `motivo_rechazo`, `fecha_transferencia`, `fecha_conciliacion`, `metadata` y timestamps.
+  * Servicio `SipapService` en `payments/services.py`:
+    * `generate_transfer_code(prefix='SIPAP')`: generador de códigos estándar correlativos.
+    * `simulate_transfer(...)`: inyección de transferencias simuladas para entornos operativos y de prueba con soporte de confirmación inmediata opcional.
+    * `validate_transfer(...)`: validación de existencia, montos exactos, divisas y cuentas remitentes.
+    * `confirm_deposit(...)`: conciliación atómica y automática de depósitos bancarios. Aplica control de **idempotencia estricta** verificando comprobantes ya conciliados para evitar duplicación de asientos, actualiza `PaymentGatewayRecord` a `COMPLETADO` y transiciona la transacción cambiaria vinculada de `PENDIENTE` a `COMPLETADA`.
+    * `reject_transfer(...)`: registro de rechazos por disconformidad bancaria, actualizando la pasarela a `FALLIDO` y cancelando atómicamente la orden cambiaria vinculada (`CANCELADA`).
+  * Vistas y Enrutamiento en `payments/views.py` y `payments/urls.py`:
+    * `sipap_confirm_deposit` (`/payments/sipap/confirmar/`): endpoint POST `@csrf_exempt` para conciliación automática e idempotente.
+    * `sipap_simulate_transfer` (`/payments/sipap/simular/`): endpoint POST `@csrf_exempt` para generación controlada de comprobantes simulados.
+    * `sipap_query_status` (`/payments/sipap/consultar/<str:codigo>/`): endpoint GET para consulta de estado de transferencias.
+    * `sipap_reject_transfer` (`/payments/sipap/rechazar/`): endpoint POST `@csrf_exempt` para rechazo documentado y anulación de órdenes.
+  * Migración generada: `payments/migrations/0008_sipaptransferrecord.py`.
+  * Registro en Django Admin: `payments/admin.py` con `SipapTransferRecordAdmin`.
+  * Suite de pruebas automatizadas: pruebas unitarias exhaustivas (`SipapServiceTestCase`) y de integración HTTP (`SipapEndpointsTestCase`) en `payments/tests.py`, elevando la cobertura a **330 tests aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `payments/models.py`
+  * `payments/services.py`
+  * `payments/views.py`
+  * `payments/urls.py`
+  * `payments/admin.py`
+  * `payments/tests.py`
+  * `payments/migrations/0008_sipaptransferrecord.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 15. SCRUM-94: Orquestación en TransactionService para transición atómica de pago y liquidación
+
+* **Objetivo:** Extender `apps/transactions/services.py` y `apps/transactions/models.py` para procesar la confirmación y liquidación atómica de pagos entrantes (Stripe o SIPAP), verificar rigurosamente la integridad de montos y divisas, y transicionar de forma atómica e idempotente el estado de la transacción de `PENDIENTE` a `COMPLETADA` registrando `fecha_pago`, `referencia_externa_pago` y `pasarela_pago` (criterio SCRUM-87).
+* **Aportes y Solución con IA:**
+  * Extensión del Modelo `Transaction` (`transactions/models.py`):
+    * Incorporación de campos de liquidación: `fecha_pago` (timestamp de confirmación), `referencia_externa_pago` (identificador devuelto por Stripe o comprobante SIPAP) y `pasarela_pago` (STRIPE, SIPAP, EFECTIVO).
+    * Actualización del método `mark_as_completed` para persistir atómicamente `fecha_pago`, `referencia_externa_pago`, `pasarela_pago` y `observaciones`.
+  * Orquestación Transaccional en `TransactionService` (`transactions/services.py`):
+    * `process_payment_confirmation`: método maestro de liquidación con validaciones exhaustivas:
+      * Control estricto de **idempotencia**: ante reintentos o llamadas repetidas con la misma referencia, retorna la orden completada sin duplicar operaciones contables. Si ya fue liquidada con una referencia distinta, rechaza la operación.
+      * Verificación de estado previo: bloquea liquidaciones sobre órdenes canceladas o terminales.
+      * Validación de monto exacto: compara el monto recibido con el `monto_origen` de la orden, arrojando `ValidationError` ante cualquier discrepancia.
+      * Validación de divisa: compara la divisa informada con la `moneda_origen` esperada (ej. PYG vs USD).
+      * Transición atómica: actualiza el estado de la orden a `COMPLETADA`, asienta la auditoría en observaciones y sincroniza registros vinculados de `PaymentGatewayRecord`.
+    * Métodos de conveniencia: `confirm_stripe_payment`, `confirm_sipap_payment` y `reject_payment_and_cancel`.
+  * Integración con `payments/services.py`:
+    * Delegación completa desde `StripeService._mark_transaction_completed` hacia `TransactionService.confirm_stripe_payment`.
+    * Delegación desde `SipapService.confirm_deposit` hacia `TransactionService.confirm_sipap_payment`.
+    * Delegación desde `SipapService.reject_transfer` hacia `TransactionService.reject_payment_and_cancel`.
+  * Panel Administrativo y Migración:
+    * Actualización de `TransactionAdmin` en `transactions/admin.py` con filtros y visualización de pasarela, fecha de pago y referencia.
+    * Migración `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`.
+  * Suite de Pruebas Automatizadas:
+    * Se incorporó `TransactionPaymentOrchestrationTest` en `transactions/tests.py` con 9 pruebas unitarias que cubren: liquidación exitosa, discrepancia de monto, discrepancia de moneda, idempotencia estricta, rechazo sobre órdenes canceladas, métodos helper y rechazos de pasarela, alcanzando un total de **339 tests aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `transactions/models.py`
+  * `transactions/services.py`
+  * `transactions/admin.py`
+  * `transactions/tests.py`
+  * `transactions/migrations/0002_transaction_fecha_pago_transaction_pasarela_pago_and_more.py`
+  * `payments/services.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 16. SCRUM-95: Vistas e interfaces de usuario para pago en línea y confirmación bancaria
+
+* **Objetivo:** Construir la interfaz de usuario y las vistas web para el flujo de pago del cliente (`templates/transactions/payment_checkout.html`), permitiendo la selección entre pasarela de tarjetas internacional (Stripe Checkout) y transferencia bancaria local (SIPAP), con integración al temporizador de cotización congelada y modales interactivos para carga de comprobantes y simulación asistida.
+* **Aportes y Solución con IA:**
+  * Vista Web de Checkout (`TransactionPaymentCheckoutView` en `transactions/views.py`):
+    * Vista basada en clases (`DetailView`, `LoginRequiredMixin`) protegida contra IDOR asegurando que únicamente el cliente titular autenticado o personal administrativo pueda acceder al checkout.
+    * Comprobaciones de seguridad en el ciclo de vida:
+      * Si la orden ya está `COMPLETADA`, redirige al detalle con mensaje informativo.
+      * Si la orden está `CANCELADA`, redirige al detalle con mensaje de advertencia.
+      * Si la cotización congelada ha expirado (>5 minutos), cancela automáticamente la transacción y redirige al detalle.
+    * Procesamiento de confirmación de comprobante SIPAP (`POST` estándar y `POST AJAX`):
+      * Valida el ingreso de `codigo_transferencia`, banco emisor y datos del remitente.
+      * Invoca a `TransactionService.confirm_sipap_payment` para conciliar atómicamente la orden y transicionarla a `COMPLETADA`.
+      * Soporta la acción `simulate_sipap` para generar transferencias asistidas en entornos de demostración y QA.
+  * Plantilla Interactiva de Checkout (`templates/transactions/payment_checkout.html`):
+    * Diseño responsivo adaptado al sistema de diseño oscuro de Global Exchange.
+    * Resumen financiero de la orden: Monto a pagar destacado, desglose de cotización, comisiones aplicadas, monto neto a recibir y medio de acreditación destino.
+    * Temporizador regresivo en JavaScript de 5 minutos sincronizado con el timestamp de creación de la transacción.
+    * Sección de Pasarela Stripe: Formulario con redirección segura a Stripe Checkout (`payments:stripe-create-checkout`) con insignias de seguridad PCI-DSS y cifrado SSL.
+    * Sección de Cuenta Recaudadora SIPAP: Exhibición de datos bancarios institucionales de Global Exchange (Banco, RUC, N° de Cuenta, Titular y Concepto requerido con botón para copiar al portapapeles).
+    * Modales interactivos: Modal de carga manual de comprobante SIPAP y modal de simulación asistida de transferencias.
+  * Enrutamiento y Enlaces de Navegación:
+    * Rutas registradas en `transactions/urls.py`: `path('<int:pk>/pago/', ...)` y alias `path('<int:pk>/checkout/', ...)`.
+    * En `templates/transactions/transaction_detail.html`: Se integró el botón y banner "Pagar Ahora / Proceder al Checkout" cuando la orden está pendiente, y el bloque de detalles de pasarela y referencia externa cuando la orden está liquidada.
+  * Suite de Pruebas Automatizadas:
+    * Se incorporó `TransactionPaymentCheckoutViewTest` en `transactions/tests.py` con 13 pruebas unitarias exhaustivas que cubren: acceso autenticado exitoso, redirección de usuarios no autenticados, protección IDOR multi-inquilino, bloqueo y redirección en estados terminales, cancelación automática por cotización expirada, conciliación SIPAP vía POST tradicional y AJAX, simulación asistida, y renderizado condicional de botones y pasarelas en el detalle.
+    * Total acumulado del proyecto: **352 tests unitarios aprobados al 100% (OK)**.
+* **Archivos intervenidos:**
+  * `transactions/views.py`
+  * `transactions/urls.py`
+  * `templates/transactions/payment_checkout.html`
+  * `templates/transactions/transaction_detail.html`
+  * `transactions/tests.py`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 17. SCRUM-104: Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC
+
+* **Objetivo:** Escribir la suite completa de tests en PyUnit (`apps/payments/tests/`, `apps/transactions/tests/`, `apps/rates/tests/`, `apps/authentication/tests/`) con mocks de webhooks de Stripe/SIPAP, validación de señales de alertas y verificación de permisos HTTP 403.
+* **Aportes y Solución con IA:**
+  * **Pasarela de Pagos y Webhooks (`payments/tests.py`):**
+    * Mocks de webhooks de Stripe (`checkout.session.completed`), validación de firmas criptográficas inválidas (retorno 400), y control de idempotencia con el modelo `PaymentWebhookEvent`.
+    * Cobertura completa de simulación, conciliación de depósitos y rechazo bancario de transferencias locales en `SipapService`.
+    * Pruebas del modelo `PaymentGatewayRecord` cubriendo estados de auditoría y transiciones.
+  * **Notificaciones y Señales de Cotización (`rates/tests.py`):**
+    * Verificación de la señal `post_save` de `ExchangeRate` para la evaluación y activación de `ExchangeAlert`.
+    * Cobertura de condiciones de umbral (`MAYOR_IGUAL`, `MENOR_IGUAL`), invocación a `NotificationService`, y casos límite (alertas inactivas, sin usuarios asignados).
+  * **Control de Acceso y RBAC HTTP 403 / Redirección (`authentication/tests.py`):**
+    * Verificación de permisos y aislamiento de roles en vistas administrativas (retorno HTTP 403 o redirección según política de seguridad).
+    * Validación de redirección de usuarios no autenticados (`/oidc/authenticate/`).
+  * **Aislamiento IDOR y Recibos (`transactions/tests.py`):**
+    * Verificación contra IDOR en vistas de detalle, cancelación y comprobantes de liquidación cambiaria.
+    * Cobertura de la vista de recibos (`TransactionReceiptView`).
+  * **Compatibilidad de Rutas `apps.*` (`apps/__init__.py`):**
+    * Enrutamiento dinámico en `sys.modules` para permitir ejecuciones bajo la nomenclatura `apps.<modulo>.tests`.
+  * **Resultados:** 455 tests totales en la suite pasando al 100% (OK) con 0 fallos y 0 errores.
+* **Archivos intervenidos:**
+  * `apps/__init__.py`
+  * `authentication/tests.py`
+  * `payments/tests.py`
+  * `rates/tests.py`
+  * `transactions/tests.py`
+  * `docs/documentacion/SCRUM-104.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 18. SCRUM-105: Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4
+
+* **Objetivo:** Actualizar los documentos formales de ingeniería: diagrama de clases (`DIS_CLA_01`), diagrama de paquetes (`DIS_PAQ_01`), casos de prueba (`DIS_CPR_01`) y especificación ERS incorporando los módulos de pasarelas de pago, MFA, alertas y RBAC.
+* **Aportes y Solución con IA:**
+  * **Especificación de Requerimientos de Software (ERS v3.4 - `EQUIPO_08_A_ERS.md`):**
+    * Incorporación de definiciones formales de Stripe, SIPAP (BCP), MFA/TOTP, Webhooks e Idempotencia.
+    * Formalización de Requerimientos Funcionales RF-39 (Stripe Checkout y Webhooks), RF-40 (Conciliación Bancaria Local SIPAP), RF-41 (Orquestación Transaccional y Liquidación Atómica), RF-42 (Vistas de Checkout y Pago en Línea), RF-43 (Autenticación Multifactor MFA), RF-44 (Alertas de Cotización y Centro de Notificaciones) y RF-45 (Módulo de Permisos RBAC y Menú Dinámico).
+    * Incorporación de Requerimientos No Funcionales RNF-SEC-05 (Firma criptográfica en webhooks), RNF-SEC-06 (Idempotencia estricta en pagos) y RNF-SEC-07 (Principio de menor privilegio y bloqueo HTTP 403).
+    * Registro formal en el historial de cambios (versión 3.4 fechada al 12/10/2026).
+  * **Diagrama de Clases UML (`DIS_CLA_01` - `EQUIPO_88_B_DIS_CLA_01.md`):**
+    * Documentación detallada de atributos, métodos y multiplicidades para `PaymentWebhookEvent`, `PaymentGatewayRecord`, `SipapTransferRecord`, `StripeService`, `SipapService`, `ExchangeAlert`, `NotificationService`, decoradores RBAC y claims MFA.
+    * Actualización del modelo `Transaction` con campos de pago (`fecha_pago`, `referencia_externa_pago`, `pasarela_pago`).
+    * Diagrama Mermaid integral actualizado reflejando todas las entidades de dominio y servicios del Sprint 4.
+  * **Diagrama de Paquetes y Arquitectura (`DIS_PAQ_01` - `EQUIPO_88_B_DIS_PAQ_01.md`):**
+    * Actualización de responsabilidades y componentes de `apps.payments`, `apps.transactions`, `apps.rates` y `apps.authentication`.
+    * Ampliación del catálogo de interfaces expuestas (endpoints webhook, conciliación/simulación SIPAP, checkout interactivo, alertas de cambio y perfil MFA).
+  * **Casos de Prueba Formales (`DIS_CPR_01` - `EQUIPO_88_B_DIS_CPR_01.md`):**
+    * Incorporación de 31 nuevos casos de prueba estructurados: Módulo 16 CPR-STR (Stripe y Webhooks), Módulo 17 CPR-SIP (SIPAP), Módulo 18 CPR-ALT (Alertas y Notificaciones), Módulo 19 CPR-RBC (RBAC y MFA) y Módulo 20 CPR-ORQ (Orquestación atómica de pagos).
+  * **Documento Específico de Tarea:**
+    * Creación de `docs/documentacion/SCRUM-105.md` con trazabilidad completa de los artefactos intervenidos.
+* **Archivos intervenidos:**
+  * `docs/documentacion/Proyecto/EQUIPO_08_A_ERS.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CLA_01.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_PAQ_01.md`
+  * `docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CPR_01.md`
+  * `docs/documentacion/SCRUM-105.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 19. SCRUM-106: Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4
+
+* **Objetivo:** Redactar y normalizar docstrings Sphinx en todos los nuevos módulos, recompilar el sitio de documentación Sphinx HTML sin advertencias, registrar las conversaciones de IA en `docs/chat_ia.md` y crear el Git Tag oficial `v4.0.0-sprint4` para la entrega del Hito 6 / Cierre de Sprint 4.
+* **Aportes y Solución con IA:**
+  * **Estandarización y Depuración de Docstrings Sphinx (reStructuredText):**
+    * Normalización estricta de docstrings en `authentication/permissions.py` eliminando errores de indentación inesperada e insertando líneas en blanco previas a listas de elementos.
+    * Corrección de directivas y referencias en `authentication/tests.py`, `payments/models.py`, `payments/services.py`, `transactions/services.py` y `transactions/views.py`.
+    * Encapsulado en formato código (`` ````) de tokens y prefijos con guión bajo (`cs_test_...`, `pi_...`, `sk_test_...`, `whsec_...`) para neutralizar advertencias de enlaces rotos o targets desconocidos de docutils.
+  * **Actualización del Catálogo Sphinx (`docs/sphinx/`):**
+    * Creación del directorio de recursos estáticos `docs/sphinx/source/_static`.
+    * Vinculación del módulo de señales `rates.signals` en `docs/sphinx/source/rates.rst`.
+    * Vinculación del módulo de permisos y mixins RBAC `authentication.permissions` en `docs/sphinx/source/authentication.rst`.
+  * **Compilación HTML de Documentación:**
+    * Compilación exitosa en modo estricto (`sphinx-build -W -b html`) obteniendo **0 advertencias y 0 errores** (`build succeeded`), con el sitio completo generado en `docs/sphinx/build/html/`.
+  * **Bitácora de IA y Documentación Técnica:**
+    * Registro de actividades en `docs/chat_ia.md`.
+    * Elaboración del documento detallado `docs/documentacion/SCRUM-106.md`.
+  * **Etiquetado Oficial Git:**
+    * Creación del tag anotado `v4.0.0-sprint4`.
+  * **Verificación de Pruebas Unitarias:**
+    * Ejecución completa de la suite del sistema: **455 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+* **Archivos intervenidos:**
+  * `authentication/permissions.py`
+  * `authentication/tests.py`
+  * `payments/models.py`
+  * `payments/services.py`
+  * `transactions/services.py`
+  * `transactions/views.py`
+  * `docs/sphinx/source/rates.rst`
+  * `docs/sphinx/source/authentication.rst`
+  * `docs/sphinx/source/_static/`
+  * `docs/documentacion/SCRUM-106.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+
 

@@ -1,6 +1,6 @@
 # Detalle del Diagrama de Clases — EQUIPO 88 B DIS CLA 01
 
-> Última actualización: Hito 5 (SCRUM-85) — incorpora las clases del módulo de transacciones (`Transaction`, `TransactionService`), cuentas de acreditación (`ReceivingMethod`), catálogo de entidades financieras (`EntidadFinanciera`), límites operativos (`OperationLimit`, `OperationLimitValidationService`), congelamiento de cotizaciones (`QuoteFreezeService`) y comando de seeding.
+> Última actualización: Sprint 4 (SCRUM-105) — incorpora las clases y servicios de Pasarelas de Pago (`PaymentGatewayRecord`, `PaymentWebhookEvent`, `SipapTransferRecord`, `StripeService`, `SipapService`), Alertas y Notificaciones (`ExchangeAlert`, `NotificationService`), Autenticación Multifactor MFA (claims TOTP) y Control de Acceso RBAC (`RoleRequiredMixin`, decoradores, context processors).
 
 ## 1. Descripción general
 
@@ -1585,6 +1585,9 @@ classDiagram
         +Decimal monto_origen
         +Decimal monto_destino
         +String estado
+        +String pasarela_pago
+        +String referencia_externa_pago
+        +DateTime fecha_pago
         +String token_congelamiento
         +Text observaciones
         +DateTime created_at
@@ -1612,9 +1615,271 @@ classDiagram
 
 ---
 
-# 30. Resumen final y Trazabilidad Hito 5
+# 31. Clase `PaymentWebhookEvent` (`payments.models`)
 
-El diseño estructural consolidado formaliza la arquitectura completa para el **Hito 5 (Sprint 3)**, vinculando los tres módulos principales:
-1. **Gestión de Clientes e Identidad (`customers`, `authentication`)**: Multi-representación y resolución segura de cliente activo en sesión.
-2. **Motor Financiero y Políticas de Riesgo (`rates`)**: Divisas, cotizaciones, comisiones segmentadas, cotizador de tasas netas y control de límites operativos (`OperationLimit`).
-3. **Medios de Liquidación y Transacciones (`payments`, `transactions`)**: Dropdowns de entidades bancarias, formularios dedicados por instrumento (tarjetas con algoritmo de Luhn, billeteras móviles, transferencias), cuentas destino de acreditación (`ReceivingMethod`), formalización de órdenes de compra/venta (`Transaction`), mitigación de expiración de cotizaciones y anulación manual auditada.
+La clase `PaymentWebhookEvent` modela el registro inmutable de eventos recibidos por webhook desde pasarelas de pago (Stripe o SIPAP) para garantizar procesamiento exactamente una vez (*idempotencia estricta*).
+
+## Atributos
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `event_id` | `String` | Identificador único emitido por la pasarela (ej. `evt_1Nz...`). Clave única indexada (`unique=True`, `db_index=True`). |
+| `gateway` | `String` | Nombre de la pasarela de origen (`STRIPE` o `SIPAP`). |
+| `tipo_evento` | `String` | Clasificación del evento recibido (ej. `checkout.session.completed`). |
+| `payload` | `JSON` | Cuerpo completo deserializado de la petición HTTP recibida. |
+| `procesado` | `Boolean` | Bandera que indica si la lógica de negocio ya fue ejecutada exitosamente. |
+| `error_mensaje` | `Text` | Detalle del error si el procesamiento falló. |
+| `created_at` | `DateTime` | Marca temporal de recepción del webhook. |
+| `updated_at` | `DateTime` | Marca temporal de procesamiento definitivo. |
+
+---
+
+# 32. Clase `PaymentGatewayRecord` (`payments.models`)
+
+Representa el registro formal de la orden de pago procesada por una pasarela externa vinculada a una transacción cambiaria.
+
+## Atributos y Métodos
+
+| Miembro | Tipo | Descripción |
+|---|---|---|
+| `transaction` | `ForeignKey(Transaction)` | Transacción cambiaria asociada. |
+| `gateway` | `String` | Pasarela utilizada (`STRIPE` o `SIPAP`). |
+| `gateway_payment_id` | `String` | Identificador externo devuelto por la pasarela (ej. `cs_test_...` o `pi_...`). |
+| `monto` | `Decimal` | Monto pagado reportado por la pasarela. |
+| `moneda` | `String` | Código ISO de la moneda debitada. |
+| `estado` | `String` | Estado de la operación: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED`. |
+| `raw_response` | `JSON` | Respuesta en bruto de la API de la pasarela. |
+| `marcar_completado()` | Método | Transiciona a `COMPLETED` y actualiza marca temporal. |
+| `marcar_fallido(err)` | Método | Transiciona a `FAILED` y asienta el mensaje de error. |
+| `marcar_reembolsado()` | Método | Transiciona a `REFUNDED`. |
+
+---
+
+# 33. Clase `SipapTransferRecord` (`payments.models`)
+
+Representa la orden de transferencia y liquidación interbancaria local en Guaraníes a través del Sistema de Pagos del Paraguay (SIPAP - BCP).
+
+## Atributos
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `codigo_transferencia` | `String` | Identificador unívoco correlativo de la transferencia (ej. `SIPAP-20261012-0001`). |
+| `transaction` | `ForeignKey(Transaction)` | Transacción cambiaria asociada (opcional para conciliación previa). |
+| `monto` | `Decimal` | Importe en Guaraníes a transferir. |
+| `moneda` | `String` | Código de moneda (fijado por defecto en `PYG`). |
+| `estado` | `String` | Estado bancario: `PENDIENTE`, `CONFIRMADO`, `RECHAZADO`. |
+| `banco_origen` | `String` | Entidad bancaria remitente. |
+| `cuenta_origen` | `String` | Número de cuenta bancaria remitente. |
+| `titular_origen` | `String` | Nombre y apellido o razón social del titular transferente. |
+| `observaciones` | `Text` | Motivo de rechazo o notas de auditoría bancaria. |
+
+---
+
+# 34. Servicios de Pasarela: `StripeService` y `SipapService` (`payments.services`)
+
+## `StripeService`
+- `create_checkout_session(transaction, success_url, cancel_url)`: Inicializa la sesión en los servidores de Stripe con line items, metadatos (`transaction_id`) y URLs de retorno.
+- `construct_event(payload, sig_header)`: Verifica criptográficamente la firma del webhook contra el secreto de webhook del entorno.
+- `process_webhook_event(event)`: Despacha la lógica de acreditación delegando en `TransactionService.confirm_stripe_payment`.
+
+## `SipapService`
+- `simulate_transfer(monto, moneda, transaction_obj, banco_origen, ...)`: Genera un `SipapTransferRecord` en estado `PENDIENTE` para pruebas asistidas.
+- `confirm_deposit(codigo_transferencia, transaction_obj, ...)`: Concilia la transferencia y delega en `TransactionService.confirm_sipap_payment`.
+- `reject_transfer(codigo_transferencia, motivo, ...)`: Anula la transferencia y delega en `TransactionService.reject_payment_and_cancel`.
+- `query_status(codigo_transferencia)`: Consulta el estado en tiempo real de la transferencia interbancaria.
+
+---
+
+# 35. Clase `ExchangeAlert` y `NotificationService` (`rates`)
+
+## `ExchangeAlert` (`rates.models`)
+Modela las alertas de cotización parametrizadas por los clientes para recibir avisos ante oscilaciones del mercado.
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| `customer` | `ForeignKey(Customer)` | Cliente titular de la alerta. |
+| `base_currency` | `ForeignKey(Currency)` | Moneda origen. |
+| `target_currency` | `ForeignKey(Currency)` | Moneda destino. |
+| `threshold_rate` | `Decimal` | Tasa umbral definida. |
+| `condition` | `String` | Regla de comparación: `MAYOR_IGUAL` o `MENOR_IGUAL`. |
+| `is_active` | `Boolean` | Bandera de activación de la alerta. |
+| `is_triggered` | `Boolean` | Bandera que previene disparos duplicados una vez cumplida la condición. |
+| `triggered_at` | `DateTime` | Marca temporal del momento del disparo. |
+
+## `NotificationService` (`rates.services`)
+- `dispatch_alert_notifications(alert, current_rate)`: Genera notificaciones en el sistema para todos los usuarios asignados al cliente titular de la alerta.
+- Escucha la señal `post_save` de `ExchangeRate` para evaluar de forma reactiva las alertas vigentes.
+
+---
+
+# 36. Módulo RBAC y Claims MFA (`authentication`)
+
+## Control de Acceso Basado en Roles (RBAC)
+- `RoleRequiredMixin`: Mixin para CBVs que restringe la ejecución a usuarios con los roles requeridos, respondiendo con `HTTP 403 Forbidden` o redirección según configuración.
+- Decorador `@role_required(*roles)`: Decorador de vistas funcionales.
+- Decorador `@client_required`: Asegura la existencia de un cliente activo en sesión.
+- Context Processor `auth_roles`: Inyecta los roles del usuario activo en todas las plantillas.
+- Template Tags `has_role`, `has_any_role`: Renderizado condicional en la interfaz web.
+
+## MFA (Multi-Factor Authentication)
+- Extracción de claims `amr` (Authentication Methods References) del token JWT para verificar autenticación con OTP/TOTP.
+- Bloqueo o advertencia en operaciones de alto valor para usuarios sin MFA activo.
+
+---
+
+# 37. Diagrama de Clases Consolidado — Sprint 4 (SCRUM-105)
+
+```mermaid
+classDiagram
+    direction TB
+
+    class User {
+        +UUID keycloak_id
+        +String username
+        +String email
+        +Boolean is_active
+        +List mfa_methods
+        +get_realm_roles() : List
+        +has_mfa_enabled() : Boolean
+    }
+
+    class Customer {
+        +UUID id
+        +String nombre
+        +String ruc
+        +String segmento
+        +Boolean is_active
+    }
+
+    class CustomerUserAssignment {
+        +User user
+        +Customer customer
+        +String role
+        +Boolean is_active
+    }
+
+    class Currency {
+        +String code
+        +String name
+        +String symbol
+        +Integer decimal_places
+        +Boolean is_active
+    }
+
+    class ExchangeRate {
+        +Currency base_currency
+        +Currency target_currency
+        +Decimal purchase_rate
+        +Decimal sale_rate
+        +Boolean is_active
+        +DateTime created_at
+    }
+
+    class ExchangeAlert {
+        +Customer customer
+        +Currency base_currency
+        +Currency target_currency
+        +Decimal threshold_rate
+        +String condition
+        +Boolean is_active
+        +Boolean is_triggered
+        +DateTime triggered_at
+    }
+
+    class Transaction {
+        +BigInt id
+        +String codigo_referencia
+        +String tipo_operacion
+        +Decimal tasa_neta
+        +Decimal monto_origen
+        +Decimal monto_destino
+        +String estado
+        +String pasarela_pago
+        +String referencia_externa_pago
+        +DateTime fecha_pago
+        +String token_congelamiento
+        +mark_as_completed(user)
+        +mark_as_cancelled(motivo)
+    }
+
+    class PaymentGatewayRecord {
+        +Transaction transaction
+        +String gateway
+        +String gateway_payment_id
+        +Decimal monto
+        +String moneda
+        +String estado
+        +JSON raw_response
+        +marcar_completado()
+        +marcar_fallido(err)
+    }
+
+    class PaymentWebhookEvent {
+        +String event_id
+        +String gateway
+        +String tipo_evento
+        +JSON payload
+        +Boolean procesado
+        +String error_mensaje
+    }
+
+    class SipapTransferRecord {
+        +String codigo_transferencia
+        +Transaction transaction
+        +Decimal monto
+        +String moneda
+        +String estado
+        +String banco_origen
+        +String cuenta_origen
+        +String titular_origen
+    }
+
+    class StripeService {
+        +create_checkout_session()
+        +construct_event()
+        +process_webhook_event()
+    }
+
+    class SipapService {
+        +simulate_transfer()
+        +confirm_deposit()
+        +reject_transfer()
+        +query_status()
+    }
+
+    class TransactionService {
+        +create_transaction_order()
+        +process_payment_confirmation()
+        +confirm_stripe_payment()
+        +confirm_sipap_payment()
+        +reject_payment_and_cancel()
+    }
+
+    class NotificationService {
+        +dispatch_alert_notifications()
+    }
+
+    User "1" <-- "0..*" CustomerUserAssignment
+    Customer "1" <-- "0..*" CustomerUserAssignment
+    Customer "1" *-- "0..*" ExchangeAlert : configura
+    Currency "1" <-- "0..*" ExchangeAlert : base
+    Currency "1" <-- "0..*" ExchangeAlert : target
+    ExchangeRate ..> ExchangeAlert : dispara via post_save
+    ExchangeAlert ..> NotificationService : despacha
+    Customer "1" <-- "0..*" Transaction : titular
+    Transaction "1" *-- "0..1" PaymentGatewayRecord : registro pasarela
+    Transaction "1" *-- "0..1" SipapTransferRecord : conciliacion
+    StripeService ..> TransactionService : confirma pago
+    SipapService ..> TransactionService : confirma/rechaza
+    TransactionService ..> Transaction : orquesta ciclo de vida
+    StripeService ..> PaymentWebhookEvent : registra idempotencia
+```
+
+---
+
+# 38. Resumen final y Trazabilidad Sprint 4 (SCRUM-105)
+
+El diseño estructural consolidado formaliza la arquitectura completa para el **Sprint 4 (SCRUM-105)**, integrando:
+1. **Pasarelas de Pago Internacional y Local (`payments`, `transactions`)**: Integración con Stripe Checkout (tarjetas) y SIPAP (transferencias bancarias), garantizando idempotencia estricta vía `PaymentWebhookEvent`, persistencia de transacciones en `PaymentGatewayRecord` y `SipapTransferRecord`, y orquestación atómica centralizada en `TransactionService`.
+2. **Alertas Financieras y Notificaciones (`rates`)**: Modelo reactivo de alertas de cotización (`ExchangeAlert`) evaluadas por señal `post_save` y despachadas mediante `NotificationService`.
+3. **MFA y RBAC Reforzado (`authentication`)**: Detección de claims TOTP en tokens JWT y módulo transversal de permisos (`RoleRequiredMixin`, `@role_required`) asegurando aislamiento contra elevación de privilegios y ataques IDOR.

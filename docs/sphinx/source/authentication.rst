@@ -37,6 +37,14 @@ authentication.context\_processors module
    :show-inheritance:
    :undoc-members:
 
+authentication.permissions module
+---------------------------------
+
+.. automodule:: authentication.permissions
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 authentication.tests module
 ---------------------------
 

@@ -31,3 +31,50 @@ class EntidadFinancieraAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'tipo', 'activo', 'orden')
     list_filter = ('tipo', 'activo')
     ordering = ('tipo', 'orden')
+
+
+from .models import ReceivingMethod, PaymentGatewayRecord, PaymentWebhookEvent, SipapTransferRecord
+
+
+@admin.register(ReceivingMethod)
+class ReceivingMethodAdmin(admin.ModelAdmin):
+    list_display = ('id', 'cliente', 'entidad_bancaria', 'tipo_cuenta', 'numero_cuenta', 'titular', 'es_predeterminado', 'activo')
+    list_filter = ('tipo_cuenta', 'es_predeterminado', 'activo')
+    search_fields = ('titular', 'numero_cuenta', 'cliente__nombre')
+
+
+@admin.register(PaymentGatewayRecord)
+class PaymentGatewayRecordAdmin(admin.ModelAdmin):
+    list_display = ('id', 'gateway', 'monto', 'moneda', 'estado', 'session_id', 'payment_intent_id', 'created_at')
+    list_filter = ('gateway', 'estado', 'moneda', 'created_at')
+    search_fields = ('session_id', 'payment_intent_id', 'referencia_externa', 'cliente__nombre')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(PaymentWebhookEvent)
+class PaymentWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ('id', 'event_id', 'gateway', 'tipo_evento', 'procesado', 'created_at')
+    list_filter = ('gateway', 'procesado', 'tipo_evento', 'created_at')
+    search_fields = ('event_id', 'tipo_evento')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(SipapTransferRecord)
+class SipapTransferRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'codigo_transferencia',
+        'banco_origen',
+        'cuenta_origen',
+        'titular_origen',
+        'monto',
+        'moneda',
+        'estado',
+        'fecha_transferencia',
+        'fecha_conciliacion',
+    )
+    list_filter = ('estado', 'moneda', 'banco_origen', 'fecha_transferencia')
+    search_fields = ('codigo_transferencia', 'titular_origen', 'cuenta_origen', 'documento_origen')
+    readonly_fields = ('created_at', 'updated_at', 'fecha_conciliacion')
+    raw_id_fields = ('transaction', 'gateway_record')
+

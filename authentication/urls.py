@@ -14,6 +14,7 @@ from . import views
 app_name = "authentication"
 
 urlpatterns = [
+    path("profile/", views.UserProfileView.as_view(), name="profile"),
     path("logout/", views.KeycloakLogoutView.as_view(), name="logout"),
 ]
 

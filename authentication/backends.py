@@ -113,6 +113,32 @@ class KeycloakOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             return self.UserModel.objects.none()
         return self.UserModel.objects.filter(email=email)
 
+    def _extract_mfa_enabled(self, claims: Dict[str, Any]) -> bool:
+        """
+        Extrae y evalúa los claims de MFA (amr, otp, mfa_enabled) provistos por Keycloak.
+
+        :param claims: Diccionario de claims OIDC.
+        :type claims: dict
+        :return: Verdadero si se detecta autenticación de doble factor activa.
+        :rtype: bool
+        """
+        amr = claims.get("amr", [])
+        if isinstance(amr, str):
+            amr = [amr]
+        if isinstance(amr, (list, tuple, set)):
+            if any(isinstance(m, str) and m.lower() in ("otp", "totp", "mfa", "duo", "sms") for m in amr):
+                return True
+
+        otp_claim = claims.get("otp")
+        if otp_claim is True or str(otp_claim).lower() in ("true", "1", "yes"):
+            return True
+
+        mfa_claim = claims.get("mfa_enabled")
+        if mfa_claim is True or str(mfa_claim).lower() in ("true", "1", "yes"):
+            return True
+
+        return False
+
     def _update_user_from_claims(self, user: AbstractBaseUser, claims: Dict[str, Any]) -> None:
         """
         Actualiza los campos del usuario y sincroniza sus grupos y permisos a partir de las claims.
@@ -126,6 +152,9 @@ class KeycloakOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.first_name = claims.get("given_name", "")
         user.last_name = claims.get("family_name", "")
         user.username = claims.get("preferred_username", user.username)
+
+        # Sincronizar estado mfa_enabled en la instancia del modelo de usuario
+        user.mfa_enabled = self._extract_mfa_enabled(claims)
 
         # Mapear roles de Keycloak a permisos de Django
         # Soporta tanto el claim personalizado 'realm_roles' como el formato estándar 'realm_access.roles'

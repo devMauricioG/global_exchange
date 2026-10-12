@@ -12,3 +12,7 @@ class RatesConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'rates'
     verbose_name = 'Monedas, Tasas de Cambio y Comisiones'
+
+    def ready(self) -> None:
+        """Registra los receptores de señales de la aplicación."""
+        from . import signals  # noqa: F401

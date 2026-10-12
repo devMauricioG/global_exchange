@@ -10,6 +10,7 @@ Cubre exhaustivamente:
 - Panel de administración :class:`~transactions.admin.TransactionAdmin`.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 import io
 import json
@@ -803,3 +804,538 @@ class TransactionAdminTest(TransactionTestMixin, TestCase):
         self.assertIn('estado', tx_admin.list_filter)
         self.assertIn('codigo_referencia', tx_admin.search_fields)
         self.assertIn('codigo_referencia', tx_admin.readonly_fields)
+        self.assertIn('fecha_pago', tx_admin.readonly_fields)
+        self.assertIn('pasarela_pago', tx_admin.list_display)
+
+
+class TransactionPaymentOrchestrationTest(TransactionTestMixin, TestCase):
+    """
+    Suite de pruebas unitarias para la orquestación atómica de pago y liquidación (SCRUM-94 / SCRUM-87).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_process_payment_confirmation_success(self):
+        """Verifica la liquidación atómica exitosa de una transacción con registro de pasarela y fecha."""
+        ref = 'pi_test_stripe_valid_999'
+        monto = self.tx.monto_origen
+        moneda = self.tx.moneda_origen.code
+
+        completed_tx = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx,
+            gateway='STRIPE',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+            datos_adicionales={'metodo': 'tarjeta_visa'},
+            usuario_operador=self.user,
+        )
+
+        self.assertEqual(completed_tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(completed_tx.referencia_externa_pago, ref)
+        self.assertEqual(completed_tx.pasarela_pago, 'STRIPE')
+        self.assertIsNotNone(completed_tx.fecha_pago)
+        self.assertEqual(completed_tx.usuario, self.user)
+        self.assertIn('Stripe', completed_tx.observaciones)
+        self.assertIn('metodo=tarjeta_visa', completed_tx.observaciones)
+
+        # Verificar persistencia en base de datos
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.referencia_externa_pago, ref)
+        self.assertEqual(self.tx.pasarela_pago, 'STRIPE')
+        self.assertIsNotNone(self.tx.fecha_pago)
+
+    def test_process_payment_confirmation_amount_mismatch_raises_error(self):
+        """Verifica el rechazo estricto si el monto informado difiere del monto_origen."""
+        wrong_monto = Decimal('500.00')
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx.id,
+                gateway='STRIPE',
+                referencia_externa='ref_mismatch',
+                monto_pagado=wrong_monto,
+                moneda_pagada=self.tx.moneda_origen.code,
+            )
+        self.assertIn('monto', ctx.exception.message_dict)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_currency_mismatch_raises_error(self):
+        """Verifica el rechazo si la moneda pagada no coincide con la moneda de origen de la transacción."""
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='STRIPE',
+                referencia_externa='ref_cur_mismatch',
+                monto_pagado=self.tx.monto_origen,
+                moneda_pagada='EUR',  # orden espera PYG
+            )
+        self.assertIn('moneda', ctx.exception.message_dict)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_cancelled_transaction_fails(self):
+        """Verifica que una orden ya cancelada no pueda transicionar a completada."""
+        self.tx.mark_as_cancelled(motivo='Cancelada previamente')
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='SIPAP',
+                referencia_externa='SIPAP-CANCEL-TEST',
+                monto_pagado=self.tx.monto_origen,
+                moneda_pagada=self.tx.moneda_origen.code,
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+    def test_process_payment_confirmation_strict_idempotency(self):
+        """Verifica que una segunda confirmación con la misma referencia retorne la orden sin re-procesar."""
+        ref = 'IDEMPOTENT-REF-001'
+        monto = self.tx.monto_origen
+        moneda = self.tx.moneda_origen.code
+
+        # Primera confirmación
+        tx1 = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+        )
+        self.assertEqual(tx1.estado, Transaction.Estado.COMPLETADA)
+        fecha_primera = tx1.fecha_pago
+
+        # Segunda confirmación con la misma referencia (idempotente)
+        tx2 = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx.id,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            monto_pagado=monto,
+            moneda_pagada=moneda,
+        )
+        self.assertEqual(tx2.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(tx2.fecha_pago, fecha_primera)
+
+        # Tercera llamada con referencia DIFERENTE debe arrojar ValidationError
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.process_payment_confirmation(
+                transaction_obj=self.tx,
+                gateway='SIPAP',
+                referencia_externa='OTHER-CONFLICTING-REF',
+                monto_pagado=monto,
+                moneda_pagada=moneda,
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+    def test_confirm_stripe_payment_helper(self):
+        """Verifica el método helper confirm_stripe_payment."""
+        ref = 'cs_test_session_stripe_001'
+        res = TransactionService.confirm_stripe_payment(
+            transaction_obj=self.tx,
+            payment_reference=ref,
+            monto=self.tx.monto_origen,
+            moneda=self.tx.moneda_origen.code,
+            metadata={'session_id': ref},
+        )
+        self.assertEqual(res.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(res.pasarela_pago, 'STRIPE')
+        self.assertEqual(res.referencia_externa_pago, ref)
+
+    def test_confirm_sipap_payment_helper(self):
+        """Verifica el método helper confirm_sipap_payment."""
+        ref = 'SIPAP-20261008-HELPER'
+        res = TransactionService.confirm_sipap_payment(
+            transaction_obj=self.tx,
+            codigo_transferencia=ref,
+            monto=self.tx.monto_origen,
+            moneda=self.tx.moneda_origen.code,
+            banco_origen='Banco Itaú',
+            cuenta_origen='123456',
+            titular_origen='Titular Prueba',
+        )
+        self.assertEqual(res.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(res.pasarela_pago, 'SIPAP')
+        self.assertEqual(res.referencia_externa_pago, ref)
+        self.assertIn('Banco Itaú', res.observaciones)
+
+    def test_reject_payment_and_cancel_success(self):
+        """Verifica que reject_payment_and_cancel transicione la orden a CANCELADA con auditoría."""
+        ref = 'SIPAP-REJECT-001'
+        motivo = 'Cuenta origen con fondos bloqueados'
+
+        res = TransactionService.reject_payment_and_cancel(
+            transaction_obj=self.tx,
+            gateway='SIPAP',
+            referencia_externa=ref,
+            motivo=motivo,
+        )
+        self.assertEqual(res.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('Rechazo de Pago - SIPAP', res.observaciones)
+        self.assertIn(motivo, res.observaciones)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_reject_payment_on_completed_transaction_fails(self):
+        """Verifica que no se pueda cancelar una transacción ya completada."""
+        self.tx.mark_as_completed()
+        with self.assertRaises(ValidationError) as ctx:
+            TransactionService.reject_payment_and_cancel(
+                transaction_obj=self.tx,
+                gateway='STRIPE',
+                referencia_externa='REF-FAILED-CANCEL',
+            )
+        self.assertIn('estado', ctx.exception.message_dict)
+
+
+class TransactionPaymentCheckoutViewTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas unitarias e integración para la interfaz web de Checkout de Pago (SCRUM-95).
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_checkout_view_get_authenticated_success(self):
+        """GET /transactions/<pk>/pago/ carga la interfaz de checkout con resumen financiero y pasarelas."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/payment_checkout.html')
+        self.assertEqual(response.context['transaction'].id, self.tx.id)
+        self.assertIn('remaining_seconds', response.context)
+        self.assertIn('collector_bank_info', response.context)
+        self.assertTrue(response.context['stripe_available'])
+        self.assertTrue(response.context['sipap_available'])
+        self.assertContains(response, self.tx.codigo_referencia)
+        self.assertContains(response, 'Stripe')
+        self.assertContains(response, 'SIPAP')
+
+    def test_checkout_view_alternate_url_alias(self):
+        """Verifica que el alias /checkout/ también resuelva a la vista de pago."""
+        url = reverse('transactions:payment_checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_checkout_view_unauthenticated_redirects(self):
+        """Usuarios no autenticados son redirigidos a la vista de login."""
+        self.client.logout()
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/oidc/authenticate/', response.url)
+
+    def test_checkout_view_idor_prevention(self):
+        """Un cliente no puede acceder al checkout de una transacción perteneciente a otro cliente."""
+        tx_otro = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+        url = reverse('transactions:payment-checkout', kwargs={'pk': tx_otro.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:list'))
+
+    def test_checkout_view_completed_transaction_redirects(self):
+        """Una transacción ya liquidada no permite acceder al checkout y redirige a su detalle."""
+        self.tx.mark_as_completed()
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+    def test_checkout_view_cancelled_transaction_redirects(self):
+        """Una transacción cancelada no permite acceder al checkout y redirige a su detalle."""
+        self.tx.mark_as_cancelled(motivo='Cancelación de prueba')
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+    def test_checkout_view_expired_transaction_auto_cancels_and_redirects(self):
+        """Una transacción con cotización expirada (>5 min) es cancelada automáticamente al ingresar al checkout."""
+        past_time = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past_time)
+
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+        self.assertIn('Expiración', self.tx.observaciones)
+
+    def test_checkout_view_post_sipap_confirmation_success(self):
+        """POST con comprobante SIPAP confirma el pago, transiciona a COMPLETADA y redirige al detalle."""
+        ref = 'SIPAP-TRANS-WEB-999'
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': ref,
+            'banco_origen': 'Banco Continental',
+            'cuenta_origen': '11223344',
+            'titular_origen': self.cliente.nombre,
+            'documento_origen': self.cliente.documento_ruc,
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.pasarela_pago, 'SIPAP')
+        self.assertEqual(self.tx.referencia_externa_pago, ref)
+
+    def test_checkout_view_post_sipap_empty_code_error(self):
+        """POST sin código de transferencia SIPAP retorna mensaje de error y no liquida la orden."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': '',
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 200)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_checkout_view_post_sipap_ajax_success(self):
+        """Petición AJAX POST con código SIPAP retorna respuesta JSON de éxito."""
+        ref = 'SIPAP-AJAX-WEB-001'
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'confirm_sipap',
+            'codigo_transferencia': ref,
+        }
+        response = self.client.post(url, payload, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertTrue(data['success'])
+        self.assertIn('redirect_url', data)
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+
+    def test_checkout_view_post_simulate_sipap_success(self):
+        """POST con acción simulate_sipap genera comprobante simulado y liquida automáticamente."""
+        url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        payload = {
+            'action': 'simulate_sipap',
+        }
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('transactions:detail', kwargs={'pk': self.tx.pk}))
+
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.COMPLETADA)
+        self.assertEqual(self.tx.pasarela_pago, 'SIPAP')
+        self.assertTrue(self.tx.referencia_externa_pago.startswith('SIPAP-'))
+
+    def test_transaction_detail_shows_checkout_cta_when_pending(self):
+        """Verifica que transaction_detail.html muestre el botón de acceso al checkout si la orden está pendiente."""
+        url = reverse('transactions:detail', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        checkout_url = reverse('transactions:payment-checkout', kwargs={'pk': self.tx.pk})
+        self.assertContains(response, checkout_url)
+        self.assertContains(response, 'Pagar Ahora')
+
+    def test_transaction_detail_shows_payment_gateway_when_completed(self):
+        """Verifica que transaction_detail.html muestre la pasarela y referencia externa si fue pagada."""
+        self.tx.mark_as_completed(
+            fecha_pago=timezone.now(),
+            referencia_externa='cs_test_checkout_888',
+            pasarela='STRIPE',
+        )
+        url = reverse('transactions:detail', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Stripe')
+        self.assertContains(response, 'cs_test_checkout_888')
+
+
+# ==============================================================================
+# SCRUM-104: PRUEBAS DE AISLAMIENTO IDOR Y RBAC EN TRANSACCIONES
+# ==============================================================================
+
+class TransactionIDORIsolationTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para verificar el aislamiento IDOR entre clientes
+    en las vistas de transacciones.
+
+    Un usuario solo puede acceder a las transacciones de su propio cliente.
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.my_tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+        # Transaccion de otro cliente
+        self.other_tx = Transaction.objects.create(**self._build_valid_transaction_data(
+            cliente=self.otro_cliente,
+            medio_pago_origen=self.otro_medio_pago,
+            medio_acreditacion_destino=self.otro_medio_acreditacion,
+        ))
+
+    def test_user_can_view_own_transaction_detail(self):
+        """Un usuario puede ver el detalle de su propia transaccion."""
+        url = reverse('transactions:detail', kwargs={'pk': self.my_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_cannot_view_other_client_transaction_detail(self):
+        """Un usuario no puede ver la transaccion de otro cliente (404)."""
+        url = reverse('transactions:detail', kwargs={'pk': self.other_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_user_transaction_list_only_shows_own(self):
+        """El listado de transacciones solo muestra las del cliente propio."""
+        url = reverse('transactions:list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.my_tx.codigo_referencia)
+        self.assertNotContains(response, self.other_tx.codigo_referencia)
+
+    def test_user_cannot_cancel_other_client_transaction(self):
+        """Un usuario no puede cancelar la transaccion de otro cliente."""
+        url = reverse('transactions:cancel', kwargs={'pk': self.other_tx.pk})
+        response = self.client.post(url)
+        # Deberia redirigir o negar
+        self.other_tx.refresh_from_db()
+        self.assertEqual(self.other_tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_admin_can_view_any_transaction(self):
+        """Un superusuario puede ver las transacciones de cualquier cliente."""
+        admin = User.objects.create_superuser(
+            username='tx_idor_admin', email='txadmin@test.com', password='AdminPwd123!',
+        )
+        self.client.force_login(admin)
+        url = reverse('transactions:detail', kwargs={'pk': self.other_tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+
+class TransactionUnauthenticatedAccessTest(TestCase):
+    """
+    Pruebas SCRUM-104 para verificar que todas las vistas de transacciones
+    redirijan a usuarios no autenticados.
+    """
+
+    def test_transaction_list_redirects_unauthenticated(self):
+        """GET /transactions/ redirige a login."""
+        response = self.client.get(reverse('transactions:list'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/oidc/authenticate/', response.url)
+
+    def test_transaction_detail_redirects_unauthenticated(self):
+        """GET /transactions/<pk>/ redirige a login."""
+        response = self.client.get(reverse('transactions:detail', kwargs={'pk': 9999}))
+        self.assertEqual(response.status_code, 302)
+
+    def test_transaction_create_redirects_unauthenticated(self):
+        """GET /transactions/create/ redirige a login."""
+        response = self.client.get(reverse('transactions:create'))
+        self.assertEqual(response.status_code, 302)
+
+
+class TransactionServiceExtendedTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas extendidas SCRUM-104 para TransactionService.
+
+    Cubre escenarios de borde en la orquestacion de pagos.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_check_and_cancel_single_does_not_cancel_fresh_transaction(self):
+        """check_and_cancel_single no cancela una transaccion recien creada (<5 min)."""
+        TransactionService.check_and_cancel_single(self.tx)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_check_and_cancel_single_cancels_expired_transaction(self):
+        """check_and_cancel_single cancela una transaccion expirada (>5 min)."""
+        past = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past)
+        self.tx.refresh_from_db()
+
+        TransactionService.check_and_cancel_single(self.tx)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.CANCELADA)
+
+    def test_is_transaction_expired_returns_false_for_fresh(self):
+        """is_transaction_expired retorna False para una transaccion recien creada."""
+        self.assertFalse(TransactionService.is_transaction_expired(self.tx))
+
+    def test_is_transaction_expired_returns_true_for_old(self):
+        """is_transaction_expired retorna True para una transaccion de mas de 5 minutos."""
+        past = timezone.now() - timedelta(minutes=10)
+        Transaction.objects.filter(id=self.tx.id).update(created_at=past)
+        self.tx.refresh_from_db()
+        self.assertTrue(TransactionService.is_transaction_expired(self.tx))
+
+    def test_cancel_transaction_by_customer_prevents_idor(self):
+        """cancel_transaction_by_customer rechaza cancelar la transaccion de otro cliente."""
+        with self.assertRaises(ValidationError):
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=self.tx.id,
+                cliente=self.otro_cliente,
+                usuario=self.otro_user,
+                motivo='Intento IDOR',
+            )
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.estado, Transaction.Estado.PENDIENTE)
+
+    def test_process_payment_confirmation_with_transaction_id(self):
+        """process_payment_confirmation acepta un ID entero de transaccion."""
+        completed_tx = TransactionService.process_payment_confirmation(
+            transaction_obj=self.tx.id,
+            gateway='SIPAP',
+            referencia_externa='SIPAP-ID-TEST-001',
+            monto_pagado=self.tx.monto_origen,
+            moneda_pagada=self.tx.moneda_origen.code,
+        )
+        self.assertEqual(completed_tx.estado, Transaction.Estado.COMPLETADA)
+
+    def test_completed_transaction_cannot_be_cancelled(self):
+        """Una transaccion completada no puede cancelarse."""
+        self.tx.mark_as_completed()
+        with self.assertRaises(ValidationError):
+            TransactionService.cancel_transaction_by_customer(
+                transaction_id=self.tx.id,
+                cliente=self.cliente,
+                usuario=self.user,
+                motivo='Intento post-completada',
+            )
+
+
+class TransactionReceiptViewTest(TransactionTestMixin, TestCase):
+    """
+    Pruebas SCRUM-104 para la vista de comprobante de transaccion.
+    """
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.tx = Transaction.objects.create(**self._build_valid_transaction_data())
+
+    def test_receipt_view_accessible_for_owner(self):
+        """Un usuario puede acceder al comprobante de su transaccion."""
+        url = reverse('transactions:receipt', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_receipt_view_unauthenticated_redirects(self):
+        """Un usuario no autenticado es redirigido al intentar ver el comprobante."""
+        self.client.logout()
+        url = reverse('transactions:receipt', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 302)

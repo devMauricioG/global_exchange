@@ -7,13 +7,16 @@ el cierre de sesión unificado SSO con Keycloak.
 """
 
 import logging
+from typing import Any, Dict
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth import logout
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views import View
+from django.views.generic import TemplateView
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,33 @@ def home_view(request: HttpRequest) -> HttpResponse:
         return render(request, 'home.html')
     else:
         return redirect('/oidc/authenticate/')
+
+
+class UserProfileView(LoginRequiredMixin, TemplateView):
+    """
+    Vista del perfil de usuario y estado de seguridad 2FA/MFA.
+
+    Muestra el resumen del usuario autenticado, su rol principal, el estado del
+    doble factor extraído del backend OIDC (mfa_enabled) y la URL directa para
+    la gestión de credenciales MFA en Keycloak.
+    """
+    template_name = "profile.html"
+
+    def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        mfa_enabled = getattr(user, "mfa_enabled", False)
+
+        public_url = getattr(settings, "KEYCLOAK_PUBLIC_URL", "http://localhost:8080")
+        realm = getattr(settings, "KEYCLOAK_REALM", "GlobalExchangeRealm")
+        keycloak_account_url = f"{public_url}/realms/{realm}/account/#/security/signing-and-log-in"
+
+        context.update({
+            "user_info": user,
+            "mfa_enabled": mfa_enabled,
+            "keycloak_account_url": keycloak_account_url,
+        })
+        return context
 
 
 class KeycloakLogoutView(View):
