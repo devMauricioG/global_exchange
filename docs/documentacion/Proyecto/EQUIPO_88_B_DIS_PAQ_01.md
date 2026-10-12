@@ -1,6 +1,6 @@
 # Descripción detallada del diagrama de arquitectura
 
-> Última actualización: Hito 5 (SCRUM-85) — incorpora el motor transaccional completo en `apps.transactions` (`TransactionService`, vistas CBV, APIs JSON, expiración a 5 minutos, comprobante de liquidación), la ampliación de `apps.payments` (`EntidadFinanciera`, `ReceivingMethod`, formularios especializados), `apps.rates` (`OperationLimit`, `OperationLimitValidationService`, `QuoteFreezeService`, `currency_filters`) y el comando `seed_data` en `apps.customers`.
+> Última actualización: Sprint 4 (SCRUM-105) — incorpora la arquitectura de Pasarelas de Pago (`StripeService`, `SipapService`, `PaymentGatewayRecord`, `PaymentWebhookEvent`, `SipapTransferRecord`), Checkout y Liquidación Atómica en `apps.transactions`, Alertas y Notificaciones reactivas en `apps.rates` (`ExchangeAlert`, señal `post_save`, `NotificationService`), y módulo de Control de Acceso RBAC y claims MFA en `apps.authentication`.
 
 ## 1. Identificación general
 
@@ -63,6 +63,7 @@ Este módulo representa el núcleo operativo y de ejecución transaccional del s
   - `TransactionCreateView`: formulario guiado para seleccionar par de divisas, monto y medios de pago/cobro.
   - `TransactionConfirmView`: pantalla de confirmación con cuenta regresiva en tiempo real (countdown a 5 minutos), visualización del desglose financiero y botón de ejecución final.
   - `TransactionDetailView`: ficha técnica completa de la transacción y su trazabilidad.
+  - `TransactionPaymentCheckoutView`: pantalla interactiva de selección de pasarela de pago (Stripe Checkout vs. transferencia bancaria local SIPAP), temporizador regresivo de cotización congelada a 5 minutos, modales para confirmación manual y simulación asistida.
   - `TransactionCancelView`: cancelación explícita por el usuario con registro de motivo.
   - `TransactionReceiptView`: comprobante oficial descargable e imprimible con diseño profesional, sellos de tiempo y firma digital simulada.
   - `TransactionCreateApiView` y `TransactionCancelApiView`: endpoints REST JSON para clientes móviles o integraciones automatizadas.
@@ -114,32 +115,34 @@ Gestiona parámetros financieros, divisas, tasas de cambio, histórico, comision
 
 | Componente | Responsabilidad |
 | --- | --- |
-| `models.py` | Define `Currency`, `ExchangeRate`, `SegmentCommission` y `OperationLimit` (mínimos y máximos por segmento y moneda). |
-| `services.py` | Contiene `RateCalculationService` (cálculo de cotización neta), `OperationLimitValidationService` (validación de importes mínimos/máximos) y `QuoteFreezeService` (generación de cotizaciones congeladas con vencimiento a 5 minutos). |
-| `forms.py` | Valida datos de monedas, tasas, comisiones, límites y parámetros de cotización. |
-| `views.py` | Implementa CRUD, tablero, cotizador web y endpoints JSON. |
+| `models.py` | Define `Currency`, `ExchangeRate`, `SegmentCommission`, `OperationLimit` y `ExchangeAlert` (alertas de umbral de cotización por cliente y par de monedas). |
+| `services.py` | Contiene `RateCalculationService` (cálculo de cotización neta), `OperationLimitValidationService` (validación de límites), `QuoteFreezeService` (congelamiento a 5 min) y `NotificationService` (despacho de notificaciones y alertas). |
+| `signals.py` | Escucha la señal `post_save` de `ExchangeRate` para evaluar reactivamente las alertas vigentes y despachar notificaciones. |
+| `forms.py` | Valida datos de monedas, tasas, comisiones, límites, parámetros de cotización y alertas. |
+| `views.py` | Implementa CRUD, tablero, cotizador web, gestión de alertas y endpoints JSON. |
 | `templatetags/currency_filters.py` | Etiquetas y filtros para presentación estandarizada de importes (`currency_format`), tasas (`exchange_rate_format`) y porcentajes (`percentage_format`). |
 | `urls.py` | Expone rutas bajo `/rates/`. |
-| `tests.py` | Cubre modelos, servicios, filtros y vistas. |
+| `tests.py` | Cubre modelos, servicios, señales, filtros y vistas. |
 
 ### Relaciones
 
-- **Con `apps.customers`**: resuelve segmento comercial y asigna límites según categoría del cliente.
+- **Con `apps.customers`**: resuelve segmento comercial, límites y destinatarios de alertas.
 - **Con `apps.transactions`**: suministra tasas congeladas y validación de límites para la creación de órdenes de compra/venta.
 
 ## 7b. Aplicación `apps.payments`
 
-Administra las entidades del sistema financiero, los medios de pago del cliente (débito/transferencia saliente) y los medios de recepción o cobro (crédito/transferencia entrante).
+Administra las entidades del sistema financiero, los medios de pago del cliente, cuentas de recepción/cobro y las pasarelas externas de pago (Stripe y SIPAP).
 
 ### Componentes
 
 | Componente | Responsabilidad |
 | --- | --- |
-| `models.py` | Define `EntidadFinanciera` (catálogo oficial con tipo, código y RUC), `PaymentMethod` (medios de pago del cliente) y `ReceivingMethod` (cuentas y billeteras de destino para cobro/acreditación). |
+| `models.py` | Define `EntidadFinanciera`, `PaymentMethod`, `ReceivingMethod`, `PaymentWebhookEvent` (idempotencia de webhooks), `PaymentGatewayRecord` (órdenes en pasarela) y `SipapTransferRecord` (conciliación interbancaria). |
+| `services.py` | `StripeService` (creación de Checkout Sessions, verificación criptográfica de firmas de webhook y despacho) y `SipapService` (simulación, confirmación y rechazo de transferencias interbancarias). |
 | `forms.py` | Validadores especializados: `ReceivingMethodForm`, `BankTransferForm`, `CreditDebitCardForm`, `DigitalWalletForm` y `CashBranchForm`. |
-| `views.py` | Vistas CBVs para CRUD de medios de pago y de medios de recepción, cambio de estado y endpoints API JSON. |
-| `urls.py` | Expone rutas bajo `/payments/` y `/payments/receiving-methods/`. |
-| `tests.py` | Cobertura de entidades, medios de cobro, aislamiento por cliente y prevención IDOR. |
+| `views.py` | Vistas CBVs para CRUD de medios de pago/cobro, endpoints de webhook de Stripe (`/webhook/stripe/`), endpoints de conciliación/simulación SIPAP y API REST JSON. |
+| `urls.py` | Expone rutas bajo `/payments/` y endpoints de pasarelas. |
+| `tests.py` | Cobertura de entidades, medios, webhooks simulados con firma inválida/válida, SIPAP y prevención IDOR. |
 
 ### Relaciones
 
@@ -154,7 +157,8 @@ Centraliza autenticación OIDC, verificación de tokens JWT y autorización basa
 
 - `middlewares.py (JWT Bearer Validation)`: intercepta solicitudes API y valida tokens JWT.
 - `backends.py (Keycloak OIDC)`: integra el sistema con Keycloak mediante OpenID Connect.
-- `context_processors.py (auth_roles)`: inyecta en plantillas los roles de usuario (`is_admin`, `is_operator`, `is_auditor`, etc.).
+- `permissions.py (RBAC)`: provee `RoleRequiredMixin` y decorador `@role_required` para control de acceso declarativo en vistas.
+- `context_processors.py (auth_roles)`: inyecta en plantillas los roles de usuario (`is_admin`, `is_operator`, `is_auditor`, etc.) y estado de seguridad MFA.
 - `templatetags/auth_tags.py`: etiquetas personalizadas (`has_role`, `has_any_role`) para renderizado condicional.
 
 ## 9. Paquete `global_exchange_core`
@@ -306,6 +310,7 @@ graph TD
 | `transactions` | `/transactions/create/` | Formulario web de solicitud de compra/venta con validaciones. |
 | `transactions` | `/transactions/<uuid:pk>/confirm/` | Pantalla resumen de confirmación con temporizador regresivo de 5 min. |
 | `transactions` | `/transactions/<uuid:pk>/` | Ficha técnica y detalle del estado de la transacción. |
+| `transactions` | `/transactions/<uuid:pk>/pago/` | Interfaz interactiva de checkout para selección de Stripe Checkout o transferencia bancaria local SIPAP. |
 | `transactions` | `/transactions/<uuid:pk>/receipt/` | Comprobante oficial de liquidación con diseño imprimible/PDF. |
 | `transactions` | `/transactions/<uuid:pk>/cancel/` | Cancelación controlada de la transacción pendiente. |
 | `transactions` | `/transactions/api/create/` | Endpoint REST JSON para creación de órdenes de cambio. |
@@ -314,10 +319,16 @@ graph TD
 | `rates` | `/rates/api/calculate/` | Cálculo JSON por GET o POST. |
 | `rates` | `/rates/api/commissions/` | Consulta y detalle de reglas de comisión. |
 | `rates` | `/rates/dashboard/` y `/rates/api/history/` | Tablero de monitoreo e historial de cotizaciones. |
+| `rates` | `/rates/alerts/` | Centro de configuración de alertas de cotización. |
 | `payments` | `/payments/` | Gestión web de medios de pago del cliente. |
 | `payments` | `/payments/receiving-methods/` | Gestión web de medios de cobro/recepción del cliente. |
+| `payments` | `/payments/webhook/stripe/` | Endpoint receptor de webhooks de Stripe con verificación de firma criptográfica. |
+| `payments` | `/payments/stripe/checkout/<id>/` | Inicialización de sesión Stripe Checkout. |
+| `payments` | `/payments/sipap/confirmar/` | Confirmación y conciliación de depósitos SIPAP. |
+| `payments` | `/payments/sipap/simular/` | Simulación asistida de transferencias bancarias SIPAP. |
 | `payments` | `/payments/api/` | API JSON de medios de pago. |
 | `customers` | `/customers/switch-active/` | Endpoint seguro para alternancia del cliente activo en sesión. |
+| `authentication` | `/auth/profile/` | Panel de perfil de usuario con indicador de seguridad y estado MFA (TOTP). |
 
 ## 12. Flujo funcional transaccional completo
 

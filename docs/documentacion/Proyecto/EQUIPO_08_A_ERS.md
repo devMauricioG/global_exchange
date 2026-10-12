@@ -1,10 +1,10 @@
-# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.3)
+# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.4)
 
 **Proyecto:** Global Exchange – Casa de Cambio Digital e Híbrida
 
-**Estado:** Documento Consolidado (ERS v3.2 + Hito 5 SCRUM 85)
+**Estado:** Documento Consolidado (ERS v3.3 + Sprint 4 SCRUM-105: Pasarelas Stripe/SIPAP, MFA, Alertas y RBAC)
 
-**Fecha de Actualización:** 24 de Septiembre de 2026
+**Fecha de Actualización:** 12 de Octubre de 2026
 
 ### TABLA DE CONTENIDOS
 
@@ -83,6 +83,16 @@ Este documento representa la base técnica definitiva para las etapas de arquite
 | **Cotización neta** | Resultado informativo que expone tasa efectiva, importes brutos, comisiones y monto final.                         |
 | ---                | ---                                                                                                                 |
 | **Medio de pago**  | Instrumento de cobro o liquidación registrado por el cliente: transferencia, billetera, tarjeta, efectivo u otro.   |
+| ---                | ---                                                                                                                 |
+| **Stripe**         | Pasarela de pagos internacional para procesamiento seguro de tarjetas de crédito y débito vía Stripe Checkout.      |
+| ---                | ---                                                                                                                 |
+| **SIPAP**          | Sistema de Pagos del Paraguay (BCP). Plataforma interbancaria para transferencias en tiempo real en moneda local.   |
+| ---                | ---                                                                                                                 |
+| **MFA / TOTP**     | Multi-Factor Authentication. Mecanismo de seguridad basado en contraseñas de un solo uso por tiempo (Time-based OTP)|
+| ---                | ---                                                                                                                 |
+| **Webhook**        | Mecanismo de notificación HTTP asíncrona entre pasarelas de pago y el backend de Global Exchange.                   |
+| ---                | ---                                                                                                                 |
+| **Idempotencia**   | Capacidad de un servicio de procesar eventos idénticos repetidos sin producir efectos secundarios adicionales.     |
 | ---                | ---                                                                                                                 |
 
 #### 1.3. Alcance
@@ -339,6 +349,56 @@ El núcleo central omnicanal interactúa con:
   - **Criterios de aceptación:**
     - Carga idempotente de usuarios, clientes, monedas, cotizaciones históricas, comisiones, entidades, medios de pago, límites y transacciones.
     - Opción `--clean` / `--reset` para reinicio completo y seguro de datos.
+- **RF-39: Integración de Pasarela de Pago Internacional (Stripe Checkout y Webhooks)**
+  - **Descripción:** El sistema debe permitir el pago de operaciones cambiarias mediante tarjetas internacionales a través de Stripe Checkout, verificando criptográficamente las notificaciones asíncronas vía Webhook.
+  - **Criterios de aceptación:**
+    - Generación de sesiones seguras de checkout en `StripeService.create_checkout_session` con URLs de retorno de éxito y cancelación.
+    - Endpoint receptor de webhooks (`/payments/webhook/stripe/`) con validación de cabecera `Stripe-Signature`.
+    - Procesamiento idempotente de eventos `checkout.session.completed` registrando en `PaymentWebhookEvent`.
+    - Rechazo con HTTP 400 ante firmas criptográficas inválidas o manipuladas.
+- **RF-40: Conciliación de Transferencias Bancarias Locales (SIPAP / BCP)**
+  - **Descripción:** El sistema debe permitir la recaudación y liquidación en Guaraníes vía transferencias SIPAP, ofreciendo simulación asistida, confirmación de depósito y rechazo auditado.
+  - **Criterios de aceptación:**
+    - Generación de códigos unívocos correlativos `SIPAP-YYYYMMDD-XXXXX` asociados a la orden.
+    - Servicio `SipapService.simulate_transfer` para pruebas y demostraciones en QA.
+    - Conciliación manual o automática mediante `SipapService.confirm_deposit` transicionando el estado a `COMPLETADO`.
+    - Capacidad de rechazo controlado (`SipapService.reject_transfer`) con motivo y auditoría formal.
+    - Persistencia en modelo `SipapTransferRecord`.
+- **RF-41: Orquestación Transaccional y Liquidación Atómica en TransactionService**
+  - **Descripción:** La confirmación o rechazo de transacciones a través de cualquier pasarela debe estar centralizada en `TransactionService` para garantizar transiciones de estado consistentes y atómicas.
+  - **Criterios de aceptación:**
+    - Método unificado `process_payment_confirmation`: valida estado actual, coincidencia estricta de monto y moneda, actualiza a `COMPLETADA` y vincula `fecha_pago`, `referencia_externa_pago` y `pasarela_pago`.
+    - Garantía estricta de idempotencia: reintentos con la misma referencia retornan la transacción ya liquidada sin alterar saldos ni timestamps.
+    - Registro coordinado en `PaymentGatewayRecord`.
+    - Método `reject_payment_and_cancel` para anular órdenes pendientes ante fallos en pasarela.
+- **RF-42: Vistas Web de Checkout y Pago en Línea (TransactionPaymentCheckoutView)**
+  - **Descripción:** La plataforma debe proveer una interfaz de usuario interactiva y responsiva para que el cliente elija el método de pago (Stripe o SIPAP) dentro de la ventana de cotización congelada.
+  - **Criterios de aceptación:**
+    - Visualización del resumen financiero: monto a pagar, cotización congelada, comisiones y cuenta receptora.
+    - Temporizador regresivo en JavaScript de 5 minutos; expiración automática con redirección si se agota el tiempo.
+    - Protección estricta IDOR: sólo el titular de la orden o un administrador puede ingresar a la pantalla de pago.
+    - Redirección con mensaje descriptivo si la transacción ya está completada o cancelada.
+    - Modales integrados para confirmación de comprobante SIPAP y simulación asistida.
+- **RF-43: Autenticación Multifactor (MFA / TOTP) y Perfil de Usuario**
+  - **Descripción:** El sistema debe verificar e integrar los factores de autenticación múltiple delegados en Keycloak, exponiendo el estado de seguridad en el panel de perfil del usuario.
+  - **Criterios de aceptación:**
+    - Detección de claims `amr` (Authentication Methods References) en el token JWT para identificar el uso de OTP/TOTP.
+    - Vistas y componentes en `authentication` para exhibir el nivel de seguridad y requerir MFA en operaciones administrativas o de alto valor.
+    - Redirección forzada de usuarios anónimos hacia `/oidc/authenticate/`.
+- **RF-44: Alertas de Cotización y Centro de Notificaciones**
+  - **Descripción:** Los clientes deben poder configurar alertas de umbral de cotización cambiaria (`ExchangeAlert`) que se evalúen automáticamente ante actualizaciones del mercado.
+  - **Criterios de aceptación:**
+    - Modelo `ExchangeAlert` con umbral, condición (`MAYOR_IGUAL`, `MENOR_IGUAL`) y banderas de activación.
+    - Señal reactiva `post_save` en `ExchangeRate` que evalúa de forma asíncrona/inmediata las alertas vigentes.
+    - Invocación de `NotificationService` para crear notificaciones asociadas al cliente y sus usuarios.
+    - Interfaz de usuario para gestión de alertas y panel de notificaciones en tiempo real.
+- **RF-45: Control de Acceso RBAC Granular y Menú de Navegación Dinámico**
+  - **Descripción:** El sistema debe aplicar un esquema robusto de autorización por roles (Admin, Operador, Auditor, Cliente) y representar la navegación condicionalmente según los privilegios y cliente activo.
+  - **Criterios de aceptación:**
+    - Decoradores `role_required` y mixins `RoleRequiredMixin` protegiendo vistas sensibles.
+    - Retorno de código HTTP 403 Forbidden o redirección segura ante accesos no autorizados.
+    - Context processor `auth_roles` y template tags `has_role`, `has_any_role` para renderizado condicional en `base.html`.
+    - Restricción estricta de vistas de gestión de divisas y tasas exclusivamente al rol administrativo.
 
 
 #### 4.3. Requerimientos No Funcionales
@@ -353,6 +413,9 @@ El núcleo central omnicanal interactúa con:
 - **RNF-DAT-01 (Aritmética Financiera):** Los importes monetarios deben calcularse con `Decimal`; no se admite aritmética financiera basada en punto flotante.
 - **RNF-INT-01 (API JSON):** La API de cotización y las APIs de medios de pago deben responder JSON válido, con códigos 200, 201, 400 o 404 según corresponda.
 - **RNF-MAN-01 (Desacoplamiento del Cotizador):** La lógica de cálculo debe estar desacoplada en `RateCalculationService` para ser reutilizable por el cotizador y futuras transacciones.
+- **RNF-SEC-05 (Firma Criptográfica y Webhooks Seguros):** Los webhooks de pasarelas de pago deben validar rigurosamente la firma criptográfica (`Stripe-Signature` / secreto de firma) rechazando con HTTP 400 cualquier payload corrupto o no autenticado.
+- **RNF-SEC-06 (Control de Idempotencia en Pagos):** Todo evento de webhook o confirmación bancaria debe registrarse en `PaymentWebhookEvent` garantizando procesamiento exactamente una vez (*exactly-once semantics*), previniendo doble acreditación por reintentos de red.
+- **RNF-SEC-07 (Principio de Menor Privilegio y RBAC Estricto):** Ningún usuario estándar o cliente puede acceder a endpoints administrativos de monedas, parametrización o conciliación bancaria, respondiendo con código HTTP 403 Forbidden.
 
 ### 5\. Requerimientos de Licencia
 
@@ -382,3 +445,5 @@ El núcleo central omnicanal interactúa con:
 | 11/09/2026 | \-                 | 3.2                | Hito 4 SCRUM 57: Gestión de monedas y tasas de cambio (RF-28), comisiones por segmento (RF-29), cotizador de tasas netas (RF-30), medios de pago (RF-31), reglas de negocio RN08-RN18 y RNF complementarios (DAT-01, SEC-04, INT-01, MAN-01).                              | Equipo IS2                                                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
 | 24/09/2026 | \-                 | 3.3                | Hito 5 SCRUM-85: Módulo de Transacciones de Compra/Venta (RF-35), Cuentas de Acreditación (RF-32), Catálogo de Entidades Financieras (RF-33), Límites Operativos (RF-34), Cancelación y Expiración (RF-36), Comprobantes (RF-37) y Comando de Seeding (RF-38).        | Equipo IS2                                                       |
+| ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
+| 12/10/2026 | \-                 | 3.4                | Sprint 4 SCRUM-105: Pasarelas de pago Stripe Checkout y SIPAP (RF-39, RF-40), Orquestación atómica en TransactionService (RF-41), Checkout web (RF-42), MFA con claims TOTP (RF-43), Alertas y Notificaciones (RF-44), RBAC granular y menú dinámico (RF-45), RNF-SEC-05/06/07. | Mauricio González / Equipo IS2                                   |

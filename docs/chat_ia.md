@@ -292,3 +292,18 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - **Enrutamiento dinámico `apps.*` (`apps/__init__.py`):**
   - Configuración en `sys.modules` para permitir la importación y ejecución de tests con la convención `apps.<app>.tests`.
 - **Resultados:** 455 tests totales del proyecto aprobados al 100% de éxito (`OK`), sin regresiones.
+
+---
+
+## Mauricio González — 12/10/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 4 — Actualización de Documentación de Diseño UML y ERS v3.4 (SCRUM-105)
+
+**Resumen:**
+- Actualicé integralmente los documentos formales de ingeniería de software para reflejar los desarrollos del Sprint 4:
+  - **ERS v3.4 (`docs/documentacion/Proyecto/EQUIPO_08_A_ERS.md`):** Formalización de requerimientos funcionales RF-39 a RF-45 (Stripe Checkout, Webhooks, SIPAP, orquestación en TransactionService, checkout interactivo, MFA TOTP, alertas y RBAC con menú dinámico), requerimientos no funcionales RNF-SEC-05 a 07 (firma criptográfica, idempotencia y menor privilegio) y tabla histórica de cambios v3.4.
+  - **Diagrama de Clases UML (`docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CLA_01.md`):** Modelado de `PaymentWebhookEvent`, `PaymentGatewayRecord`, `SipapTransferRecord`, `StripeService`, `SipapService`, `ExchangeAlert`, `NotificationService`, campos extendidos de `Transaction` y diagrama Mermaid consolidado.
+  - **Diagrama de Paquetes (`docs/documentacion/Proyecto/EQUIPO_88_B_DIS_PAQ_01.md`):** Actualización de las capas de `payments`, `transactions`, `rates`, `authentication`, interfaces expuestas y matriz de dependencias.
+  - **Casos de Prueba (`docs/documentacion/Proyecto/EQUIPO_88_B_DIS_CPR_01.md`):** 31 nuevos casos de prueba estructurados (Módulos 16 a 20: CPR-STR, CPR-SIP, CPR-ALT, CPR-RBC, CPR-ORQ).
+  - **Documento de Tarea:** Creación de `docs/documentacion/SCRUM-105.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
+- Verifiqué la batería completa de pruebas: 455/455 tests aprobados al 100% de éxito (`OK`), certificando ausencia de regresiones.
