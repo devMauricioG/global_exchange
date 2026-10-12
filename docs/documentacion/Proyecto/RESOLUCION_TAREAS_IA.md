@@ -26,6 +26,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-95** | Vistas e Interfaces de Usuario para Pago en Línea y Confirmación Bancaria | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-104** | Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-105** | Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4 | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-106** | Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4 | Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -502,5 +503,43 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-105.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+---
+
+### 19. SCRUM-106: Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4
+
+* **Objetivo:** Redactar y normalizar docstrings Sphinx en todos los nuevos módulos, recompilar el sitio de documentación Sphinx HTML sin advertencias, registrar las conversaciones de IA en `docs/chat_ia.md` y crear el Git Tag oficial `v4.0.0-sprint4` para la entrega del Hito 6 / Cierre de Sprint 4.
+* **Aportes y Solución con IA:**
+  * **Estandarización y Depuración de Docstrings Sphinx (reStructuredText):**
+    * Normalización estricta de docstrings en `authentication/permissions.py` eliminando errores de indentación inesperada e insertando líneas en blanco previas a listas de elementos.
+    * Corrección de directivas y referencias en `authentication/tests.py`, `payments/models.py`, `payments/services.py`, `transactions/services.py` y `transactions/views.py`.
+    * Encapsulado en formato código (`` ````) de tokens y prefijos con guión bajo (`cs_test_...`, `pi_...`, `sk_test_...`, `whsec_...`) para neutralizar advertencias de enlaces rotos o targets desconocidos de docutils.
+  * **Actualización del Catálogo Sphinx (`docs/sphinx/`):**
+    * Creación del directorio de recursos estáticos `docs/sphinx/source/_static`.
+    * Vinculación del módulo de señales `rates.signals` en `docs/sphinx/source/rates.rst`.
+    * Vinculación del módulo de permisos y mixins RBAC `authentication.permissions` en `docs/sphinx/source/authentication.rst`.
+  * **Compilación HTML de Documentación:**
+    * Compilación exitosa en modo estricto (`sphinx-build -W -b html`) obteniendo **0 advertencias y 0 errores** (`build succeeded`), con el sitio completo generado en `docs/sphinx/build/html/`.
+  * **Bitácora de IA y Documentación Técnica:**
+    * Registro de actividades en `docs/chat_ia.md`.
+    * Elaboración del documento detallado `docs/documentacion/SCRUM-106.md`.
+  * **Etiquetado Oficial Git:**
+    * Creación del tag anotado `v4.0.0-sprint4`.
+  * **Verificación de Pruebas Unitarias:**
+    * Ejecución completa de la suite del sistema: **455 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+* **Archivos intervenidos:**
+  * `authentication/permissions.py`
+  * `authentication/tests.py`
+  * `payments/models.py`
+  * `payments/services.py`
+  * `transactions/services.py`
+  * `transactions/views.py`
+  * `docs/sphinx/source/rates.rst`
+  * `docs/sphinx/source/authentication.rst`
+  * `docs/sphinx/source/_static/`
+  * `docs/documentacion/SCRUM-106.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
 
 

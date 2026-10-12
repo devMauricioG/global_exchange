@@ -60,6 +60,14 @@ rates.views module
    :show-inheritance:
    :undoc-members:
 
+rates.signals module
+--------------------
+
+.. automodule:: rates.signals
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 rates.tests module
 ------------------
 

@@ -44,7 +44,7 @@ class StripeService:
         """
         Obtiene la clave secreta de la API de Stripe configurada en settings.
 
-        :return: Clave secreta (ej. 'sk_test_...').
+        :return: Clave secreta (ej. ``sk_test_...``).
         :rtype: str
         """
         key = getattr(settings, 'STRIPE_SECRET_KEY', None)
@@ -57,7 +57,7 @@ class StripeService:
         """
         Obtiene la clave secreta del Webhook de Stripe configurada en settings.
 
-        :return: Secreto de webhook (ej. 'whsec_...').
+        :return: Secreto de webhook (ej. ``whsec_...``).
         :rtype: str
         """
         secret = getattr(settings, 'STRIPE_WEBHOOK_SECRET', None)
@@ -594,6 +594,7 @@ class SipapService:
     Servicio de simulación, validación y confirmación bancaria local SIPAP (SCRUM-93 / SCRUM-87).
 
     Gestiona la interacción con la red interbancaria nacional (Sistema de Pagos del Paraguay):
+
     - Generación y simulación de transferencias bancarias para entornos operativos y de prueba.
     - Validación de códigos de comprobante, cuentas de origen/destino y montos de depósitos.
     - Conciliación atómica y automática de depósitos bancarios, actualizando registros de pasarela

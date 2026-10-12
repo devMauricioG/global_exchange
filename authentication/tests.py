@@ -734,6 +734,7 @@ class DynamicNavMenuActiveCustomerTests(TestCase):
     SCRUM-103 – Menú de navegación dinámico y condicional según roles y cliente activo.
 
     Verifica que:
+
     - Transacciones, Medios de Pago y Medios de Acreditación sean visibles
       únicamente cuando existe un cliente activo en sesión **o** el usuario
       tiene rol operator/admin.
