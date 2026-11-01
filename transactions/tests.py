@@ -1339,3 +1339,6 @@ class TransactionReceiptViewTest(TransactionTestMixin, TestCase):
         url = reverse('transactions:receipt', kwargs={'pk': self.tx.pk})
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
+
+# SCRUM-121: Tests para Kiosco Táctil y Facturación Electrónica KuDE
+from .tests_kiosk_kude import *

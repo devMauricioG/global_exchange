@@ -212,7 +212,12 @@
 <body>
 
 <div class="receipt-container">
-    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+    <div class="print-btn" style="display: flex; gap: 0.5rem; background: transparent; padding: 0;">
+        <a href="{% url 'transactions:kude' transaction.pk %}" style="background-color: #0284c7; color: #ffffff; text-decoration: none; padding: 0.45rem 0.85rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; display: inline-flex; align-items: center;">📄 Ver KuDE</a>
+        <a href="{% url 'transactions:kude_pdf' transaction.pk %}" style="background-color: #ef4444; color: #ffffff; text-decoration: none; padding: 0.45rem 0.85rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; display: inline-flex; align-items: center;" download>📥 KuDE (PDF)</a>
+        <a href="{% url 'transactions:kude_xml' transaction.pk %}" style="background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 0.45rem 0.85rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem; display: inline-flex; align-items: center;" download>💾 XML</a>
+        <button onclick="window.print()" style="background-color: var(--text-main); color: white; border: none; padding: 0.45rem 0.85rem; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">🖨️ Imprimir</button>
+    </div>
 
     <div class="header">
         <div class="header-company">

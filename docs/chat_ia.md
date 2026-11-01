@@ -327,3 +327,28 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 - Redacté el documento de trazabilidad de la tarea en `docs/documentacion/SCRUM-106.md` y actualicé `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
 - Generé el Git Tag oficial anotado `v4.0.0-sprint4` para la entrega formal del Hito 6 / Cierre del Sprint 4.
 
+
+---
+
+## Mauricio González — 01/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Hotfix / Sprint 4 — Terminal táctil /kiosk/ y endpoints para consulta, visualización y descarga de KuDE PDF y XML firmado (SCRUM-121)
+
+**Resumen:**
+- Diseñé e implementé la solución técnica integral para responder al requerimiento dual de terminal táctil de autoservicio y facturación electrónica KuDE de la SET/DNIT:
+- **Terminal Táctil Kiosco de Autoservicio (`/kiosk/`):**
+  - Desarrollé la vista interactiva `KioskHomeView` (`templates/kiosk/kiosk_home.html`) con diseño dark-mode de alta visibilidad, panel táctil de selección de divisas (USD, EUR, etc.), cotizador en tiempo real y teclado numérico virtual.
+  - Implementé el temporizador de seguridad de 90 segundos con reinicio dinámico ante toques/teclado, modal preventivo de expiración y retorno automático al estado inicial neutro para protección de datos personales.
+  - Expuse endpoints JSON: cotización en tiempo real (`/kiosk/api/quote/`), validación express de clientes por RUC o Cédula (`/kiosk/api/customer/lookup/`), registro rápido en un toque (`/kiosk/api/customer/register/`) y formalización instantánea con emisión de KuDE (`/kiosk/api/transact/`).
+- **Facturación Electrónica KuDE (SIFEN / e-Kuatia):**
+  - Creé el modelo `ElectronicInvoice` en `transactions/models.py` vinculado a `Transaction` para almacenar CDC de 44 dígitos, timbrado, numeración legal `001-001-XXXXXXX`, XML firmado y datos del código QR.
+  - Implementé en `transactions/kude_service.py` el algoritmo oficial Módulo 11 de la DNIT (`compute_mod11_dv`), generación matemática del CDC de 44 dígitos y generación canónica de XML conforme al esquema e-Kuatia con firma XMLDSig.
+  - Creé el generador nativo en Python de comprobantes KuDE PDF-1.4 (`transactions/kude_pdf.py`), eliminando dependencias externas de librerías binarias C/C++ y garantizando portabilidad multiplataforma.
+  - Implementé las vistas de visualización HTML responsiva (`/transactions/<pk>/kude/`), descarga de PDF binario (`/transactions/<pk>/kude/pdf/`), descarga de XML firmado (`/transactions/<pk>/kude/xml/`) y endpoint de consulta pública (`/kude/<identifier>/`).
+  - Integré accesos al KuDE en las plantillas `transaction_detail.html`, `receipt.html` y agregué el acceso al Kiosco en la barra de navegación principal `base.html`.
+- **Suite de Pruebas Unitarias e Integración (`transactions/tests_kiosk_kude.py`):**
+  - Escribí 20 pruebas automáticas cubriendo el algoritmo Módulo 11, estructura del CDC, generación de XML/QR/PDF, ciclo de vida del modelo `ElectronicInvoice`, endpoints de descarga, API pública y todas las funcionalidades de la terminal táctil Kiosco.
+- **Verificación de Calidad:**
+  - Ejecución de la suite completa de tests del proyecto: **475 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+  - Compilación limpia de documentación Sphinx con `-W` (0 advertencias, `build succeeded`).
+  - Redacción del reporte detallado en `docs/documentacion/SCRUM-121.md` y actualización del catálogo general en `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
