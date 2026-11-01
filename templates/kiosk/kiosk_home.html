@@ -1,0 +1,1123 @@
+{% load currency_filters %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kiosco Táctil de Autoservicio - Global Exchange</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #060913;
+            --bg-surface: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #273549;
+            --border: #334155;
+            --border-highlight: #38bdf8;
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.35);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.35);
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-subtle: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Top Bar */
+        .kiosk-header {
+            background-color: var(--bg-surface);
+            border-bottom: 2px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .kiosk-brand {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .brand-badge {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: #060913;
+            box-shadow: 0 0 16px var(--primary-glow);
+        }
+
+        .brand-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            color: #ffffff;
+        }
+
+        .brand-subtitle {
+            font-size: 0.85rem;
+            color: var(--primary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Security Timer Widget */
+        .timer-widget {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 0.6rem 1.25rem;
+            border-radius: 9999px;
+        }
+
+        .timer-display {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--warning);
+        }
+
+        .timer-progress {
+            width: 80px;
+            height: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .timer-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--success), var(--warning));
+            width: 100%;
+            transition: width 1s linear;
+        }
+
+        .btn-reset {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-reset:hover {
+            background-color: var(--danger);
+            color: #ffffff;
+        }
+
+        /* Main Kiosk Layout */
+        .kiosk-main {
+            flex: 1;
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .kiosk-main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Currency Selector Cards */
+        .section-header {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .currencies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .currency-card {
+            background-color: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 1rem;
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .currency-card:hover, .currency-card.active {
+            border-color: var(--primary);
+            background-color: var(--bg-card-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .currency-card.active::after {
+            content: "✓";
+            position: absolute;
+            top: 6px;
+            right: 8px;
+            background-color: var(--primary);
+            color: #060913;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 0.75rem;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .curr-code {
+            font-size: 1.35rem;
+            font-weight: 900;
+            letter-spacing: -0.025em;
+            color: #ffffff;
+        }
+
+        .curr-rates {
+            margin-top: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .rate-buy { color: var(--success); }
+        .rate-sell { color: var(--primary); }
+
+        /* Operation Selector: COMPRA vs VENTA */
+        .operation-toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .btn-toggle-op {
+            min-height: 64px;
+            border-radius: 1rem;
+            border: 2px solid var(--border);
+            background-color: var(--bg-card);
+            color: var(--text-muted);
+            font-size: 1.15rem;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-toggle-op.active-buy {
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(37, 99, 235, 0.3) 100%);
+            border-color: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .btn-toggle-op.active-sell {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.3) 100%);
+            border-color: var(--success);
+            color: #ffffff;
+            box-shadow: 0 0 20px var(--success-glow);
+        }
+
+        /* Amount Display & Keypad */
+        .amount-display-container {
+            background-color: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: 1rem;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .amount-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .amount-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.05em;
+        }
+
+        /* On-Screen Touch Keypad */
+        .keypad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.6rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .keypad-btn {
+            min-height: 58px;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.85rem;
+            color: #ffffff;
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            cursor: pointer;
+            transition: all 0.1s active;
+        }
+
+        .keypad-btn:active {
+            background-color: var(--primary);
+            color: #060913;
+            transform: scale(0.97);
+        }
+
+        .keypad-btn-fn {
+            background-color: #334155;
+            color: #cbd5e1;
+            font-size: 1.1rem;
+        }
+
+        /* Right Column: Customer & Calculation Summary */
+        .panel-container {
+            background-color: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: 1.25rem;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        /* Express Customer Verification Card */
+        .customer-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 1.25rem;
+        }
+
+        .doc-input-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .kiosk-input {
+            flex: 1;
+            min-height: 52px;
+            background-color: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 0 1rem;
+            color: #ffffff;
+            font-size: 1.1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            outline: none;
+        }
+        .kiosk-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary-glow);
+        }
+
+        .btn-action {
+            min-height: 52px;
+            padding: 0 1.25rem;
+            background: linear-gradient(135deg, var(--primary) 0%, #2563eb 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 0.75rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .customer-status {
+            margin-top: 0.75rem;
+            padding: 0.6rem 0.85rem;
+            border-radius: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: none;
+        }
+
+        .customer-status.success {
+            display: block;
+            background-color: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #34d399;
+        }
+
+        .customer-status.warning {
+            display: block;
+            background-color: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #fbbf24;
+        }
+
+        /* Quotation Breakdown Box */
+        .quote-summary-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+
+        .summary-row.highlight {
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        .summary-row.total {
+            border-top: 1px solid var(--border);
+            padding-top: 0.75rem;
+            margin-top: 0.25rem;
+        }
+
+        .total-amount {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.85rem;
+            font-weight: 900;
+            color: var(--success);
+            text-shadow: 0 0 12px var(--success-glow);
+        }
+
+        /* Large CTA Confirm Button */
+        .btn-confirm-kiosk {
+            min-height: 68px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 1rem;
+            font-size: 1.35rem;
+            font-weight: 900;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            box-shadow: 0 0 25px var(--success-glow);
+            transition: all 0.2s;
+            margin-top: auto;
+        }
+        .btn-confirm-kiosk:hover {
+            opacity: 0.95;
+            transform: translateY(-2px);
+        }
+        .btn-confirm-kiosk:disabled {
+            background: #334155;
+            color: #64748b;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Inactivity Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(6, 9, 19, 0.85);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .modal-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background-color: var(--bg-surface);
+            border: 2px solid var(--warning);
+            box-shadow: 0 0 50px rgba(245, 158, 11, 0.3);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            max-width: 520px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .modal-card h2 {
+            font-size: 1.8rem;
+            color: var(--warning);
+            margin-bottom: 1rem;
+        }
+
+        .modal-countdown {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 3.5rem;
+            font-weight: 900;
+            color: #ffffff;
+            margin: 1rem 0;
+        }
+
+        /* Success & KuDE Presentation Modal */
+        .kude-modal-card {
+            background-color: var(--bg-surface);
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 50px var(--primary-glow);
+            border-radius: 1.5rem;
+            padding: 2rem;
+            max-width: 650px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .kude-actions-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn-kude-action {
+            min-height: 52px;
+            border-radius: 0.75rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-kude-view { background-color: var(--primary); color: #060913; }
+        .btn-kude-pdf { background-color: #ef4444; color: #ffffff; }
+        .btn-kude-xml { background-color: #3b82f6; color: #ffffff; }
+        .btn-kude-new { background-color: var(--success); color: #ffffff; grid-column: span 2; min-height: 60px; font-size: 1.15rem; }
+    </style>
+</head>
+<body>
+
+    <!-- Header & Inactivity Security Timer -->
+    <header class="kiosk-header">
+        <div class="kiosk-brand">
+            <div class="brand-badge">⚡</div>
+            <div>
+                <div class="brand-title">Global Exchange</div>
+                <div class="brand-subtitle">Terminal de Autoservicio Kiosco</div>
+            </div>
+        </div>
+
+        <div class="timer-widget">
+            <div class="timer-display">
+                <span>⏱️</span>
+                <span id="timerText">90s</span>
+            </div>
+            <div class="timer-progress">
+                <div class="timer-progress-bar" id="timerProgressBar"></div>
+            </div>
+            <button type="button" class="btn-reset" onclick="resetKiosk()">✕ Salir</button>
+        </div>
+    </header>
+
+    <!-- Main Kiosk Layout -->
+    <main class="kiosk-main">
+
+        <!-- Left Column: Currency Selection, Operation Mode & Keypad -->
+        <div>
+            <!-- Step 1: Currency Selection -->
+            <div class="section-header">
+                <span>1. Seleccione la Divisa Extranjera</span>
+            </div>
+            <div class="currencies-grid" id="currenciesContainer">
+                {% for item in rates_data %}
+                <div class="currency-card {% if forloop.first %}active{% endif %}" 
+                     data-code="{{ item.currency.code }}"
+                     data-symbol="{{ item.symbol }}"
+                     data-buy="{{ item.buy_rate }}"
+                     data-sell="{{ item.sell_rate }}"
+                     onclick="selectCurrency('{{ item.currency.code }}')">
+                    <div class="curr-code">{{ item.currency.code }}</div>
+                    <div class="curr-rates">
+                        <span class="rate-buy">C: {{ item.buy_rate|floatformat:0 }}</span>
+                        <span class="rate-sell">V: {{ item.sell_rate|floatformat:0 }}</span>
+                    </div>
+                </div>
+                {% empty %}
+                <div style="grid-column: span 4; padding: 1rem; color: var(--text-muted); text-align: center;">
+                    Cargando cotizaciones disponibles...
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Step 2: Operation Type -->
+            <div class="section-header">
+                <span>2. Tipo de Operación</span>
+            </div>
+            <div class="operation-toggle">
+                <button type="button" class="btn-toggle-op active-buy" id="btnBuy" onclick="setOperation('BUY')">
+                    <span>📥 COMPRAR</span>
+                    <span style="font-size: 0.8rem; font-weight: 500;">(Entrego PYG, Recibo Divisa)</span>
+                </button>
+                <button type="button" class="btn-toggle-op" id="btnSell" onclick="setOperation('SELL')">
+                    <span>📤 VENDER</span>
+                    <span style="font-size: 0.8rem; font-weight: 500;">(Entrego Divisa, Recibo PYG)</span>
+                </button>
+            </div>
+
+            <!-- Step 3: Amount Display -->
+            <div class="amount-display-container">
+                <div>
+                    <div class="amount-label" id="amountLabel">Monto a Operar</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted);" id="currActiveName">USD - Dólares</div>
+                </div>
+                <div class="amount-value" id="amountDisplay">100</div>
+            </div>
+
+            <!-- Touch Keypad -->
+            <div class="keypad-grid">
+                <button type="button" class="keypad-btn" onclick="keypadPress('1')">1</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('2')">2</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('3')">3</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('4')">4</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('5')">5</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('6')">6</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('7')">7</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('8')">8</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('9')">9</button>
+                <button type="button" class="keypad-btn keypad-btn-fn" onclick="keypadClear()">C</button>
+                <button type="button" class="keypad-btn" onclick="keypadPress('0')">0</button>
+                <button type="button" class="keypad-btn keypad-btn-fn" onclick="keypadBackspace()">⌫</button>
+            </div>
+        </div>
+
+        <!-- Right Column: Express Customer Lookup, Live Quote Summary & Confirmation -->
+        <div class="panel-container">
+
+            <!-- Customer Express Identification Card -->
+            <div class="customer-card">
+                <div class="section-header" style="margin-bottom: 0.35rem;">
+                    <span>3. Identificación Express del Cliente</span>
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-muted);">
+                    Ingrese Cédula de Identidad o RUC para emitir su Factura Electrónica (KuDE).
+                </p>
+                <div class="doc-input-group">
+                    <input type="text" id="customerDocInput" class="kiosk-input" placeholder="Ej. 4567890 o RUC" maxlength="20">
+                    <button type="button" class="btn-action" onclick="lookupCustomer()">Verificar</button>
+                </div>
+
+                <div id="customerStatusBox" class="customer-status"></div>
+
+                <!-- Express 1-touch Registration if not found -->
+                <div id="expressRegisterBox" style="display: none; margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem;">
+                    <p style="font-size: 0.8rem; color: var(--warning); margin-bottom: 0.5rem;">Registro rápido para clientes nuevos:</p>
+                    <input type="text" id="regNombre" class="kiosk-input" placeholder="Nombre y Apellido completo" style="margin-bottom: 0.5rem; min-height: 44px; font-size: 0.95rem;">
+                    <button type="button" class="btn-action" style="width: 100%; min-height: 44px;" onclick="registerExpressCustomer()">Registrar y Continuar</button>
+                </div>
+            </div>
+
+            <!-- Live Quote Calculation Summary -->
+            <div class="quote-summary-card">
+                <div class="section-header" style="margin-bottom: 0.5rem;">
+                    <span>4. Resumen de Liquidación en Tiempo Real</span>
+                </div>
+
+                <div class="summary-row">
+                    <span>Tasa Base Oficial:</span>
+                    <span id="lblTasaBase" style="font-family: 'JetBrains Mono', monospace;">-</span>
+                </div>
+                <div class="summary-row">
+                    <span>Comisión de Segmento:</span>
+                    <span id="lblComision" style="font-family: 'JetBrains Mono', monospace;">0 Gs.</span>
+                </div>
+                <div class="summary-row highlight">
+                    <span>Tasa Neta Aplicada:</span>
+                    <span id="lblTasaNeta" style="font-family: 'JetBrains Mono', monospace; color: var(--primary);">-</span>
+                </div>
+                <div class="summary-row">
+                    <span>Monto a Entregar:</span>
+                    <span id="lblMontoOrigen" style="font-family: 'JetBrains Mono', monospace;">-</span>
+                </div>
+
+                <div class="summary-row total">
+                    <div>
+                        <span style="font-weight: 800; font-size: 1.1rem; color: #ffffff;">Monto Neto a Recibir:</span>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">Liquidación inmediata en caja</div>
+                    </div>
+                    <div class="total-amount" id="lblMontoDestino">0</div>
+                </div>
+
+                <div id="limitsWarningBox" style="display: none; padding: 0.5rem; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--danger); border-radius: 0.5rem; color: #fca5a5; font-size: 0.8rem;"></div>
+            </div>
+
+            <!-- Confirm Transaction Button -->
+            <button type="button" class="btn-confirm-kiosk" id="btnConfirmKiosk" onclick="confirmKioskTransaction()">
+                <span>⚡ CONFIRMAR OPERACION</span>
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Inactivity Security Warning Modal -->
+    <div class="modal-overlay" id="inactivityModal">
+        <div class="modal-card">
+            <h2>⚠️ ¿Sigues Operando?</h2>
+            <p style="color: var(--text-muted); font-size: 1rem;">
+                Por tu seguridad y privacidad, esta terminal se reiniciará en:
+            </p>
+            <div class="modal-countdown" id="modalCountdown">20</div>
+            <p style="color: var(--text-subtle); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                Toca el botón para continuar con tu cotización.
+            </p>
+            <button type="button" class="btn-action" style="min-height: 60px; font-size: 1.2rem; width: 100%;" onclick="keepSessionAlive()">
+                CONTINUAR OPERANDO
+            </button>
+        </div>
+    </div>
+
+    <!-- Success & KuDE Download Modal -->
+    <div class="modal-overlay" id="successKudeModal">
+        <div class="kude-modal-card">
+            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
+            <h2 style="font-size: 1.7rem; color: var(--success); margin-bottom: 0.5rem;">¡Operación Liquidada con Éxito!</h2>
+            <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1rem;">
+                Su transacción y Factura Electrónica KuDE fueron autorizadas por SIFEN.
+            </p>
+
+            <div style="background-color: var(--bg-card); padding: 1rem; border-radius: 1rem; text-align: left; margin-bottom: 1rem;">
+                <div style="font-size: 0.85rem; color: var(--text-muted);">Referencia: <strong id="succRefCode" style="color: #ffffff;">-</strong></div>
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">Factura Nº: <strong id="succFacturaNum" style="color: #ffffff;">-</strong></div>
+                <div style="font-size: 0.8rem; color: var(--primary); margin-top: 0.25rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;">
+                    CDC: <span id="succCdc"></span>
+                </div>
+            </div>
+
+            <div class="kude-actions-grid">
+                <a href="#" id="linkKudeView" target="_blank" class="btn-kude-action btn-kude-view">
+                    📄 Ver KuDE Oficial
+                </a>
+                <a href="#" id="linkKudePdf" target="_blank" class="btn-kude-action btn-kude-pdf">
+                    📥 Descargar KuDE (PDF)
+                </a>
+                <a href="#" id="linkKudeXml" target="_blank" class="btn-kude-action btn-kude-xml">
+                    💾 Descargar XML Firmado
+                </a>
+                <a href="#" id="linkReceipt" target="_blank" class="btn-kude-action" style="background-color: #475569; color: #ffffff;">
+                    🖨️ Comprobante Caja
+                </a>
+                <button type="button" class="btn-kude-action btn-kude-new" onclick="resetKiosk()">
+                    🔄 Nueva Operación en Kiosco
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Logic for Kiosk -->
+    <script>
+        // State variables
+        let selectedCurrency = 'USD';
+        let operationType = 'BUY';
+        let currentAmount = '100';
+        let validatedCustomer = null;
+        let lastQuotation = null;
+
+        // Inactivity Timer Settings
+        const DEFAULT_TIMEOUT = 90; // seconds
+        const WARNING_WINDOW = 20; // seconds
+        let secondsLeft = DEFAULT_TIMEOUT;
+        let timerInterval = null;
+
+        function startInactivityTimer() {
+            clearInterval(timerInterval);
+            secondsLeft = DEFAULT_TIMEOUT;
+            updateTimerDisplay();
+
+            timerInterval = setInterval(() => {
+                secondsLeft--;
+                updateTimerDisplay();
+
+                if (secondsLeft <= WARNING_WINDOW && secondsLeft > 0) {
+                    showInactivityWarning(secondsLeft);
+                } else if (secondsLeft <= 0) {
+                    clearInterval(timerInterval);
+                    autoResetKiosk();
+                }
+            }, 1000);
+        }
+
+        function resetInactivityTimer() {
+            secondsLeft = DEFAULT_TIMEOUT;
+            hideInactivityWarning();
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            const timerText = document.getElementById('timerText');
+            const progressBar = document.getElementById('timerProgressBar');
+            if (timerText) timerText.innerText = secondsLeft + 's';
+            if (progressBar) {
+                const percent = (secondsLeft / DEFAULT_TIMEOUT) * 100;
+                progressBar.style.width = percent + '%';
+            }
+        }
+
+        function showInactivityWarning(sec) {
+            const modal = document.getElementById('inactivityModal');
+            const count = document.getElementById('modalCountdown');
+            if (modal) modal.classList.add('show');
+            if (count) count.innerText = sec;
+        }
+
+        function hideInactivityWarning() {
+            const modal = document.getElementById('inactivityModal');
+            if (modal) modal.classList.remove('show');
+        }
+
+        function keepSessionAlive() {
+            resetInactivityTimer();
+        }
+
+        function autoResetKiosk() {
+            hideInactivityWarning();
+            resetKiosk();
+        }
+
+        function resetKiosk() {
+            selectedCurrency = 'USD';
+            operationType = 'BUY';
+            currentAmount = '100';
+            validatedCustomer = null;
+            lastQuotation = null;
+
+            document.getElementById('amountDisplay').innerText = '100';
+            document.getElementById('customerDocInput').value = '';
+            document.getElementById('customerStatusBox').className = 'customer-status';
+            document.getElementById('customerStatusBox').style.display = 'none';
+            document.getElementById('expressRegisterBox').style.display = 'none';
+            document.getElementById('successKudeModal').classList.remove('show');
+            hideInactivityWarning();
+
+            // Set default active card
+            const cards = document.querySelectorAll('.currency-card');
+            cards.forEach(c => {
+                if (c.getAttribute('data-code') === 'USD') c.classList.add('active');
+                else c.classList.remove('active');
+            });
+
+            setOperation('BUY');
+            startInactivityTimer();
+            calculateQuote();
+        }
+
+        // Touch event listener to refresh inactivity
+        ['touchstart', 'mousedown', 'keydown', 'scroll'].forEach(evt => {
+            window.addEventListener(evt, () => {
+                if (secondsLeft > WARNING_WINDOW) {
+                    secondsLeft = DEFAULT_TIMEOUT;
+                }
+            }, { passive: true });
+        });
+
+        // Currency selection
+        function selectCurrency(code) {
+            selectedCurrency = code;
+            document.querySelectorAll('.currency-card').forEach(c => {
+                if (c.getAttribute('data-code') === code) c.classList.add('active');
+                else c.classList.remove('active');
+            });
+            document.getElementById('currActiveName').innerText = code;
+            calculateQuote();
+        }
+
+        // Operation type selection
+        function setOperation(type) {
+            operationType = type;
+            const btnBuy = document.getElementById('btnBuy');
+            const btnSell = document.getElementById('btnSell');
+            const amountLabel = document.getElementById('amountLabel');
+
+            if (type === 'BUY') {
+                btnBuy.className = 'btn-toggle-op active-buy';
+                btnSell.className = 'btn-toggle-op';
+                amountLabel.innerText = 'Quiero Recibir (Divisa)';
+            } else {
+                btnBuy.className = 'btn-toggle-op';
+                btnSell.className = 'btn-toggle-op active-sell';
+                amountLabel.innerText = 'Quiero Entregar (Divisa)';
+            }
+            calculateQuote();
+        }
+
+        // Keypad actions
+        function keypadPress(val) {
+            if (currentAmount === '0' || currentAmount === '100' && val !== '0') {
+                currentAmount = val;
+            } else if (currentAmount.length < 9) {
+                currentAmount += val;
+            }
+            document.getElementById('amountDisplay').innerText = currentAmount;
+            calculateQuote();
+        }
+
+        function keypadBackspace() {
+            if (currentAmount.length > 1) {
+                currentAmount = currentAmount.slice(0, -1);
+            } else {
+                currentAmount = '0';
+            }
+            document.getElementById('amountDisplay').innerText = currentAmount;
+            calculateQuote();
+        }
+
+        function keypadClear() {
+            currentAmount = '0';
+            document.getElementById('amountDisplay').innerText = currentAmount;
+            calculateQuote();
+        }
+
+        // Real-time AJAX Quote Calculation
+        function calculateQuote() {
+            const ruc = validatedCustomer ? validatedCustomer.documento_ruc : '';
+            const params = new URLSearchParams({
+                currency: selectedCurrency,
+                amount: currentAmount || '0',
+                operation_type: operationType,
+                customer_ruc: ruc,
+            });
+
+            fetch("{% url 'kiosk:api_quote' %}?" + params.toString())
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        lastQuotation = data;
+                        document.getElementById('lblTasaBase').innerText = Number(data.tasa_base).toLocaleString('es-PY') + ' Gs.';
+                        document.getElementById('lblComision').innerText = Number(data.comision).toLocaleString('es-PY') + ' Gs.';
+                        document.getElementById('lblTasaNeta').innerText = Number(data.tasa_neta).toLocaleString('es-PY') + ' Gs.';
+                        document.getElementById('lblMontoOrigen').innerText = Number(data.monto_origen).toLocaleString('es-PY') + ' ' + data.moneda_origen;
+                        document.getElementById('lblMontoDestino').innerText = Number(data.monto_destino).toLocaleString('es-PY') + ' ' + data.moneda_destino;
+
+                        const warnBox = document.getElementById('limitsWarningBox');
+                        if (!data.limits.is_valid && data.limits.errors.length > 0) {
+                            warnBox.style.display = 'block';
+                            warnBox.innerText = '⚠️ Límite: ' + data.limits.errors.join(', ');
+                        } else {
+                            warnBox.style.display = 'none';
+                        }
+                    }
+                })
+                .catch(err => console.error("Error al cotizar:", err));
+        }
+
+        // Express Customer Lookup
+        function lookupCustomer() {
+            const doc = document.getElementById('customerDocInput').value.trim();
+            if (!doc) {
+                alert("Por favor ingrese su Cédula de Identidad o RUC.");
+                return;
+            }
+
+            fetch("{% url 'kiosk:api_customer_lookup' %}?doc=" + encodeURIComponent(doc))
+                .then(res => res.json())
+                .then(data => {
+                    const statusBox = document.getElementById('customerStatusBox');
+                    const regBox = document.getElementById('expressRegisterBox');
+
+                    if (data.found) {
+                        validatedCustomer = data;
+                        statusBox.className = 'customer-status success';
+                        statusBox.innerHTML = `✅ <strong>${data.nombre}</strong> (RUC/CI: ${data.documento_ruc}) — Segmento: ${data.segmento_display}`;
+                        regBox.style.display = 'none';
+                        calculateQuote();
+                    } else {
+                        validatedCustomer = null;
+                        statusBox.className = 'customer-status warning';
+                        statusBox.innerHTML = `⚠️ Cliente no encontrado. Complete su nombre para registro express:`;
+                        regBox.style.display = 'block';
+                    }
+                })
+                .catch(err => console.error("Error al validar cliente:", err));
+        }
+
+        // Express Customer Registration
+        function registerExpressCustomer() {
+            const nombre = document.getElementById('regNombre').value.trim();
+            const doc = document.getElementById('customerDocInput').value.trim();
+
+            if (!nombre) {
+                alert("Debe ingresar su nombre completo.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('nombre', nombre);
+            formData.append('documento_ruc', doc);
+
+            fetch("{% url 'kiosk:api_customer_register' %}", {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    validatedCustomer = data;
+                    const statusBox = document.getElementById('customerStatusBox');
+                    statusBox.className = 'customer-status success';
+                    statusBox.innerHTML = `✅ <strong>${data.nombre}</strong> (RUC/CI: ${data.documento_ruc}) — Registrado Exitosamente`;
+                    document.getElementById('expressRegisterBox').style.display = 'none';
+                    calculateQuote();
+                } else {
+                    alert("Error: " + (data.error || 'No se pudo registrar'));
+                }
+            })
+            .catch(err => console.error("Error en registro:", err));
+        }
+
+        // Confirm Operation from Kiosk
+        function confirmKioskTransaction() {
+            if (!validatedCustomer) {
+                alert("Por favor verifique su Cédula de Identidad o RUC antes de confirmar.");
+                document.getElementById('customerDocInput').focus();
+                return;
+            }
+
+            const btn = document.getElementById('btnConfirmKiosk');
+            btn.disabled = true;
+            btn.innerText = "PROCESANDO EN SIFEN...";
+
+            const formData = new FormData();
+            formData.append('currency', selectedCurrency);
+            formData.append('amount', currentAmount);
+            formData.append('operation_type', operationType);
+            formData.append('customer_id', validatedCustomer.id);
+            formData.append('customer_ruc', validatedCustomer.documento_ruc);
+
+            fetch("{% url 'kiosk:api_transact' %}", {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerText = "⚡ CONFIRMAR OPERACION";
+
+                if (data.success) {
+                    document.getElementById('succRefCode').innerText = data.codigo_referencia;
+                    document.getElementById('succFacturaNum').innerText = data.numero_factura;
+                    document.getElementById('succCdc').innerText = data.cdc_formatted;
+
+                    document.getElementById('linkKudeView').href = data.kude_view_url;
+                    document.getElementById('linkKudePdf').href = data.kude_pdf_url;
+                    document.getElementById('linkKudeXml').href = data.kude_xml_url;
+                    document.getElementById('linkReceipt').href = data.receipt_url;
+
+                    document.getElementById('successKudeModal').classList.add('show');
+                } else {
+                    alert("Error al procesar la operación: " + (data.error || "Intente nuevamente."));
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.innerText = "⚡ CONFIRMAR OPERACION";
+                console.error("Error al confirmar:", err);
+                alert("Ocurrió un error de conexión al emitir la factura electrónica.");
+            });
+        }
+
+        // CSRF Token Helper
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // Initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            startInactivityTimer();
+            calculateQuote();
+        });
+    </script>
+</body>
+</html>
+

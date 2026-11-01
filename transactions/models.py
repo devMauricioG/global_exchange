@@ -387,3 +387,154 @@ class Transaction(models.Model):
             self.observaciones = f"{obs}\n[Cancelación] {motivo}".strip()
         if save:
             self.save(update_fields=['estado', 'observaciones', 'updated_at'])
+
+    @property
+    def kude(self):
+        """
+        Retorna la factura electrónica (KuDE) asociada a la transacción, si existe.
+        """
+        return getattr(self, 'factura_electronica', None)
+
+    @property
+    def has_kude(self) -> bool:
+        """
+        Indica si la transacción cuenta con un documento tributario electrónico (KuDE) emitido.
+        """
+        return hasattr(self, 'factura_electronica') and self.factura_electronica is not None
+
+
+class ElectronicInvoice(models.Model):
+    """
+    Modelo representativo del Documento Tributario Electrónico (DTE) y su representación gráfica KuDE.
+
+    Satisface los requerimientos técnicos y fiscales del Sistema Integrado de Facturación
+    Electrónica Nacional (SIFEN / e-Kuatia) de la Dirección Nacional de Ingresos Tributarios (DNIT)
+    de Paraguay (SCRUM-121).
+
+    :ivar id: Identificador numérico auto-incremental (PK).
+    :vartype id: int
+    :ivar transaction: Transacción cambiaria liquidada asociada a esta factura electrónica.
+    :vartype transaction: transactions.models.Transaction
+    :ivar cdc: Código de Control / Clave de Acceso de 44 dígitos numéricos según estándar SIFEN.
+    :vartype cdc: str
+    :ivar timbrado: Número de timbrado fiscal otorgado por la DNIT (8 dígitos).
+    :vartype timbrado: str
+    :ivar numero_factura: Número legal de factura con formato Establecimiento-Punto-Secuencia (ej. 001-001-0000001).
+    :vartype numero_factura: str
+    :ivar fecha_emision: Fecha y hora exacta de emisión y firma del documento.
+    :vartype fecha_emision: datetime.datetime
+    :ivar estado: Estado de autorización en SIFEN ('EMITIDO', 'APROBADO', 'RECHAZADO').
+    :vartype estado: str
+    :ivar xml_firmado: Contenido íntegro del XML firmado digitalmente (formato e-Kuatia).
+    :vartype xml_firmado: str
+    :ivar qr_data: Parámetros y URL para validación mediante código QR oficial de la DNIT.
+    :vartype qr_data: str
+    :ivar protocolo_autorizacion: Número de protocolo asignado tras la aprobación en el receptor SIFEN.
+    :vartype protocolo_autorizacion: str
+    :ivar created_at: Marca temporal de creación del registro.
+    :vartype created_at: datetime.datetime
+    :ivar updated_at: Marca temporal de la última actualización.
+    :vartype updated_at: datetime.datetime
+    """
+
+    class EstadoSifen(models.TextChoices):
+        """
+        Estados de la factura electrónica en el flujo de autorización SIFEN.
+        """
+        EMITIDO = 'EMITIDO', 'Emitido'
+        APROBADO = 'APROBADO', 'Aprobado / Autorizado'
+        RECHAZADO = 'RECHAZADO', 'Rechazado'
+
+    transaction = models.OneToOneField(
+        Transaction,
+        on_delete=models.CASCADE,
+        related_name='factura_electronica',
+        verbose_name='Transacción Asociada',
+        help_text='Transacción cambiaria vinculada a este documento tributario electrónico.',
+    )
+    cdc = models.CharField(
+        max_length=44,
+        unique=True,
+        db_index=True,
+        verbose_name='Código de Control (CDC)',
+        help_text='Clave de Acceso única de 44 dígitos numéricos para consulta oficial en SIFEN.',
+    )
+    timbrado = models.CharField(
+        max_length=8,
+        default='12548963',
+        verbose_name='Número de Timbrado',
+        help_text='Número de timbrado fiscal vigente otorgado por la DNIT.',
+    )
+    numero_factura = models.CharField(
+        max_length=20,
+        db_index=True,
+        verbose_name='Número de Factura Electrónica',
+        help_text='Formato legal oficial: 001-001-0000001 (Establecimiento-PuntoExpedición-Secuencia).',
+    )
+    fecha_emision = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name='Fecha y Hora de Emisión',
+        help_text='Fecha y hora formal de emisión tributaria.',
+    )
+    estado = models.CharField(
+        max_length=15,
+        choices=EstadoSifen.choices,
+        default=EstadoSifen.APROBADO,
+        db_index=True,
+        verbose_name='Estado en SIFEN',
+        help_text='Estado de recepción y autorización en el Sistema Integrado de Facturación Electrónica.',
+    )
+    xml_firmado = models.TextField(
+        blank=True,
+        verbose_name='XML Firmado (e-Kuatia)',
+        help_text='Estructura canónica del Documento Electrónico con firma digital XML-DSig.',
+    )
+    qr_data = models.TextField(
+        blank=True,
+        verbose_name='Cadena de Verificación QR',
+        help_text='URL y parámetros oficiales para consulta pública y lectura QR en portal SET/DNIT.',
+    )
+    protocolo_autorizacion = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name='Protocolo de Autorización SIFEN',
+        help_text='Identificador de transacción y protocolo emitido por el webservice de la DNIT.',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Registro',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+    )
+
+    class Meta:
+        verbose_name = 'Factura Electrónica (KuDE)'
+        verbose_name_plural = 'Facturas Electrónicas (KuDE)'
+        ordering = ['-fecha_emision']
+        indexes = [
+            models.Index(fields=['cdc']),
+            models.Index(fields=['numero_factura']),
+            models.Index(fields=['estado', '-fecha_emision']),
+        ]
+
+    def __str__(self) -> str:
+        return f'KuDE {self.numero_factura} (CDC: {self.cdc[:8]}...) [{self.get_estado_display()}]'
+
+    @property
+    def cdc_formatted(self) -> str:
+        """
+        Formatea el CDC de 44 dígitos en 11 bloques de 4 dígitos separados por guiones.
+        """
+        if not self.cdc or len(self.cdc) != 44:
+            return self.cdc or ''
+        return '-'.join(self.cdc[i:i + 4] for i in range(0, 44, 4))
+
+    @property
+    def is_aprobado(self) -> bool:
+        """
+        Indica si el documento electrónico se encuentra aprobado y autorizado ante SIFEN.
+        """
+        return self.estado == self.EstadoSifen.APROBADO

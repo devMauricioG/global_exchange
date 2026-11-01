@@ -36,8 +36,17 @@
                     💳 Pagar Ahora
                 </a>
             {% endif %}
+            <a href="{% url 'transactions:kude' pk=transaction.pk %}" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none;">
+                📄 Factura KuDE
+            </a>
+            <a href="{% url 'transactions:kude_pdf' pk=transaction.pk %}" class="btn btn-secondary" title="Descargar KuDE en formato PDF">
+                📥 PDF
+            </a>
+            <a href="{% url 'transactions:kude_xml' pk=transaction.pk %}" class="btn btn-secondary" title="Descargar XML firmado">
+                💾 XML
+            </a>
             <a href="{% url 'transactions:receipt' pk=transaction.pk %}" target="_blank" class="btn btn-secondary">
-                🖨️ Imprimir
+                🖨️ Recibo
             </a>
             <a href="{% url 'transactions:list' %}" class="btn btn-secondary">
                 📋 Mis Transacciones

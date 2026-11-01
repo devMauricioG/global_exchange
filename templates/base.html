@@ -893,6 +893,13 @@
                     </a>
                 </li>
 
+                <!-- Terminal Kiosco de Autoservicio (SCRUM-121) -->
+                <li>
+                    <a href="{% url 'kiosk:home' %}" class="nav-link {% if '/kiosk/' in request.path %}active{% endif %}">
+                        🖥️ Kiosco
+                    </a>
+                </li>
+
                 {% if user.is_authenticated %}
                     <!-- Opción Visible para roles: Admin y Operator -->
                     {% if is_operator or user|has_any_role:"admin,operator" %}

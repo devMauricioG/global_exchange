@@ -16,6 +16,7 @@ sys.modules['apps.customers'] = customers
 sys.modules['apps.payments'] = payments
 sys.modules['apps.rates'] = rates
 sys.modules['apps.transactions'] = transactions
+sys.modules['apps.kiosk'] = transactions
 
 # Export test module references for apps.* paths
 if hasattr(authentication, 'tests'):

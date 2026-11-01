@@ -27,6 +27,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-104** | Suite de Pruebas Unitarias automatizadas para Pagos, MFA, Notificaciones y RBAC | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-105** | Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4 | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-106** | Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4 | Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-121** | Terminal Táctil /kiosk/ y Consulta, Visualización y Descarga de KuDE PDF y XML | Hotfix / Sprint 4 | Mauricio González | Finalizado |
 
 
 ---
@@ -543,3 +544,46 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 
 
 
+
+---
+
+### 20. SCRUM-121: Vistas y endpoints para consulta, visualización y descarga de KUDE PDF y XML firmado / Terminal Táctil Kiosco de Autoservicio
+
+* **Objetivo:** Desarrollar en pps/transactions/ o pps/kiosk/ la vista táctil simplificada /kiosk/ con layout dark-mode de alta legibilidad, selección rápida de divisas, cotizador en tiempo real, validación express de cliente por RUC/Cédula y temporizador de seguridad por inactividad, junto con el sistema de consulta, visualización y descarga de facturación electrónica KuDE en PDF y XML firmado.
+* **Aportes y Solución con IA:**
+  * **Terminal Táctil Kiosco de Autoservicio (/kiosk/):**
+    * Diseño de interfaz responsiva en modo oscuro (	emplates/kiosk/kiosk_home.html) de alto contraste con tarjetas interactivas de monedas.
+    * Teclado virtual táctil (Keypad) en pantalla con presets de montos rápidos.
+    * Temporizador de seguridad de 90 segundos con detección de toques/eventos, alerta modal de inactividad a los 15s y reseteo automático al estado inicial.
+    * Endpoints REST JSON: cotización en tiempo real (/kiosk/api/quote/), validación express de cliente (/kiosk/api/customer/lookup/), registro de clientes en 1 toque (/kiosk/api/customer/register/) y formalización instantánea de operaciones (/kiosk/api/transact/).
+  * **Facturación Electrónica KuDE (SIFEN / e-Kuatia):**
+    * Modelo ElectronicInvoice vinculado a Transaction para gestión fiscal, CDC de 44 dígitos, timbrado y número de factura.
+    * Implementación del algoritmo oficial Módulo 11 de la DNIT (compute_mod11_dv) para generación del CDC de 44 dígitos.
+    * Generador de XML firmado conforme a especificaciones e-Kuatia y firma digital XMLDSig.
+    * Generador binario nativo en Python de comprobantes KuDE PDF-1.4 (KudePdfGenerator) con sellos, CDC formateado, tabla de liquidación y código QR de SIFEN.
+    * Vistas y endpoints para visualización HTML (/transactions/<pk>/kude/), descarga de PDF (/transactions/<pk>/kude/pdf/), descarga de XML firmado (/transactions/<pk>/kude/xml/) y API pública de consulta (/kude/<identifier>/).
+  * **Verificación y Calidad:**
+    * Suite automatizada de 20 tests unitarios e integración en 	ransactions/tests_kiosk_kude.py.
+    * Suite completa del proyecto: **475 tests exitosos al 100% (OK)**, 0 regresiones.
+    * Compilación limpia de Sphinx con 0 advertencias (sphinx-build -W -b html).
+* **Archivos intervenidos:**
+  * 	ransactions/models.py
+  * 	ransactions/migrations/0003_electronicinvoice.py
+  * 	ransactions/kude_service.py
+  * 	ransactions/kude_pdf.py
+  * 	ransactions/kude_views.py
+  * 	ransactions/kiosk_views.py
+  * 	ransactions/kiosk_urls.py
+  * 	ransactions/urls.py
+  * config/urls.py
+  * pps/__init__.py
+  * 	emplates/kiosk/kiosk_home.html
+  * 	emplates/transactions/kude.html
+  * 	emplates/transactions/receipt.html
+  * 	emplates/transactions/transaction_detail.html
+  * 	emplates/base.html
+  * 	ransactions/tests_kiosk_kude.py
+  * 	ransactions/tests.py
+  * docs/documentacion/SCRUM-121.md
+  * docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md
+  * docs/chat_ia.md
