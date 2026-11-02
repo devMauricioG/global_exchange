@@ -444,6 +444,7 @@ class ElectronicInvoice(models.Model):
         EMITIDO = 'EMITIDO', 'Emitido'
         APROBADO = 'APROBADO', 'Aprobado / Autorizado'
         RECHAZADO = 'RECHAZADO', 'Rechazado'
+        CANCELADO = 'CANCELADO', 'Cancelado / Anulado'
 
     transaction = models.OneToOneField(
         Transaction,
@@ -538,3 +539,362 @@ class ElectronicInvoice(models.Model):
         Indica si el documento electrónico se encuentra aprobado y autorizado ante SIFEN.
         """
         return self.estado == self.EstadoSifen.APROBADO
+
+
+class FacturaSeguraConfig(models.Model):
+    """
+    Configuración del cliente PAC FacturaSegura y Protocolo de Cuota con Reserva Blindada (SCRUM-122).
+
+    Administra las credenciales de conexión con el proveedor autorizado de facturación electrónica
+    (SIFEN / e-Kuatia) y garantiza que 10 consultas / emisiones queden estrictamente reservadas y blindadas
+    para pruebas automatizadas y QA, bloqueando operaciones comerciales ordinarias ante agotamiento.
+    """
+
+    class Environment(models.TextChoices):
+        SANDBOX = 'SANDBOX', 'Ambiente Sandbox / Pruebas'
+        PRODUCTION = 'PRODUCTION', 'Ambiente Producción'
+
+    api_key = models.CharField(
+        max_length=150,
+        default='fs_live_sec_key_demo',
+        verbose_name='Clave API FacturaSegura',
+        help_text='Token o API Key provisto por FacturaSegura PAC.',
+    )
+    api_url = models.CharField(
+        max_length=255,
+        default='https://api.facturasegura.com.py/v1',
+        verbose_name='URL del PAC',
+        help_text='Endpoint base del servicio de facturación electrónica.',
+    )
+    client_id = models.CharField(
+        max_length=100,
+        default='global-exchange-pac',
+        verbose_name='ID de Cliente PAC',
+    )
+    environment = models.CharField(
+        max_length=20,
+        choices=Environment.choices,
+        default=Environment.SANDBOX,
+        verbose_name='Ambiente Operativo',
+    )
+    total_quota = models.PositiveIntegerField(
+        default=1000,
+        verbose_name='Cuota Total Asignada',
+        help_text='Cantidad total de llamadas/facturas contratadas para el período.',
+    )
+    used_quota = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Cuota Operativa Consumida',
+        help_text='Cantidad de documentos emitidos en operación ordinaria.',
+    )
+    test_quota_reserved = models.PositiveIntegerField(
+        default=10,
+        verbose_name='Reserva Blindada de Pruebas',
+        help_text='Cantidad de consultas/emisiones protegidas e inalterables para pruebas y QA.',
+    )
+    test_quota_used = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Cuota de Pruebas Consumida',
+        help_text='Llamadas de prueba realizadas sobre la reserva blindada.',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name='Activo',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Registro',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+    )
+
+    class Meta:
+        verbose_name = 'Configuración FacturaSegura'
+        verbose_name_plural = 'Configuraciones FacturaSegura'
+
+    def __str__(self) -> str:
+        return f'FacturaSegura [{self.environment}] (Cuota Disp: {self.operational_quota_available}, Blindada Test: {self.test_quota_available})'
+
+    @property
+    def operational_quota_available(self) -> int:
+        """
+        Retorna la cuota restante disponible para operaciones comerciales ordinarias.
+        Protege estrictamente la reserva blindada de pruebas (test_quota_reserved).
+        """
+        disponible = self.total_quota - self.used_quota - self.test_quota_reserved
+        return max(0, disponible)
+
+    @property
+    def test_quota_available(self) -> int:
+        """
+        Retorna la cuota restante de la reserva blindada de 10 pruebas.
+        """
+        return max(0, self.test_quota_reserved - self.test_quota_used)
+
+    @property
+    def is_operational_quota_exhausted(self) -> bool:
+        """
+        Indica si la cuota operativa se ha agotado (alcanzando el límite de la reserva blindada).
+        """
+        return self.operational_quota_available == 0
+
+    @property
+    def is_test_quota_exhausted(self) -> bool:
+        """
+        Indica si las 10 pruebas blindadas fueron completamente consumidas.
+        """
+        return self.test_quota_available == 0
+
+    def consume_quota(self, is_test: bool = False) -> int:
+        """
+        Ejecuta el protocolo de consumo de cuota asegurando la reserva blindada de 10 pruebas.
+
+        :param is_test: Indica si la llamada proviene de la suite de pruebas/QA.
+        :raises QuotaShieldExhaustedError: Si se intenta operar habiendo consumido el saldo operativo.
+        :raises TestQuotaExhaustedError: Si se agotan las 10 pruebas blindadas.
+        :return: Cuota restante disponible para la categoría invocada.
+        """
+        from .facturasegura_client import QuotaShieldExhaustedError, TestQuotaExhaustedError
+
+        if not is_test:
+            if self.operational_quota_available <= 0:
+                raise QuotaShieldExhaustedError(
+                    f"Cuota operativa agotada (Total: {self.total_quota}, Usadas: {self.used_quota}). "
+                    f"Las {self.test_quota_reserved} consultas restantes están blindadas exclusivamente para pruebas de integración y QA."
+                )
+            self.used_quota += 1
+            self.save(update_fields=['used_quota', 'updated_at'])
+            return self.operational_quota_available
+        else:
+            if self.test_quota_available <= 0:
+                raise TestQuotaExhaustedError(
+                    f"Reserva blindada de {self.test_quota_reserved} pruebas agotada ({self.test_quota_used}/{self.test_quota_reserved} consumidas)."
+                )
+            self.test_quota_used += 1
+            self.save(update_fields=['test_quota_used', 'updated_at'])
+            return self.test_quota_available
+
+    def replenish_quota(self, amount: int = 100) -> None:
+        """Incrementa la cuota total disponible."""
+        self.total_quota += amount
+        self.save(update_fields=['total_quota', 'updated_at'])
+
+    def reset_test_quota(self) -> None:
+        """Restablece el contador de la reserva blindada de 10 pruebas."""
+        self.test_quota_used = 0
+        self.save(update_fields=['test_quota_used', 'updated_at'])
+
+    @classmethod
+    def get_config(cls) -> 'FacturaSeguraConfig':
+        """Obtiene o inicializa la configuración activa del PAC."""
+        config, _ = cls.objects.get_or_create(
+            id=1,
+            defaults={
+                'total_quota': 1000,
+                'used_quota': 0,
+                'test_quota_reserved': 10,
+                'test_quota_used': 0,
+            }
+        )
+        return config
+
+
+class KioskTotem(models.Model):
+    """
+    Terminal de autoservicio físico (Tótem / Kiosco) para operaciones cambiarias en efectivo (SCRUM-122).
+    """
+
+    class Estado(models.TextChoices):
+        ONLINE = 'ONLINE', 'En Línea'
+        OFFLINE = 'OFFLINE', 'Fuera de Servicio'
+        MAINTENANCE = 'MAINTENANCE', 'En Mantenimiento'
+        LOW_CASH = 'LOW_CASH', 'Bajo Saldo en Efectivo'
+
+    codigo = models.CharField(
+        max_length=50,
+        unique=True,
+        default='TOTEM-01',
+        verbose_name='Código de Terminal',
+        help_text='Identificador único del hardware del kiosco (ej. TOTEM-01).',
+    )
+    nombre = models.CharField(
+        max_length=100,
+        default='Tótem Sucursal Central',
+        verbose_name='Nombre Descriptivo',
+    )
+    ubicacion = models.CharField(
+        max_length=200,
+        default='Casa Central - Hall de Atención',
+        verbose_name='Ubicación Física',
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.ONLINE,
+        verbose_name='Estado Operativo',
+    )
+    ip_address = models.GenericIPAddressField(
+        default='192.168.1.100',
+        verbose_name='Dirección IP de la Terminal',
+    )
+    activo = models.BooleanField(
+        default=True,
+        verbose_name='Habilitado',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha de Alta',
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Última Actualización',
+    )
+
+    class Meta:
+        verbose_name = 'Tótem / Terminal Kiosco'
+        verbose_name_plural = 'Tótems / Terminales Kiosco'
+        ordering = ['codigo']
+
+    def __str__(self) -> str:
+        return f'{self.codigo} - {self.nombre} ({self.get_estado_display()})'
+
+    def get_total_balance(self, currency_code: str) -> Decimal:
+        """Calcula el saldo total en efectivo disponible en los casetes para la moneda indicada."""
+        return sum(
+            vault.saldo for vault in self.vaults.filter(currency__code=currency_code)
+        )
+
+
+class KioskCashVault(models.Model):
+    """
+    Casete / Depósito de Billetes por denominación individual en la terminal Kiosco (SCRUM-122).
+    """
+
+    totem = models.ForeignKey(
+        KioskTotem,
+        on_delete=models.CASCADE,
+        related_name='vaults',
+        verbose_name='Tótem Asignado',
+    )
+    currency = models.ForeignKey(
+        'rates.Currency',
+        on_delete=models.PROTECT,
+        related_name='kiosk_vaults',
+        verbose_name='Moneda',
+    )
+    denominacion = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name='Denominación de Billete',
+        help_text='Valor facial del billete (ej. 100000 para PYG o 100 para USD).',
+    )
+    cantidad = models.PositiveIntegerField(
+        default=100,
+        verbose_name='Cantidad de Billetes Físicos',
+        help_text='Stock físico actual de piezas de esta denominación en el casete.',
+    )
+    capacidad_maxima = models.PositiveIntegerField(
+        default=2000,
+        verbose_name='Capacidad Máxima del Casete',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Casete de Billetes (Tótem)'
+        verbose_name_plural = 'Casetes de Billetes (Tótem)'
+        unique_together = ('totem', 'currency', 'denominacion')
+        ordering = ['totem', 'currency', '-denominacion']
+
+    def __str__(self) -> str:
+        return f'{self.totem.codigo} | {self.currency.code} {self.denominacion:,.0f} (Stock: {self.cantidad} un.)'
+
+    @property
+    def saldo(self) -> Decimal:
+        """Saldo monetario total almacenado en este casete."""
+        return self.denominacion * Decimal(self.cantidad)
+
+
+class KioskCashOperation(models.Model):
+    """
+    Registro y comprobante de movimiento físico de efectivo (aceptación / dispensación) en Kiosco (SCRUM-122).
+    """
+
+    class TipoOperacion(models.TextChoices):
+        ACEPTACION = 'ACEPTACION', 'Aceptación Física de Billetes'
+        DISPENSACION = 'DISPENSACION', 'Dispensación Física de Divisas'
+        RECARGA = 'RECARGA', 'Recarga / Mantenimiento de Casetes'
+
+    totem = models.ForeignKey(
+        KioskTotem,
+        on_delete=models.PROTECT,
+        related_name='cash_operations',
+        verbose_name='Tótem',
+    )
+    transaction = models.ForeignKey(
+        'Transaction',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cash_operations',
+        verbose_name='Transacción Cambiaria',
+    )
+    uuid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        verbose_name='Identificador de Comprobante',
+    )
+    tipo_operacion = models.CharField(
+        max_length=20,
+        choices=TipoOperacion.choices,
+        verbose_name='Tipo de Movimiento',
+    )
+    currency = models.ForeignKey(
+        'rates.Currency',
+        on_delete=models.PROTECT,
+        related_name='cash_operations',
+        verbose_name='Moneda',
+    )
+    monto_total = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        verbose_name='Monto Total en Efectivo',
+    )
+    desglose_billetes = models.JSONField(
+        default=dict,
+        verbose_name='Desglose por Denominación',
+        help_text='Diccionario con la cantidad física por denominación, ej. {"100000": 3, "50000": 2}.',
+    )
+    total_billetes = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Total de Billetes Físicos',
+    )
+    codigo_qr = models.TextField(
+        blank=True,
+        verbose_name='Cadena de Verificación QR',
+    )
+    hash_verificacion = models.CharField(
+        max_length=64,
+        blank=True,
+        verbose_name='Hash Criptográfico SHA-256',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Fecha y Hora',
+    )
+
+    class Meta:
+        verbose_name = 'Comprobante de Movimiento en Efectivo'
+        verbose_name_plural = 'Comprobantes de Movimientos en Efectivo'
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:
+        return f'{self.get_tipo_operacion_display()} {self.currency.code} {self.monto_total:,.2f} ({self.totem.codigo})'
+
+    @property
+    def fecha_formateada(self) -> str:
+        """Marca temporal formateada legible."""
+        return self.created_at.strftime("%d/%m/%Y %H:%M:%S")

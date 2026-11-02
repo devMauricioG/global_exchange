@@ -352,3 +352,32 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
   - Ejecución de la suite completa de tests del proyecto: **475 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
   - Compilación limpia de documentación Sphinx con `-W` (0 advertencias, `build succeeded`).
   - Redacción del reporte detallado en `docs/documentacion/SCRUM-121.md` y actualización del catálogo general en `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Mauricio González — 01/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 4 / Kiosco — Protocolo de cuota y cliente real FacturaSeguraClient con reserva blindada de 10 pruebas / KioskCashService (SCRUM-122)
+
+**Resumen:**
+- Implementé de manera integral el subsistema de gestión física de efectivo en terminales de autoservicio y la integración certificada con el PAC FacturaSegura:
+- **Protocolo de Cuota y Cliente Real `FacturaSeguraClient` (`transactions/facturasegura_client.py`):**
+  - Creé el modelo `FacturaSeguraConfig` en `transactions/models.py` para parametrizar el consumo de cuotas, el balance operativo y la reserva blindada inviolable de 10 pruebas (`test_quota_reserved = 10`).
+  - Diseñé el protocolo de blindaje: si la cuota comercial ordinaria se agota (`operational_quota_available == 0`), el sistema bloquea cualquier emisión ordinaria con `QuotaShieldExhaustedError`, preservando las 10 consultas restantes exclusivamente para la suite de pruebas automatizadas y QA.
+  - Implementé las operaciones `emitir_factura`, `consultar_factura`, `consultar_cuota` y `cancelar_factura`, actualizando el estado del modelo `ElectronicInvoice`.
+- **Servicio de Efectivo en Terminales Kiosco `KioskCashService` (`transactions/kiosk_cash_service.py`):**
+  - Modelé el hardware de la terminal `KioskTotem`, los casetes de billetes por denominación `KioskCashVault` y el registro de movimientos físicos `KioskCashOperation`.
+  - Definí el catálogo oficial de denominaciones permitidas (`DENOMINACIONES_PERMITIDAS`) para PYG, USD, EUR, BRL y ARS, con validación estricta y rechazo de billetes ilícitos o no estándar (`InvalidBillDenominationError`).
+  - Desarrollé la aceptación física de billetes con control de capacidad en casetes y registro transaccional atómico (`accept_cash`).
+  - Implementé el algoritmo de dispensación óptima (`calculate_dispense_breakdown` y `dispense_cash`) basado en Bounded Coin Change con backtracking, minimizando la cantidad de piezas físicas despachadas y controlando saldo en tótem (`InsufficientTotemBalanceError`, `CannotDispenseExactChangeError`).
+  - Construí un generador determinista nativo de códigos QR en formato SVG (`generate_qr_svg`), eliminando librerías binarias externas, y sellos de trazabilidad criptográfica SHA-256.
+- **Vistas, Endpoints y Plantillas:**
+  - Diseñé la plantilla imprimible de ticket térmico `templates/kiosk/cash_receipt.html` con desglose de billetes, totales, sellos y código QR SVG.
+  - Expuse endpoints REST para consulta de inventario (`/kiosk/api/cash/status/`), aceptación (`/kiosk/api/cash/accept/`), dispensación (`/kiosk/api/cash/dispense/`), comprobantes (`/kiosk/api/cash/receipt/<uuid>/`) y estado de cuota (`/kiosk/api/facturasegura/cuota/`).
+  - Integré la aceptación, dispensación y emisión certificada en la transacción de autoservicio `/kiosk/api/transact/` y actualicé `templates/kiosk/kiosk_home.html`.
+- **Suite de Pruebas Automatizadas (`transactions/tests_kiosk_cash_facturasegura.py`):**
+  - Escribí 25 casos de prueba unitarios e integrados cubriendo la validación de billetes, aceptación física, dispensación óptima, casos de saldo insuficiente y cambio imposible, protocolo de cuota, reserva blindada de 10 pruebas, consultas y flujo completo de transacción.
+- **Verificación de Calidad:**
+  - Suite completa del sistema: **500 tests ejecutados y aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+  - Compilación limpia de documentación Sphinx en modo estricto (`sphinx-build -W -b html`) con 0 advertencias.
+  - Redacción del informe formal en `docs/documentacion/SCRUM-122.md` y actualización de `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.

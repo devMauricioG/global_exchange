@@ -27,8 +27,28 @@ from customers.models import Cliente
 from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 from rates.models import Currency, ExchangeRate, OperationLimit
 from rates.services import RateCalculationService
+from .facturasegura_client import (
+    FacturaSeguraClient,
+    FacturaSeguraError,
+    QuotaShieldExhaustedError,
+    TestQuotaExhaustedError,
+)
+from .kiosk_cash_service import (
+    DENOMINACIONES_PERMITIDAS,
+    CannotDispenseExactChangeError,
+    InsufficientTotemBalanceError,
+    InvalidBillDenominationError,
+    KioskCashError,
+    KioskCashService,
+)
 from .kude_service import KudeService
-from .models import ElectronicInvoice, Transaction
+from .models import (
+    ElectronicInvoice,
+    FacturaSeguraConfig,
+    KioskCashOperation,
+    KioskTotem,
+    Transaction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +201,7 @@ class KioskQuoteApiView(View):
                 segment_or_customer=cliente or segment,
                 amount=amount,
                 operation_type=op_type,
-                is_source_base=(op_type == 'SELL'),
+                is_source_base=True,
                 validate_limits=True,
                 raise_on_limit_violation=False,
             )
@@ -374,7 +394,7 @@ class KioskTransactApiView(View):
                 segment_or_customer=cliente,
                 amount=amount,
                 operation_type=op_type,
-                is_source_base=(op_type == 'SELL'),
+                is_source_base=True,
                 validate_limits=True,
                 raise_on_limit_violation=True,
             )
@@ -390,6 +410,14 @@ class KioskTransactApiView(View):
         else:
             monto_origen = quotation['base_amount']
             monto_destino = quotation['net_target_amount']
+
+        # Manejo de hardware de efectivo KioskCashService y cuota FacturaSegura (SCRUM-122)
+        totem = KioskCashService.get_or_create_default_totem()
+        bills_data = request.POST.get('bills')
+        is_test = (
+            request.POST.get('is_test', '').lower() in ('1', 'true') or
+            request.GET.get('is_test', '').lower() in ('1', 'true')
+        )
 
         with db_transaction.atomic():
             tipo_transaccion = Transaction.TipoOperacion.COMPRA if op_type == 'BUY' else Transaction.TipoOperacion.VENTA
@@ -414,8 +442,55 @@ class KioskTransactApiView(View):
             )
             tx.save()
 
-            # Emitir inmediatamente la Factura Electrónica y KuDE
-            invoice = KudeService.get_or_create_invoice(tx)
+            # 1. Aceptación física de billetes (moneda entregada por el cliente)
+            accept_op = None
+            try:
+                if bills_data:
+                    try:
+                        bills_input = json.loads(bills_data)
+                    except Exception:
+                        bills_input = [int(Decimal(x.strip())) for x in bills_data.split(',') if x.strip()]
+                else:
+                    int_origen = int(monto_origen)
+                    allowed = DENOMINACIONES_PERMITIDAS.get(tx.moneda_origen.code, [])
+                    if int_origen in allowed:
+                        bills_input = {int_origen: 1}
+                    else:
+                        bills_input = None
+
+                if bills_input:
+                    accept_op = KioskCashService.accept_cash(
+                        totem=totem,
+                        currency=tx.moneda_origen,
+                        bills=bills_input,
+                        transaction=tx,
+                    )
+            except Exception as e:
+                logger.warning("Aceptación física de efectivo en Kiosco: %s", e)
+
+            # 2. Dispensación física de billetes (divisa entregada al cliente)
+            dispense_op = None
+            try:
+                dispense_op = KioskCashService.dispense_cash(
+                    totem=totem,
+                    currency=tx.moneda_destino,
+                    target_amount=monto_destino,
+                    transaction=tx,
+                )
+            except Exception as e:
+                logger.warning("Dispensación física de divisas en Kiosco: %s", e)
+
+            # 3. Emisión de Factura Electrónica e-Kuatia vía PAC FacturaSegura con protocolo de cuota
+            fs_client = FacturaSeguraClient()
+            try:
+                fs_data = fs_client.emitir_factura(tx, is_test=is_test)
+                invoice = KudeService.lookup_invoice(fs_data['cdc'])
+            except QuotaShieldExhaustedError as qerr:
+                logger.error("Cuota comercial agotada en FacturaSegura PAC: %s", qerr)
+                invoice = KudeService.get_or_create_invoice(tx)
+            except Exception as err:
+                logger.error("Falla en emisión PAC FacturaSegura: %s", err)
+                invoice = KudeService.get_or_create_invoice(tx)
 
         data = {
             'success': True,
@@ -436,5 +511,112 @@ class KioskTransactApiView(View):
             'kude_pdf_url': reverse('transactions:kude_pdf', kwargs={'pk': tx.id}),
             'kude_xml_url': reverse('transactions:kude_xml', kwargs={'pk': tx.id}),
             'receipt_url': reverse('transactions:receipt', kwargs={'pk': tx.id}),
+            'cash_accept_uuid': str(accept_op.uuid) if accept_op else None,
+            'cash_dispense_uuid': str(dispense_op.uuid) if dispense_op else None,
+            'cash_receipt_url': reverse('kiosk:cash_receipt', kwargs={'uuid': dispense_op.uuid}) if dispense_op else None,
+            'dispense_breakdown': dispense_op.desglose_billetes if dispense_op else {},
         }
         return JsonResponse(data)
+
+
+class KioskCashStatusApiView(View):
+    """Endpoint API REST para consulta del estado e inventario físico de efectivo en el tótem (SCRUM-122)."""
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
+        codigo = request.GET.get('totem', 'TOTEM-01')
+        totem = KioskCashService.get_or_create_default_totem(codigo)
+        inventory = KioskCashService.get_totem_inventory(totem)
+        return JsonResponse({
+            'success': True,
+            'totem': inventory,
+            'allowed_denominations': DENOMINACIONES_PERMITIDAS,
+        })
+
+
+class KioskCashAcceptApiView(View):
+    """Endpoint para simular la aceptación física de billetes por el validador del tótem (SCRUM-122)."""
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
+        currency_code = request.POST.get('currency', '').strip().upper()
+        bills_raw = request.POST.get('bills', '')
+        totem_code = request.POST.get('totem', 'TOTEM-01')
+
+        if not currency_code or not bills_raw:
+            return JsonResponse({'success': False, 'error': 'Debe especificar moneda y lista de billetes.'}, status=400)
+
+        currency = Currency.objects.filter(code=currency_code, is_active=True).first()
+        if not currency:
+            return JsonResponse({'success': False, 'error': f'Moneda {currency_code} inexistente.'}, status=404)
+
+        try:
+            if bills_raw.startswith('{') or bills_raw.startswith('['):
+                bills_data = json.loads(bills_raw)
+            else:
+                bills_data = [int(Decimal(x.strip())) for x in bills_raw.split(',') if x.strip()]
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': f'Formato de billetes inválido: {e}'}, status=400)
+
+        totem = KioskCashService.get_or_create_default_totem(totem_code)
+        try:
+            op = KioskCashService.accept_cash(totem=totem, currency=currency, bills=bills_data)
+            receipt = KioskCashService.generate_cash_receipt(op)
+            return JsonResponse({'success': True, 'operation': receipt})
+        except KioskCashError as err:
+            return JsonResponse({'success': False, 'error': str(err)}, status=400)
+
+
+class KioskCashDispenseApiView(View):
+    """Endpoint para simular la dispensación física de billetes desde los casetes del tótem (SCRUM-122)."""
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
+        currency_code = request.POST.get('currency', '').strip().upper()
+        amount_raw = request.POST.get('amount', '')
+        totem_code = request.POST.get('totem', 'TOTEM-01')
+
+        if not currency_code or not amount_raw:
+            return JsonResponse({'success': False, 'error': 'Debe especificar moneda y monto a dispensar.'}, status=400)
+
+        currency = Currency.objects.filter(code=currency_code, is_active=True).first()
+        if not currency:
+            return JsonResponse({'success': False, 'error': f'Moneda {currency_code} inexistente.'}, status=404)
+
+        try:
+            amount = Decimal(str(amount_raw))
+        except Exception:
+            return JsonResponse({'success': False, 'error': 'Monto inválido.'}, status=400)
+
+        totem = KioskCashService.get_or_create_default_totem(totem_code)
+        try:
+            op = KioskCashService.dispense_cash(totem=totem, currency=currency, target_amount=amount)
+            receipt = KioskCashService.generate_cash_receipt(op)
+            return JsonResponse({'success': True, 'operation': receipt})
+        except KioskCashError as err:
+            return JsonResponse({'success': False, 'error': str(err)}, status=400)
+
+
+class KioskCashReceiptApiView(View):
+    """Endpoint REST para consulta pública de comprobantes de efectivo y código QR por UUID (SCRUM-122)."""
+
+    def get(self, request: HttpRequest, uuid: uuid.UUID, *args: Any, **kwargs: Any) -> JsonResponse:
+        op = get_object_or_404(KioskCashOperation, uuid=uuid)
+        receipt = KioskCashService.generate_cash_receipt(op)
+        return JsonResponse({'success': True, 'receipt': receipt})
+
+
+class KioskCashReceiptView(View):
+    """Vista web e imprimible del comprobante de efectivo en tótem con código QR (SCRUM-122)."""
+
+    def get(self, request: HttpRequest, uuid: uuid.UUID, *args: Any, **kwargs: Any) -> HttpResponse:
+        op = get_object_or_404(KioskCashOperation, uuid=uuid)
+        receipt = KioskCashService.generate_cash_receipt(op)
+        return render(request, 'kiosk/cash_receipt.html', {'receipt': receipt, 'operation': op})
+
+
+class FacturaSeguraQuotaApiView(View):
+    """Endpoint API REST para consulta del protocolo de cuota y reserva blindada de FacturaSegura (SCRUM-122)."""
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> JsonResponse:
+        client = FacturaSeguraClient()
+        quota_data = client.consultar_cuota()
+        return JsonResponse({'success': True, 'quota': quota_data})
+

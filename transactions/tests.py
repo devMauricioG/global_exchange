@@ -1342,3 +1342,6 @@ class TransactionReceiptViewTest(TransactionTestMixin, TestCase):
 
 # SCRUM-121: Tests para Kiosco Táctil y Facturación Electrónica KuDE
 from .tests_kiosk_kude import *
+
+# SCRUM-122: Tests para KioskCashService y FacturaSeguraClient
+from .tests_kiosk_cash_facturasegura import *
