@@ -28,6 +28,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-105** | Actualización de Documentación de Diseño UML (Clases, Paquetes, Casos de Prueba) y ERS v3.4 | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-106** | Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4 | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-121** | Terminal Táctil /kiosk/ y Consulta, Visualización y Descarga de KuDE PDF y XML | Hotfix / Sprint 4 | Mauricio González | Finalizado |
+| **SCRUM-122** | Protocolo de Cuota y FacturaSeguraClient con Reserva Blindada de 10 Pruebas y KioskCashService | Sprint 4 / Kiosk | Mauricio González | Finalizado |
 
 
 ---
@@ -587,3 +588,43 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * docs/documentacion/SCRUM-121.md
   * docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md
   * docs/chat_ia.md
+
+
+---
+
+### 21. SCRUM-122: Protocolo de cuota y cliente real FacturaSeguraClient con reserva blindada de 10 pruebas / KioskCashService
+
+* **Objetivo:** Implementar el servicio `KioskCashService` que simula la aceptación física de billetes y dispensación de divisas en la terminal, validando denominaciones permitidas, disponibilidad de saldo en la caja del tótem y generando el comprobante con código QR, junto con el protocolo de cuota y cliente real `FacturaSeguraClient` con reserva blindada de 10 pruebas.
+* **Aportes y Solución con IA:**
+  * **Protocolo de Cuota y Cliente Real `FacturaSeguraClient`:**
+    * Modelo `FacturaSeguraConfig` para parametrización del PAC, cuota total, consumida y reserva blindada (`test_quota_reserved = 10`).
+    * Implementación de la reserva blindada de 10 pruebas: si la cuota comercial se agota, las llamadas ordinarias son bloqueadas (`QuotaShieldExhaustedError`), garantizando que la ejecución de tests y QA nunca se interrumpa.
+    * Métodos de emisión (`emitir_factura`), consulta de estado (`consultar_factura`), balance de cuota (`consultar_cuota`) y anulación (`cancelar_factura`).
+  * **Servicio de Efectivo en Terminales Kiosco (`KioskCashService`):**
+    * Modelos de hardware `KioskTotem`, casetes de billetes `KioskCashVault` y comprobantes `KioskCashOperation`.
+    * Catálogo de denominaciones de curso legal permitidas para PYG, USD, EUR, BRL y ARS, con rechazo de billetes inválidos (`InvalidBillDenominationError`).
+    * Aceptación física de billetes con control de capacidad en casetes receptores.
+    * Algoritmo de dispensación física de divisas (Bounded Coin Change voraz con backtracking) que minimiza la cantidad de piezas físicas y valida disponibilidad de saldo (`InsufficientTotemBalanceError`, `CannotDispenseExactChangeError`).
+    * Generador nativo puro de código QR en SVG y sellos de seguridad SHA-256.
+  * **Endpoints, Vistas y Plantillas:**
+    * Endpoints REST para estado de caja (`/kiosk/api/cash/status/`), aceptación (`/kiosk/api/cash/accept/`), dispensación (`/kiosk/api/cash/dispense/`) y comprobantes (`/kiosk/api/cash/receipt/<uuid>/`).
+    * Vista imprimible de ticket térmico con código QR en `templates/kiosk/cash_receipt.html`.
+    * Integración fluida en `/kiosk/api/transact/` y plantilla `templates/kiosk/kiosk_home.html`.
+  * **Verificación y Calidad:**
+    * Suite automatizada de 25 tests unitarios e integración en `transactions/tests_kiosk_cash_facturasegura.py`.
+    * Suite completa del proyecto: **500 tests exitosos al 100% (OK)**, 0 regresiones.
+    * Compilación limpia de Sphinx con 0 advertencias (`sphinx-build -W -b html`).
+* **Archivos intervenidos:**
+  * `transactions/models.py`
+  * `transactions/migrations/0004_facturaseguraconfig_kiosktotem_kioskcashoperation_and_more.py`
+  * `transactions/facturasegura_client.py`
+  * `transactions/kiosk_cash_service.py`
+  * `transactions/kiosk_views.py`
+  * `transactions/kiosk_urls.py`
+  * `templates/kiosk/cash_receipt.html`
+  * `templates/kiosk/kiosk_home.html`
+  * `transactions/tests_kiosk_cash_facturasegura.py`
+  * `transactions/tests.py`
+  * `docs/documentacion/SCRUM-122.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`

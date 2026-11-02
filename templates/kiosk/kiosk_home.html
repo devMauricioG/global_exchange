@@ -773,6 +773,9 @@
                 <a href="#" id="linkKudeXml" target="_blank" class="btn-kude-action btn-kude-xml">
                     💾 Descargar XML Firmado
                 </a>
+                <a href="#" id="linkCashReceipt" target="_blank" class="btn-kude-action" style="background-color: #059669; color: #ffffff; display: none;">
+                    🧾 Ticket Efectivo (QR)
+                </a>
                 <a href="#" id="linkReceipt" target="_blank" class="btn-kude-action" style="background-color: #475569; color: #ffffff;">
                     🖨️ Comprobante Caja
                 </a>
@@ -1082,6 +1085,13 @@
                     document.getElementById('linkKudePdf').href = data.kude_pdf_url;
                     document.getElementById('linkKudeXml').href = data.kude_xml_url;
                     document.getElementById('linkReceipt').href = data.receipt_url;
+                    if (data.cash_receipt_url) {
+                        const cashBtn = document.getElementById('linkCashReceipt');
+                        if (cashBtn) {
+                            cashBtn.href = data.cash_receipt_url;
+                            cashBtn.style.display = 'inline-block';
+                        }
+                    }
 
                     document.getElementById('successKudeModal').classList.add('show');
                 } else {
