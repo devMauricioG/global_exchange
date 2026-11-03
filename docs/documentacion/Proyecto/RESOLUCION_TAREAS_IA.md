@@ -667,3 +667,47 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-114.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+
+---
+
+### 23. SCRUM-115: Vistas y formularios para Apertura, Registro de Efectivo y Cierre con Arqueo de Caja
+
+* **Objetivo:** Desarrollar en `apps/cash/` las vistas basadas en clases (CBV), formularios especializados y plantillas web responsivas para la apertura de turnos con fondo inicial (RF-22, RN05), monitoreo de saldos en tiempo real, registro de movimientos manuales (RF-24) y protocolo de cierre con arqueo ciego que compare el saldo contable contra el físico y determine faltantes o sobrantes (RF-23).
+* **Aportes y Solución con IA:**
+  * **Formularios con Soporte Multidivisa Dinámico (`apps/cash/forms.py`):**
+    * `CashShiftOpenForm`: Selección de ventanilla disponible y generación dinámica de campos de fondo inicial por cada divisa activa (`initial_PYG`, `initial_USD`, etc.) con step y decimales correspondientes.
+    * `CashMovementForm`: Registro de aportes manuales, remesas a tesorería y ajustes con validación en tiempo real para impedir descubiertos o saldos negativos en caja.
+    * `BlindReconciliationForm`: Protocolo de arqueo ciego que oculta al cajero los saldos calculados por el sistema y recoge el conteo físico real de billetes en gaveta por divisa.
+  * **Vistas Basadas en Clases (`apps/cash/views.py`):**
+    * `CashDashboardView`: Panel de control en tiempo real con saldos por moneda, estado del turno actual, accesos rápidos y últimos movimientos.
+    * `CashShiftOpenView`: Apertura formal de jornada con dotación inicial y captura de credenciales Keycloak.
+    * `CashMovementCreateView`: Formulario de aportes y retiros con trazabilidad inmutable.
+    * `CashShiftCloseView`: Protocolo de arqueo ciego de ventanilla.
+    * `CashShiftDetailView` y `CashShiftReceiptView`: Acta formal de arqueo con comparativa contable vs física, determinación de sobrante/faltante/cuadrado, desglose de movimientos y formato imprimible para auditoría.
+    * `CashShiftListView` y `CashRegisterListView`: Auditoría y monitoreo histórico con filtros por estado y caja.
+    * `CashShiftStatusApiView`: Endpoint JSON para actualización de saldos en vivo.
+  * **Plantillas Web y Navegación (`templates/cash/` y `templates/base.html`):**
+    * 7 plantillas completas con estilos acordes al diseño de Global Exchange, feedback visual de descuadres y enlace `💵 Cajas` en el menú superior para roles de operador y administrador.
+  * **Documentación y Calidad:**
+    * Módulo `docs/sphinx/source/cash.rst` actualizado con autodoc de `forms`, `views` y `urls`. Compilación de Sphinx limpia (`build succeeded`).
+    * Suite automatizada de pruebas ampliada a **36 tests en `apps/cash/tests.py`** (100% OK).
+    * Suite global del proyecto: **536 tests aprobados al 100% de éxito (OK)**, 0 fallos, sin regresiones.
+* **Archivos intervenidos:**
+  * `apps/cash/forms.py`
+  * `apps/cash/views.py`
+  * `apps/cash/urls.py`
+  * `apps/cash/tests.py`
+  * `config/urls.py`
+  * `templates/base.html`
+  * `templates/cash/dashboard.html`
+  * `templates/cash/shift_open.html`
+  * `templates/cash/movement_create.html`
+  * `templates/cash/shift_close.html`
+  * `templates/cash/shift_detail.html`
+  * `templates/cash/shift_list.html`
+  * `templates/cash/register_list.html`
+  * `docs/sphinx/source/cash.rst`
+  * `docs/documentacion/SCRUM-115.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`

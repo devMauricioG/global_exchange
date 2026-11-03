@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Cierre con Arqueo Ciego de Caja — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver a Gestión de Cajas
+        </a>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <div style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 2.25rem;">🔒</span>
+                <div>
+                    <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                        Cierre de Turno con Arqueo Ciego
+                    </h1>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">
+                        Turno: <strong>{{ shift.shift_number }}</strong> &bull; Caja: <strong>{{ shift.cash_register.register_code }}</strong> &bull; Cajero: <strong>{{ shift.cashier.username }}</strong>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Protocolo de Arqueo Ciego -->
+        <div style="background: rgba(99, 102, 241, 0.1); border-left: 4px solid var(--accent); padding: 1rem 1.25rem; border-radius: 6px; margin-bottom: 1.75rem;">
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                <span style="font-size: 1.25rem;">👁️‍🗨️</span>
+                <div>
+                    <strong style="color: #c7d2fe; display: block; margin-bottom: 0.25rem; font-size: 0.95rem;">
+                        Protocolo de Arqueo Ciego (Auditoría RF-23)
+                    </strong>
+                    <p style="color: #e0e7ff; font-size: 0.875rem; line-height: 1.45; margin: 0;">
+                        Para asegurar total transparencia e imparcialidad, los saldos teóricos calculados por el sistema <strong>no son mostrados</strong> durante el arqueo. Cuente de manera exhaustiva el efectivo físico real (billetes y monedas) disponible en la gaveta y declare las cantidades exactas a continuación. Tras confirmar, el sistema generará automáticamente el acta con el cálculo de sobrante, faltante o cuadre exacto.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="." novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div style="background: var(--danger-bg); border-left: 4px solid var(--danger); padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; color: #fca5a5;">
+                {{ form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <!-- Conteo Físico por Divisa -->
+            <div style="margin-bottom: 1.75rem;">
+                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.85rem;">
+                    💵 Declaración de Conteo Físico en Gaveta
+                </h3>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+                    {% for item in reconciliation_currencies %}
+                    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+                        <label for="{{ item.bound_field.id_for_label }}" style="display: block; font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-main);">
+                            <span style="display: flex; justify-content: space-between; align-items: baseline;">
+                                <span>{{ item.code }} — {{ item.name }}</span>
+                                <span style="color: var(--primary); font-size: 1rem;">{{ item.symbol }}</span>
+                            </span>
+                            <small style="font-weight: 500; color: var(--text-muted); font-size: 0.8rem;">{{ item.bound_field.label }}</small>
+                        </label>
+                        {{ item.bound_field }}
+                        {% if item.bound_field.errors %}
+                        <div style="color: var(--danger); font-size: 0.8rem; margin-top: 0.35rem;">
+                            {{ item.bound_field.errors.0 }}
+                        </div>
+                        {% endif %}
+                        <p style="font-size: 0.75rem; color: var(--text-subtle); margin-top: 0.35rem;">
+                            {{ item.bound_field.help_text }}
+                        </p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Observaciones de Cierre -->
+            <div style="margin-bottom: 2rem;">
+                <label for="{{ form.closing_notes.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                    {{ form.closing_notes.label }}
+                </label>
+                {{ form.closing_notes }}
+                {% if form.closing_notes.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                    {{ form.closing_notes.errors.0 }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Botones de Acción -->
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                <a href="{% url 'cash:dashboard' %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main);">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary" style="background: var(--danger); border-color: var(--danger); font-weight: 700; padding: 0.65rem 1.75rem;">
+                    🔒 Formalizar Arqueo y Cerrar Caja
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+

@@ -411,3 +411,32 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Suite completa del proyecto: **518 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Generación de informe técnico en `docs/documentacion/SCRUM-114.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
 
+
+
+---
+
+## Pablo Elizeche — 03/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Cajas — Vistas y formularios para Apertura, Registro de Efectivo y Cierre con Arqueo de Caja (SCRUM-115)
+
+**Resumen:**
+- Desarrollé en `apps/cash/` el subsistema de vistas basadas en clases (CBV), formularios especializados y plantillas visuales responsivas para la interacción de cajeros y supervisores en ventanilla física, asegurando el cumplimiento de RF-22, RF-23, RF-24 y RN05:
+  - **Formularios Dinámicos con Validación Estricta (`apps/cash/forms.py`):**
+    - `CashShiftOpenForm`: Selección de caja cerrada y habilitada, con generación dinámica de campos para dotación de fondo inicial en cada divisa activa (`initial_<DIVISA>`) y asociación del `keycloak_user_id` del cajero.
+    - `CashMovementForm`: Formulario de registro de movimientos manuales (aportes de tesorería, remesas de seguridad y ajustes) con control de saldo disponible previo al impacto contable para evitar descubiertos.
+    - `BlindReconciliationForm`: Protocolo de arqueo ciego que no revela los saldos contables del sistema al operador y recoge el conteo físico de billetes y monedas por divisa.
+  - **Vistas Basadas en Clases (`apps/cash/views.py`):**
+    - Implementación de 9 CBVs protegidas con `LoginRequiredMixin` y `RoleRequiredMixin` (`admin`, `operator`, `cajero`): `CashDashboardView`, `CashShiftOpenView`, `CashMovementCreateView`, `CashShiftCloseView`, `CashShiftDetailView`, `CashShiftReceiptView`, `CashShiftListView`, `CashRegisterListView` y el endpoint JSON `CashShiftStatusApiView`.
+    - Presentación de métricas financieras de apertura, movimientos acumulados por sentido de flujo (`IN`/`OUT`) y saldos actuales.
+    - Generación y renderizado del acta de arqueo formal con determinación matemática de sobrantes, faltantes o cuadre exacto (`RECONCILED`/`DISCREPANCY`).
+  - **Plantillas Web e Integración en Navbar (`templates/cash/` y `templates/base.html`):**
+    - 7 plantillas HTML responsivas (`dashboard.html`, `shift_open.html`, `movement_create.html`, `shift_close.html`, `shift_detail.html`, `shift_list.html`, `register_list.html`) diseñadas con la paleta oscura de la plataforma, estados visuales, badges por divisa y sección de firmas para impresión.
+    - Incorporación de acceso directo `💵 Cajas` en el navbar superior para operadores y administradores.
+  - **Rutas (`apps/cash/urls.py` y `config/urls.py`):**
+    - Configuración integral bajo el namespace `cash` con prefijo `/cash/`.
+  - **Documentación Técnica Sphinx:**
+    - Actualización de `docs/sphinx/source/cash.rst` integrando los módulos `forms`, `views` y `urls`. Compilación de Sphinx limpia (`build succeeded`).
+  - **Verificación y Calidad de Software:**
+    - Suite de pruebas de `apps.cash` ampliada de 18 a **36 tests unitarios e integrados** (`apps/cash/tests.py`) al 100% de éxito.
+    - Suite completa del proyecto: **536 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Generación de informe técnico detallado en `docs/documentacion/SCRUM-115.md` y actualización de `RESOLUCION_TAREAS_IA.md`.

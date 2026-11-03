@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Registrar Movimiento de Efectivo — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver al Dashboard de Caja
+        </a>
+    </div>
+
+    <!-- Tarjeta de Información de Turno -->
+    <div class="card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: var(--bg-card); border-left: 3px solid var(--primary);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+                <span style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Turno Activo</span>
+                <div style="font-size: 1.15rem; font-weight: 800; color: var(--text-main);">{{ shift.shift_number }}</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    Caja: <strong>{{ shift.cash_register.register_code }}</strong> &bull; Cajero: <strong>{{ shift.cashier.username }}</strong>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Saldos en Gaveta</span>
+                <div style="display: flex; gap: 0.75rem; margin-top: 0.25rem; flex-wrap: wrap;">
+                    {% for c in summary.currencies %}
+                    <span style="background: rgba(14, 165, 233, 0.1); color: var(--primary); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.85rem;">
+                        {{ c.currency }}: {{ c.expected_balance }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Formulario de Movimiento -->
+    <div class="card" style="padding: 2rem;">
+        <div style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+            <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                ➕ Registrar Movimiento de Efectivo en Ventanilla
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">
+                Registro inmutable para dotaciones de tesorería, remesas de seguridad y ajustes de caja (RF-24).
+            </p>
+        </div>
+
+        <!-- Alerta de Inmutabilidad -->
+        <div style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); padding: 0.85rem 1rem; border-radius: 4px; margin-bottom: 1.5rem; color: #fcd34d; font-size: 0.875rem;">
+            ⚠️ <strong>Aviso Normativo de Auditoría:</strong> Por requerimiento reglamentario (RF-24), los movimientos de caja registrados son <strong>estrictamente inmutables</strong>. No admiten modificaciones ni eliminaciones posteriores.
+        </div>
+
+        <form method="post" action="." novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div style="background: var(--danger-bg); border-left: 4px solid var(--danger); padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; color: #fca5a5;">
+                {{ form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+                <!-- Tipo de Movimiento -->
+                <div>
+                    <label for="{{ form.movement_type.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                        {{ form.movement_type.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.movement_type }}
+                    {% if form.movement_type.errors %}
+                    <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                        {{ form.movement_type.errors.0 }}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Divisa -->
+                <div>
+                    <label for="{{ form.currency.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                        {{ form.currency.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.currency }}
+                    {% if form.currency.errors %}
+                    <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                        {{ form.currency.errors.0 }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+                <!-- Monto -->
+                <div>
+                    <label for="{{ form.amount.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                        {{ form.amount.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.amount }}
+                    {% if form.amount.errors %}
+                    <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                        {{ form.amount.errors.0 }}
+                    </div>
+                    {% endif %}
+                    <p style="font-size: 0.8rem; color: var(--text-subtle); margin-top: 0.35rem;">
+                        {{ form.amount.help_text }}
+                    </p>
+                </div>
+
+                <!-- Nº de Recibo / Comprobante -->
+                <div>
+                    <label for="{{ form.receipt_number.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                        {{ form.receipt_number.label }}
+                    </label>
+                    {{ form.receipt_number }}
+                    {% if form.receipt_number.errors %}
+                    <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                        {{ form.receipt_number.errors.0 }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Concepto / Justificación -->
+            <div style="margin-bottom: 2rem;">
+                <label for="{{ form.concept.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                    {{ form.concept.label }} <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.concept }}
+                {% if form.concept.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                    {{ form.concept.errors.0 }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Botones -->
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                <a href="{% url 'cash:dashboard' %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main);">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary" style="font-weight: 700; padding: 0.65rem 1.5rem;">
+                    💾 Confirmar y Registrar Movimiento
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+

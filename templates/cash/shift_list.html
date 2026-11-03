@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Historial de Turnos de Caja — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto;">
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                📋 Historial y Auditoría de Turnos de Caja
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Registro histórico de aperturas, cierres, arqueos y diferencias en ventanilla (RF-22, RF-23).
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="{% url 'cash:dashboard' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                💵 Dashboard de Caja
+            </a>
+            <a href="{% url 'cash:shift_open' %}" class="btn btn-primary" style="background: var(--success); border-color: var(--success);">
+                🔓 Abrir Nuevo Turno
+            </a>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card" style="padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+        <form method="get" action="." style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="id_status" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">Estado:</label>
+                <select name="status" id="id_status" class="form-select" style="width: auto; padding: 0.4rem 0.75rem; font-size: 0.85rem;">
+                    <option value="">-- Todos los estados --</option>
+                    {% for code, label in status_choices %}
+                    <option value="{{ code }}" {% if selected_status == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="id_register" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">Caja:</label>
+                <select name="register" id="id_register" class="form-select" style="width: auto; padding: 0.4rem 0.75rem; font-size: 0.85rem;">
+                    <option value="">-- Todas las cajas --</option>
+                    {% for reg in registers %}
+                    <option value="{{ reg.id }}" {% if selected_register == reg.id|stringformat:"s" %}selected{% endif %}>{{ reg.register_code }} ({{ reg.name }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <button type="submit" class="btn" style="background: var(--primary); color: #0b1120; font-weight: 700; padding: 0.4rem 1rem; font-size: 0.85rem;">
+                🔍 Filtrar
+            </button>
+            {% if selected_status or selected_register %}
+            <a href="{% url 'cash:shift_list' %}" style="font-size: 0.85rem; color: var(--text-muted); text-decoration: underline;">
+                Limpiar filtros
+            </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Tabla de Turnos -->
+    <div class="card" style="padding: 1rem; margin-bottom: 1.5rem;">
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem;">
+                        <th style="padding: 0.75rem 0.5rem;">Nº Turno</th>
+                        <th style="padding: 0.75rem 0.5rem;">Caja</th>
+                        <th style="padding: 0.75rem 0.5rem;">Cajero</th>
+                        <th style="padding: 0.75rem 0.5rem;">Apertura</th>
+                        <th style="padding: 0.75rem 0.5rem;">Cierre</th>
+                        <th style="padding: 0.75rem 0.5rem;">Estado</th>
+                        <th style="padding: 0.75rem 0.5rem; text-align: right;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in shifts %}
+                    <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                        <td style="padding: 0.75rem 0.5rem; font-weight: 800; color: var(--primary);">
+                            {{ s.shift_number }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem;">
+                            <strong>{{ s.cash_register.register_code }}</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-subtle);">{{ s.cash_register.branch_name }}</div>
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem;">
+                            {{ s.cashier.username }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; color: var(--text-muted);">
+                            {{ s.opened_at|date:"d/m/Y H:i" }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; color: var(--text-muted);">
+                            {{ s.closed_at|date:"d/m/Y H:i"|default:"En curso" }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem;">
+                            {% if s.status == 'RECONCILED' %}
+                            <span style="background: var(--success-bg); color: var(--success); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">
+                                ✓ Arqueado
+                            </span>
+                            {% elif s.status == 'DISCREPANCY' %}
+                            <span style="background: var(--danger-bg); color: var(--danger); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">
+                                ⚠ Diferencias
+                            </span>
+                            {% elif s.status == 'OPEN' %}
+                            <span style="background: rgba(14, 165, 233, 0.15); color: var(--info); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">
+                                ● Abierto
+                            </span>
+                            {% else %}
+                            <span style="background: rgba(148, 163, 184, 0.1); color: var(--text-muted); padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">
+                                {{ s.get_status_display }}
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; text-align: right;">
+                            <a href="{% url 'cash:shift_detail' s.pk %}" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem; background: var(--bg-card-hover); color: var(--text-main);">
+                                Ver Detalle / Acta
+                            </a>
+                            {% if s.is_open and s.cashier == request.user %}
+                            <a href="{% url 'cash:shift_close' s.pk %}" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem; background: var(--danger); color: white; margin-left: 0.35rem;">
+                                Cerrar
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="padding: 2.5rem; text-align: center; color: var(--text-muted);">
+                            No se encontraron turnos con los filtros especificados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if is_paginated %}
+        <div style="display: flex; justify-content: center; gap: 0.5rem; margin-top: 1.5rem;">
+            {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_register %}&register={{ selected_register }}{% endif %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main); font-size: 0.85rem;">
+                &larr; Anterior
+            </a>
+            {% endif %}
+            <span style="padding: 0.5rem 1rem; color: var(--text-muted); font-size: 0.85rem;">
+                Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+            </span>
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_register %}&register={{ selected_register }}{% endif %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main); font-size: 0.85rem;">
+                Siguiente &rarr;
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

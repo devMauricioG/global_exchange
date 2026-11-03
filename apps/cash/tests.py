@@ -3,21 +3,30 @@ Suite integral de pruebas unitarias e integración para Cajas, Turnos y Movimien
 
 Verifica el cumplimiento de requerimientos:
 - RF-22: Apertura y Asignación de Cajas Presenciales con dotación inicial por divisa.
-- RF-23: Cierre y Arqueo de Caja Físico con cálculo matemático de diferencias.
+- RF-23: Cierre y Arqueo Ciego de Caja Físico con cálculo matemático de diferencias (sobrante/faltante).
 - RF-24: Auditoría y Trazabilidad Inmutable de Movimientos de Efectivo.
 - RN05: Control estricto de caja abierta y un solo turno activo por cajero.
+- SCRUM-115: Vistas basadas en clases, plantillas y formularios interactivos.
 """
 
 from decimal import Decimal
+import json
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import Client, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from customers.models import Cliente
 from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 from rates.models import Currency, ExchangeRate
 from transactions.models import Transaction
+from .forms import (
+    BlindReconciliationForm,
+    CashMovementForm,
+    CashShiftOpenForm,
+)
 from .models import (
     Caja,
     CashMovement,
@@ -45,21 +54,29 @@ class CashTestCaseBase(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+
         self.user_cajero = User.objects.create_user(
             username='cajero1',
             email='cajero1@globalexchange.com.py',
             password='Password123!',
         )
+        self.user_cajero.groups.add(self.group_operator)
+
         self.user_cajero2 = User.objects.create_user(
             username='cajero2',
             email='cajero2@globalexchange.com.py',
             password='Password123!',
         )
+        self.user_cajero2.groups.add(self.group_operator)
+
         self.user_supervisor = User.objects.create_user(
             username='supervisor1',
             email='supervisor1@globalexchange.com.py',
             password='Password123!',
+            is_staff=True,
         )
+        self.user_supervisor.groups.add(self.group_operator)
 
         # Monedas base
         self.pyg, _ = Currency.objects.get_or_create(
@@ -83,6 +100,9 @@ class CashTestCaseBase(TestCase):
             status=CashRegisterStatus.CLOSED,
             is_active=True,
         )
+
+        self.client_auth = Client()
+        self.client_auth.force_login(self.user_cajero)
 
 
 class CashRegisterModelTests(CashTestCaseBase):
@@ -184,7 +204,6 @@ class CashShiftLifecycleTests(CashTestCaseBase):
             initial_balances={'PYG': 1500000, 'USD': 200},
         )
 
-        # Conteo físico exacto igual a saldo inicial (sin movimientos posteriores)
         counted = {'PYG': 1500000, 'USD': 200}
         closed_shift = CashService.close_shift(
             shift=shift,
@@ -198,7 +217,6 @@ class CashShiftLifecycleTests(CashTestCaseBase):
         self.assertEqual(closed_shift.difference_balances_json.get('PYG'), '0.0000')
         self.assertEqual(closed_shift.difference_balances_json.get('USD'), '0.0000')
 
-        # La caja debe quedar cerrada y liberada
         self.register.refresh_from_db()
         self.assertEqual(self.register.status, CashRegisterStatus.CLOSED)
         self.assertIsNone(self.register.current_cashier)
@@ -210,7 +228,6 @@ class CashShiftLifecycleTests(CashTestCaseBase):
             initial_balances={'PYG': 1000000, 'USD': 100},
         )
 
-        # Faltante en PYG (-50.000) y Sobrante en USD (+10)
         counted = {'PYG': 950000, 'USD': 110}
         closed_shift = CashService.close_shift(
             shift=shift,
@@ -277,7 +294,6 @@ class CashMovementTests(CashTestCaseBase):
         self.assertEqual(self.shift.calculate_current_balance('USD'), Decimal('300.0000'))
 
     def test_insufficient_cash_balance_error_on_excessive_withdrawal(self) -> None:
-        # Intento de egresar 600 USD cuando solo hay 500 USD
         with self.assertRaises(InsufficientCashBalanceError):
             CashService.register_movement(
                 shift=self.shift,
@@ -309,7 +325,6 @@ class CashMovementTests(CashTestCaseBase):
             cashier=self.user_cajero,
         )
 
-        # Modificación prohibida (RF-24)
         mov.amount = Decimal('300000.0000')
         with self.assertRaises(ValidationError):
             mov.save()
@@ -324,7 +339,6 @@ class CashMovementTests(CashTestCaseBase):
             cashier=self.user_cajero,
         )
 
-        # Eliminación prohibida (RF-24)
         with self.assertRaises(ValidationError):
             mov.delete()
 
@@ -341,7 +355,6 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
             keycloak_user_id='sub-keycloak-cajero1',
         )
 
-        # Cliente de prueba
         self.cliente = Cliente.objects.create(
             nombre='Juan Pérez',
             documento_ruc='1234567-8',
@@ -350,13 +363,11 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
             is_active=True,
         )
 
-        # Entidad financiera
         self.entidad, _ = EntidadFinanciera.objects.get_or_create(
             nombre='Ventanilla Casa Central',
             defaults={'tipo': EntidadFinanciera.TipoEntidad.BANCO, 'activo': True},
         )
 
-        # Medio de pago en Efectivo
         self.pay_method = PaymentMethod.objects.create(
             cliente=self.cliente,
             tipo_medio=PaymentMethod.TipoMedio.EFECTIVO,
@@ -366,7 +377,6 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
             activo=True,
         )
 
-        # Medio de acreditación en Efectivo
         self.rec_method = ReceivingMethod.objects.create(
             cliente=self.cliente,
             entidad_bancaria=self.entidad,
@@ -376,7 +386,6 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
             activo=True,
         )
 
-        # Tasa de cambio PYG/USD
         now = timezone.now()
         self.rate = ExchangeRate.objects.create(
             base_currency=self.usd,
@@ -389,7 +398,6 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
         )
 
     def test_register_transaction_cash_in_and_out(self) -> None:
-        # Transacción de compra de 100 USD entregando 740.000 PYG
         tx = Transaction.objects.create(
             codigo_referencia='TX-TEST-CASH-001',
             cliente=self.cliente,
@@ -419,22 +427,17 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
         mov_in = movements[0]
         mov_out = movements[1]
 
-        # Cliente pagó 100 USD (Entrada a la caja)
         self.assertEqual(mov_in.flow, MovementFlow.IN)
         self.assertEqual(mov_in.currency, self.usd)
         self.assertEqual(mov_in.amount, Decimal('100.0000'))
         self.assertEqual(mov_in.transaction, tx)
 
-        # Caja entregó 740.000 PYG (Salida de la caja)
         self.assertEqual(mov_out.flow, MovementFlow.OUT)
         self.assertEqual(mov_out.currency, self.pyg)
         self.assertEqual(mov_out.amount, Decimal('740000.0000'))
         self.assertEqual(mov_out.transaction, tx)
 
-        # Balances verificados
-        # USD: 2000 inicial + 100 in = 2100
         self.assertEqual(self.shift.calculate_current_balance('USD'), Decimal('2100.0000'))
-        # PYG: 10.000.000 inicial - 740.000 out = 9.260.000
         self.assertEqual(self.shift.calculate_current_balance('PYG'), Decimal('9260000.0000'))
 
     def test_get_shift_summary(self) -> None:
@@ -443,3 +446,294 @@ class CashTransactionIntegrationTests(CashTestCaseBase):
         self.assertEqual(summary['cash_register'], self.register.register_code)
         self.assertEqual(summary['status'], ShiftStatus.OPEN)
         self.assertTrue(len(summary['currencies']) >= 2)
+
+
+# ==============================================================================
+# PRUEBAS DE FORMULARIOS (SCRUM-115)
+# ==============================================================================
+
+class CashFormsTests(CashTestCaseBase):
+    """Pruebas de los formularios de apertura, movimientos y arqueo ciego (SCRUM-115)."""
+
+    def test_cash_shift_open_form_valid(self) -> None:
+        form_data = {
+            'cash_register': self.register.id,
+            'initial_PYG': '1500000',
+            'initial_USD': '300.00',
+            'opening_notes': 'Apertura de prueba',
+        }
+        form = CashShiftOpenForm(data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+        shift = form.save(cashier=self.user_cajero, keycloak_user_id='sub-cajero-01')
+        self.assertEqual(shift.status, ShiftStatus.OPEN)
+        self.assertEqual(shift.cash_register, self.register)
+        self.assertEqual(shift.initial_balances_json.get('PYG'), '1500000.0000')
+        self.assertEqual(shift.initial_balances_json.get('USD'), '300.0000')
+
+    def test_cash_shift_open_form_unavailable_register(self) -> None:
+        # Abrir caja previamente
+        CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero2,
+            initial_balances={'PYG': 1000},
+        )
+        form = CashShiftOpenForm(data={'cash_register': self.register.id})
+        self.assertFalse(form.is_valid())
+        self.assertIn('cash_register', form.errors)
+
+    def test_cash_movement_form_deposit_valid(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 500000},
+        )
+        form_data = {
+            'movement_type': MovementType.MANUAL_DEPOSIT,
+            'currency': self.pyg.id,
+            'amount': '250000',
+            'concept': 'Dotación extra de caja',
+            'receipt_number': 'REC-MANUAL-01',
+        }
+        form = CashMovementForm(shift, data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+        mov = form.save(cashier=self.user_cajero)
+        self.assertEqual(mov.flow, MovementFlow.IN)
+        self.assertEqual(mov.amount, Decimal('250000.0000'))
+        self.assertEqual(shift.calculate_current_balance('PYG'), Decimal('750000.0000'))
+
+    def test_cash_movement_form_withdrawal_insufficient_funds(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'USD': 100},
+        )
+        form_data = {
+            'movement_type': MovementType.MANUAL_WITHDRAWAL,
+            'currency': self.usd.id,
+            'amount': '150.00',  # Supera saldo de 100
+            'concept': 'Remesa excesiva',
+        }
+        form = CashMovementForm(shift, data=form_data)
+        self.assertFalse(form.is_valid())
+        self.assertIn('amount', form.errors)
+
+    def test_blind_reconciliation_form_valid(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000000, 'USD': 200},
+        )
+        # Formulario de arqueo ciego donde se ingresan montos contados físicamente
+        form_data = {
+            'counted_PYG': '1000000',
+            'counted_USD': '200',
+            'closing_notes': 'Arqueo ciego exacto',
+        }
+        form = BlindReconciliationForm(shift, data=form_data)
+        self.assertTrue(form.is_valid(), form.errors)
+        closed_shift = form.save(closed_by=self.user_supervisor)
+        self.assertEqual(closed_shift.status, ShiftStatus.RECONCILED)
+        self.assertEqual(closed_shift.difference_balances_json.get('PYG'), '0.0000')
+
+
+# ==============================================================================
+# PRUEBAS DE VISTAS BASADAS EN CLASES Y FLUJOS WEB (SCRUM-115)
+# ==============================================================================
+
+class CashViewsTests(CashTestCaseBase):
+    """Pruebas de vistas, controladores y plantillas para el módulo de Cajas (SCRUM-115)."""
+
+    def test_dashboard_anonymous_redirects(self) -> None:
+        client = Client()
+        res = client.get(reverse('cash:dashboard'))
+        self.assertEqual(res.status_code, 302)
+
+    def test_dashboard_without_active_shift(self) -> None:
+        res = self.client_auth.get(reverse('cash:dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "No cuenta con un turno de caja abierto")
+        self.assertContains(res, "Abrir Turno en Ventanilla")
+        self.assertContains(res, "CAJA-01")
+
+    def test_dashboard_with_active_shift(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 2000000, 'USD': 500},
+        )
+        res = self.client_auth.get(reverse('cash:dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, shift.shift_number)
+        self.assertContains(res, "CAJA-01")
+        self.assertContains(res, "TURNO ACTIVO")
+        self.assertContains(res, "Registrar Movimiento Manual")
+        self.assertContains(res, "Cerrar y Arquear Turno")
+
+    def test_shift_open_view_get(self) -> None:
+        res = self.client_auth.get(reverse('cash:shift_open'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "Apertura de Turno en Ventanilla")
+        self.assertContains(res, "CAJA-01")
+
+    def test_shift_open_view_post_success(self) -> None:
+        data = {
+            'cash_register': self.register.id,
+            'initial_PYG': '3000000',
+            'initial_USD': '400',
+            'opening_notes': 'Turno tarde',
+        }
+        res = self.client_auth.post(reverse('cash:shift_open'), data=data, follow=True)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "abierto exitosamente")
+
+        self.register.refresh_from_db()
+        self.assertEqual(self.register.status, CashRegisterStatus.OPEN)
+        self.assertEqual(self.register.current_cashier, self.user_cajero)
+
+    def test_shift_open_view_when_already_open_redirects(self) -> None:
+        CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000},
+        )
+        res = self.client_auth.get(reverse('cash:shift_open'))
+        self.assertRedirects(res, reverse('cash:dashboard'))
+
+    def test_movement_create_view_get_and_post(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000000},
+        )
+        # GET
+        res_get = self.client_auth.get(reverse('cash:movement_create'))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertContains(res_get, "Registrar Movimiento de Efectivo")
+
+        # POST depósito
+        data = {
+            'movement_type': MovementType.MANUAL_DEPOSIT,
+            'currency': self.pyg.id,
+            'amount': '500000',
+            'concept': 'Dotación tesorería',
+        }
+        res_post = self.client_auth.post(reverse('cash:movement_create'), data=data, follow=True)
+        self.assertEqual(res_post.status_code, 200)
+        self.assertContains(res_post, "registrado con éxito")
+        self.assertEqual(shift.calculate_current_balance('PYG'), Decimal('1500000.0000'))
+
+    def test_movement_create_view_insufficient_funds_fails(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'USD': 100},
+        )
+        data = {
+            'movement_type': MovementType.MANUAL_WITHDRAWAL,
+            'currency': self.usd.id,
+            'amount': '500.00',  # Supera saldo de 100 USD
+            'concept': 'Retiro no permitido',
+        }
+        res = self.client_auth.post(reverse('cash:movement_create'), data=data)
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "Saldo insuficiente en caja")
+
+    def test_shift_close_view_blind_reconciliation_reconciled(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 2000000, 'USD': 500},
+        )
+
+        # GET arqueo ciego (no debe mostrar el saldo esperado al cajero)
+        res_get = self.client_auth.get(reverse('cash:shift_close', kwargs={'pk': shift.pk}))
+        self.assertEqual(res_get.status_code, 200)
+        self.assertContains(res_get, "Protocolo de Arqueo Ciego")
+        self.assertContains(res_get, "Total Físico Contado en PYG")
+        self.assertContains(res_get, "Total Físico Contado en USD")
+
+        # POST con arqueo cuadrado
+        data = {
+            'counted_PYG': '2000000',
+            'counted_USD': '500',
+            'closing_notes': 'Conteo exacto',
+        }
+        res_post = self.client_auth.post(
+            reverse('cash:shift_close', kwargs={'pk': shift.pk}),
+            data=data,
+            follow=True,
+        )
+        self.assertEqual(res_post.status_code, 200)
+        shift.refresh_from_db()
+        self.assertEqual(shift.status, ShiftStatus.RECONCILED)
+        self.assertContains(res_post, "ACTA DE ARQUEO Y CIERRE")
+        self.assertContains(res_post, "ARQUEO CUADRADO")
+
+    def test_shift_close_view_blind_reconciliation_discrepancy(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000000, 'USD': 300},
+        )
+        # Faltante en PYG (-20.000) y Sobrante en USD (+50)
+        data = {
+            'counted_PYG': '980000',
+            'counted_USD': '350',
+            'closing_notes': 'Diferencias justificadas',
+        }
+        res = self.client_auth.post(
+            reverse('cash:shift_close', kwargs={'pk': shift.pk}),
+            data=data,
+            follow=True,
+        )
+        self.assertEqual(res.status_code, 200)
+        shift.refresh_from_db()
+        self.assertEqual(shift.status, ShiftStatus.DISCREPANCY)
+        self.assertContains(res, "CERRADO CON DIFERENCIAS")
+        self.assertContains(res, "Faltante: -20000.0000")
+        self.assertContains(res, "Sobrante: +50.0000")
+
+    def test_shift_detail_and_receipt_view(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000000},
+        )
+        CashService.close_shift(shift, counted_balances={'PYG': 1000000}, closed_by=self.user_supervisor)
+
+        res_detail = self.client_auth.get(reverse('cash:shift_detail', kwargs={'pk': shift.pk}))
+        self.assertEqual(res_detail.status_code, 200)
+        self.assertContains(res_detail, "ACTA DE ARQUEO Y CIERRE")
+        self.assertContains(res_detail, shift.shift_number)
+
+        res_receipt = self.client_auth.get(reverse('cash:shift_receipt', kwargs={'pk': shift.pk}))
+        self.assertEqual(res_receipt.status_code, 200)
+        self.assertContains(res_receipt, "Imprimir Acta Oficial")
+
+    def test_shift_list_and_register_list_views(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1000000},
+        )
+        res_shifts = self.client_auth.get(reverse('cash:shift_list'))
+        self.assertEqual(res_shifts.status_code, 200)
+        self.assertContains(res_shifts, shift.shift_number)
+
+        res_regs = self.client_auth.get(reverse('cash:register_list'))
+        self.assertEqual(res_regs.status_code, 200)
+        self.assertContains(res_regs, "CAJA-01")
+
+    def test_shift_status_api_view(self) -> None:
+        shift = CashService.open_shift(
+            cash_register=self.register,
+            cashier=self.user_cajero,
+            initial_balances={'PYG': 1500000},
+        )
+        res = self.client_auth.get(reverse('cash:api_shift_status', kwargs={'pk': shift.pk}))
+        self.assertEqual(res.status_code, 200)
+        data = json.loads(res.content)
+        self.assertTrue(data['success'])
+        self.assertEqual(data['shift_number'], shift.shift_number)
+        self.assertTrue(data['is_open'])
+        self.assertIn('summary', data)

@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Cajas y Turnos — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto;">
+    <!-- Encabezado Principal -->
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                💵 Gestión de Cajas y Efectivo
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Control de ventanilla presencial, movimientos físicos y arqueo de caja (RF-22, RF-23, RF-24).
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a href="{% url 'cash:shift_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                📋 Historial de Turnos
+            </a>
+            <a href="{% url 'cash:register_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                🏢 Estado de Cajas
+            </a>
+            {% if not active_shift %}
+            <a href="{% url 'cash:shift_open' %}" class="btn btn-primary" style="background: var(--success); border-color: var(--success);">
+                🔓 Abrir Turno de Caja
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if active_shift %}
+    <!-- ========================================== -->
+    <!-- ESTADO: TURNO ACTIVO ABIERTO               -->
+    <!-- ========================================== -->
+    <div class="card" style="padding: 1.5rem; margin-bottom: 1.5rem; border-left: 4px solid var(--success); background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, rgba(30, 41, 59, 1) 100%);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                    <span style="background: var(--success-bg); color: var(--success); border: 1px solid var(--success); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">
+                        ● TURNO ACTIVO
+                    </span>
+                    <span style="color: var(--text-muted); font-size: 0.85rem;">
+                        Iniciado: {{ active_shift.opened_at|date:"d/m/Y H:i:s" }}
+                    </span>
+                </div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">
+                    {{ active_shift.shift_number }}
+                </h2>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">
+                    Caja: <strong>{{ active_shift.cash_register.register_code }} — {{ active_shift.cash_register.name }}</strong> ({{ active_shift.cash_register.branch_name }}) &bull; Cajero: <strong>{{ active_shift.cashier.username }}</strong>
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <a href="{% url 'cash:movement_create' %}" class="btn" style="background: var(--primary); color: #0b1120; font-weight: 700;">
+                    ➕ Registrar Movimiento Manual
+                </a>
+                <a href="{% url 'cash:shift_close' active_shift.pk %}" class="btn" style="background: var(--danger); color: white; font-weight: 700;">
+                    🔒 Cerrar y Arquear Turno
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Saldos en Vivo por Divisa -->
+    <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 0.85rem; color: var(--text-main);">
+        📊 Saldos Disponibles en Gaveta (En Tiempo Real)
+    </h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1.75rem;">
+        {% for c in currencies_summary %}
+        <div class="card" style="padding: 1.25rem; border-top: 3px solid var(--primary); background: var(--bg-card);">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.1rem; font-weight: 800; color: var(--primary);">{{ c.currency }}</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">{{ c.movements_count }} movs</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.75rem;">
+                {{ c.expected_balance }}
+            </div>
+            <div style="border-top: 1px solid var(--border-color); padding-top: 0.5rem; display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted);">
+                <span>Fondo: <strong>{{ c.initial_balance }}</strong></span>
+                <span style="color: var(--success);">+{{ c.total_in }}</span>
+                <span style="color: var(--danger);">-{{ c.total_out }}</span>
+            </div>
+        </div>
+        {% empty %}
+        <div class="card" style="padding: 1.5rem; text-align: center; grid-column: 1 / -1; color: var(--text-muted);">
+            No hay saldos registrados para este turno.
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Últimos Movimientos de Efectivo -->
+    <div class="card" style="padding: 1.5rem; margin-bottom: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+            <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main);">
+                ⚡ Movimientos del Turno (Auditoría Forense Inmutable)
+            </h3>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">
+                Total registrados: <strong>{{ summary.total_movements }}</strong>
+            </span>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem;">
+                        <th style="padding: 0.75rem 0.5rem;">Hora</th>
+                        <th style="padding: 0.75rem 0.5rem;">Tipo / Concepto</th>
+                        <th style="padding: 0.75rem 0.5rem; text-align: center;">Flujo</th>
+                        <th style="padding: 0.75rem 0.5rem;">Divisa</th>
+                        <th style="padding: 0.75rem 0.5rem; text-align: right;">Monto</th>
+                        <th style="padding: 0.75rem 0.5rem; text-align: right;">Saldo Resultante</th>
+                        <th style="padding: 0.75rem 0.5rem;">Comprobante</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in recent_movements %}
+                    <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                        <td style="padding: 0.75rem 0.5rem; color: var(--text-muted);">
+                            {{ m.created_at|date:"H:i:s" }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem;">
+                            <div style="font-weight: 600; color: var(--text-main);">{{ m.get_movement_type_display }}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-subtle);">{{ m.concept }}</div>
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                            {% if m.flow == 'IN' %}
+                            <span style="background: var(--success-bg); color: var(--success); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">
+                                ▲ IN
+                            </span>
+                            {% else %}
+                            <span style="background: var(--danger-bg); color: var(--danger); padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">
+                                ▼ OUT
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; font-weight: 700;">
+                            {{ m.currency.code }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; text-align: right; font-weight: 800; {% if m.flow == 'IN' %}color: var(--success);{% else %}color: var(--danger);{% endif %}">
+                            {% if m.flow == 'IN' %}+{% else %}-{% endif %}{{ m.amount|floatformat:2 }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; text-align: right; font-weight: 700; color: var(--text-main);">
+                            {{ m.resulting_balance|floatformat:2 }}
+                        </td>
+                        <td style="padding: 0.75rem 0.5rem; color: var(--text-subtle); font-size: 0.8rem;">
+                            {{ m.receipt_number|default:"-" }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-muted);">
+                            No hay movimientos registrados aún en este turno.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% else %}
+    <!-- ========================================== -->
+    <!-- ESTADO: SIN TURNO ACTIVO                   -->
+    <!-- ========================================== -->
+    <div class="card" style="padding: 2.5rem; text-align: center; margin-bottom: 2rem;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
+        <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">
+            No cuenta con un turno de caja abierto
+        </h2>
+        <p style="color: var(--text-muted); max-width: 550px; margin: 0 auto 1.5rem auto; font-size: 0.95rem;">
+            Para realizar cobros o entregas de efectivo por operaciones cambiarias (RN05), debe abrir formalmente un turno en una caja registradora declarando el fondo inicial físico.
+        </p>
+        <a href="{% url 'cash:shift_open' %}" class="btn btn-primary" style="padding: 0.75rem 1.75rem; font-size: 1rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.5rem;">
+            🔓 Abrir Turno en Ventanilla
+        </a>
+    </div>
+
+    <!-- Cajas Registradoras de la Sucursal -->
+    <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+        🏢 Cajas Físicas de la Sucursal
+    </h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        {% for reg in registers %}
+        <div class="card" style="padding: 1.25rem; border-left: 3px solid {% if reg.status == 'OPEN' %}var(--success){% elif reg.status == 'CLOSED' %}var(--text-subtle){% else %}var(--warning){% endif %};">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem;">
+                <span style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">{{ reg.register_code }}</span>
+                <span style="font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; {% if reg.status == 'OPEN' %}background: var(--success-bg); color: var(--success);{% else %}background: rgba(148, 163, 184, 0.1); color: var(--text-muted);{% endif %}">
+                    {{ reg.get_status_display }}
+                </span>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.5rem;">{{ reg.name }} ({{ reg.branch_name }})</p>
+            {% if reg.status == 'OPEN' and reg.current_cashier %}
+            <p style="font-size: 0.8rem; color: var(--primary);">Operado por: <strong>{{ reg.current_cashier.username }}</strong></p>
+            {% else %}
+            <p style="font-size: 0.8rem; color: var(--text-subtle);">Disponible para asignación</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if recent_shifts %}
+    <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+        📜 Sus Últimos Turnos Cerrados
+    </h3>
+    <div class="card" style="padding: 1rem;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-align: left; font-size: 0.75rem; text-transform: uppercase;">
+                    <th style="padding: 0.5rem;">Nº Turno</th>
+                    <th style="padding: 0.5rem;">Caja</th>
+                    <th style="padding: 0.5rem;">Apertura</th>
+                    <th style="padding: 0.5rem;">Cierre</th>
+                    <th style="padding: 0.5rem;">Estado</th>
+                    <th style="padding: 0.5rem; text-align: right;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in recent_shifts %}
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.5rem; font-weight: 700; color: var(--primary);">{{ s.shift_number }}</td>
+                    <td style="padding: 0.5rem;">{{ s.cash_register.register_code }}</td>
+                    <td style="padding: 0.5rem; color: var(--text-muted);">{{ s.opened_at|date:"d/m/Y H:i" }}</td>
+                    <td style="padding: 0.5rem; color: var(--text-muted);">{{ s.closed_at|date:"d/m/Y H:i"|default:"-" }}</td>
+                    <td style="padding: 0.5rem;">
+                        <span style="font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; {% if s.status == 'RECONCILED' %}background: var(--success-bg); color: var(--success);{% else %}background: var(--danger-bg); color: var(--danger);{% endif %}">
+                            {{ s.get_status_display }}
+                        </span>
+                    </td>
+                    <td style="padding: 0.5rem; text-align: right;">
+                        <a href="{% url 'cash:shift_detail' s.pk %}" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem; background: var(--bg-card-hover); color: var(--text-main);">
+                            Ver Acta
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}
+

@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}Acta de Arqueo y Cierre de Caja — {{ shift.shift_number }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+    <!-- Barra superior de navegación / Imprimir (Oculta en Print) -->
+    <div class="no-print" style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <a href="{% url 'cash:dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver al Dashboard de Caja
+        </a>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="{% url 'cash:shift_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                📋 Ver Todos los Turnos
+            </a>
+            <button onclick="window.print();" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 700;">
+                🖨️ Imprimir Acta Oficial
+            </button>
+        </div>
+    </div>
+
+    <!-- Contenedor del Acta / Comprobante Imprimible -->
+    <div class="card printable-area" style="padding: 2.5rem; background: var(--bg-card); border: 1px solid var(--border-color);">
+        <!-- Encabezado Institucional -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--border-color); padding-bottom: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <div style="font-size: 1.5rem; font-weight: 900; letter-spacing: -0.5px; color: var(--primary); margin-bottom: 0.25rem;">
+                    GLOBAL EXCHANGE S.A.
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    RUC: 80012345-6 &bull; Sucursal: {{ shift.cash_register.branch_name }}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    Casa Matriz — Asunción, Paraguay
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 1.25rem; font-weight: 800; color: var(--text-main);">
+                    ACTA DE ARQUEO Y CIERRE
+                </div>
+                <div style="font-size: 1.1rem; font-weight: 800; color: var(--primary); margin-top: 0.25rem;">
+                    {{ shift.shift_number }}
+                </div>
+                <div style="margin-top: 0.5rem;">
+                    {% if shift.status == 'RECONCILED' %}
+                    <span style="background: var(--success-bg); color: var(--success); border: 1px solid var(--success); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 800;">
+                        ✓ ARQUEO CUADRADO
+                    </span>
+                    {% elif shift.status == 'DISCREPANCY' %}
+                    <span style="background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 800;">
+                        ⚠ CERRADO CON DIFERENCIAS
+                    </span>
+                    {% elif shift.status == 'OPEN' %}
+                    <span style="background: rgba(14, 165, 233, 0.15); color: var(--info); border: 1px solid var(--info); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 800;">
+                        ● EN OPERACIÓN
+                    </span>
+                    {% else %}
+                    <span style="background: rgba(148, 163, 184, 0.1); color: var(--text-muted); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 800;">
+                        {{ shift.get_status_display }}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Metadatos de la Jornada -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; background: rgba(15, 23, 42, 0.5); padding: 1rem 1.25rem; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.875rem;">
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block;">Caja / Ventanilla</span>
+                <strong style="color: var(--text-main);">{{ shift.cash_register.register_code }}</strong> ({{ shift.cash_register.name }})
+            </div>
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block;">Cajero Responsable</span>
+                <strong style="color: var(--text-main);">{{ shift.cashier.username }}</strong>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block;">Apertura</span>
+                <span style="color: var(--text-main);">{{ shift.opened_at|date:"d/m/Y H:i:s" }}</span>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block;">Cierre / Arqueo</span>
+                <span style="color: var(--text-main);">{{ shift.closed_at|date:"d/m/Y H:i:s"|default:"En curso" }}</span>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display: block;">Supervisado / Cerrado Por</span>
+                <span style="color: var(--text-main);">{{ shift.closed_by.username|default:shift.cashier.username }}</span>
+            </div>
+        </div>
+
+        <!-- Tabla Comparativa de Arqueo (Contable vs Físico) -->
+        <div style="margin-bottom: 2rem;">
+            <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.75rem;">
+                ⚖️ Cuadro Comparativo de Arqueo Físico vs. Saldo Contable
+            </h3>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem; text-align: right;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">
+                            <th style="padding: 0.75rem 0.5rem; text-align: left;">Divisa</th>
+                            <th style="padding: 0.75rem 0.5rem;">Fondo Inicial</th>
+                            <th style="padding: 0.75rem 0.5rem;">Total Ingresos</th>
+                            <th style="padding: 0.75rem 0.5rem;">Total Egresos</th>
+                            <th style="padding: 0.75rem 0.5rem;">Saldo Esperado (Sistema)</th>
+                            <th style="padding: 0.75rem 0.5rem;">Saldo Físico (Declarado)</th>
+                            <th style="padding: 0.75rem 0.5rem; text-align: center;">Diferencia</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in currencies_summary %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding: 0.75rem 0.5rem; text-align: left; font-weight: 800; color: var(--primary);">
+                                {{ c.currency }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; color: var(--text-muted);">
+                                {{ c.initial_balance }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; color: var(--success); font-weight: 600;">
+                                +{{ c.total_in }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; color: var(--danger); font-weight: 600;">
+                                -{{ c.total_out }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; font-weight: 700; color: var(--text-main);">
+                                {{ c.expected_balance }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; font-weight: 800; color: var(--text-main);">
+                                {{ c.counted_balance }}
+                            </td>
+                            <td style="padding: 0.75rem 0.5rem; text-align: center;">
+                                {% if c.difference == '0.0000' or c.difference == '0.00' or c.difference == '0' %}
+                                <span style="background: var(--success-bg); color: var(--success); padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 700; font-size: 0.8rem;">
+                                    Cuadrado (0.00)
+                                </span>
+                                {% elif '-' in c.difference %}
+                                <span style="background: var(--danger-bg); color: var(--danger); padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 800; font-size: 0.8rem;">
+                                    Faltante: {{ c.difference }}
+                                </span>
+                                {% else %}
+                                <span style="background: rgba(14, 165, 233, 0.15); color: var(--info); padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 800; font-size: 0.8rem;">
+                                    Sobrante: +{{ c.difference }}
+                                </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if shift.opening_notes or shift.closing_notes %}
+        <!-- Observaciones -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; font-size: 0.85rem;">
+            {% if shift.opening_notes %}
+            <div style="background: rgba(15, 23, 42, 0.3); border: 1px solid var(--border-color); padding: 0.85rem 1rem; border-radius: 6px;">
+                <span style="font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Observaciones de Apertura:</span>
+                <p style="margin: 0; color: var(--text-main);">{{ shift.opening_notes }}</p>
+            </div>
+            {% endif %}
+            {% if shift.closing_notes %}
+            <div style="background: rgba(15, 23, 42, 0.3); border: 1px solid var(--border-color); padding: 0.85rem 1rem; border-radius: 6px;">
+                <span style="font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Observaciones de Cierre / Arqueo:</span>
+                <p style="margin: 0; color: var(--text-main);">{{ shift.closing_notes }}</p>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Detalle de Movimientos de la Jornada -->
+        <div style="margin-bottom: 2.5rem;">
+            <h3 style="font-size: 1.05rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.75rem;">
+                📜 Detalle de Movimientos Físicos (Auditoría RF-24)
+            </h3>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-transform: uppercase;">
+                            <th style="padding: 0.5rem;"># ID</th>
+                            <th style="padding: 0.5rem;">Hora</th>
+                            <th style="padding: 0.5rem;">Tipo</th>
+                            <th style="padding: 0.5rem;">Concepto</th>
+                            <th style="padding: 0.5rem; text-align: center;">Flujo</th>
+                            <th style="padding: 0.5rem;">Moneda</th>
+                            <th style="padding: 0.5rem; text-align: right;">Monto</th>
+                            <th style="padding: 0.5rem; text-align: right;">Saldo Caja</th>
+                            <th style="padding: 0.5rem;">Comprobante</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for m in movements %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding: 0.5rem; color: var(--text-subtle);">#{{ m.id }}</td>
+                            <td style="padding: 0.5rem; color: var(--text-muted);">{{ m.created_at|date:"H:i:s" }}</td>
+                            <td style="padding: 0.5rem; font-weight: 600;">{{ m.get_movement_type_display }}</td>
+                            <td style="padding: 0.5rem; color: var(--text-muted);">{{ m.concept }}</td>
+                            <td style="padding: 0.5rem; text-align: center;">
+                                {% if m.flow == 'IN' %}
+                                <span style="color: var(--success); font-weight: 700;">▲ IN</span>
+                                {% else %}
+                                <span style="color: var(--danger); font-weight: 700;">▼ OUT</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 0.5rem; font-weight: 700;">{{ m.currency.code }}</td>
+                            <td style="padding: 0.5rem; text-align: right; font-weight: 700;">{{ m.amount|floatformat:2 }}</td>
+                            <td style="padding: 0.5rem; text-align: right; color: var(--text-main);">{{ m.resulting_balance|floatformat:2 }}</td>
+                            <td style="padding: 0.5rem; color: var(--text-subtle);">{{ m.receipt_number|default:"-" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
+                                No se registraron movimientos en este turno.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Sección de Firmas y Trazabilidad (Ideal para Impresión) -->
+        <div style="border-top: 1px dashed var(--border-color); padding-top: 2rem; margin-top: 2rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; text-align: center;">
+                <div>
+                    <div style="border-top: 1px solid var(--border-color); margin-top: 3rem; padding-top: 0.5rem;">
+                        <strong style="color: var(--text-main); font-size: 0.9rem; display: block;">{{ shift.cashier.username }}</strong>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Firma del Cajero Responsable</span>
+                        {% if shift.keycloak_user_id %}
+                        <div style="font-size: 0.7rem; color: var(--text-subtle); margin-top: 0.25rem;">Keycloak sub: {{ shift.keycloak_user_id }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div>
+                    <div style="border-top: 1px solid var(--border-color); margin-top: 3rem; padding-top: 0.5rem;">
+                        <strong style="color: var(--text-main); font-size: 0.9rem; display: block;">{{ shift.closed_by.username|default:"Supervisor de Caja" }}</strong>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Firma del Supervisor / Tesorería</span>
+                        <div style="font-size: 0.7rem; color: var(--text-subtle); margin-top: 0.25rem;">Control de Conformidad de Arqueo</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 2rem; font-size: 0.75rem; color: var(--text-subtle);">
+                Documento generado automáticamente por el Módulo de Cajas de Global Exchange &bull; {{ now|date:"d/m/Y H:i:s" }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+@media print {
+    body {
+        background: white !important;
+        color: black !important;
+    }
+    .navbar, .no-print, header, footer {
+        display: none !important;
+    }
+    .card {
+        background: white !important;
+        border: 1px solid #ccc !important;
+        color: black !important;
+        box-shadow: none !important;
+        padding: 1rem !important;
+    }
+    .printable-area * {
+        color: black !important;
+    }
+}
+</style>
+{% endblock %}
+

@@ -20,6 +20,14 @@ apps.cash.apps module
    :show-inheritance:
    :undoc-members:
 
+apps.cash.forms module
+----------------------
+
+.. automodule:: apps.cash.forms
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 apps.cash.models module
 -----------------------
 
@@ -32,6 +40,22 @@ apps.cash.services module
 -------------------------
 
 .. automodule:: apps.cash.services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.urls module
+---------------------
+
+.. automodule:: apps.cash.urls
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.views module
+----------------------
+
+.. automodule:: apps.cash.views
    :members:
    :show-inheritance:
    :undoc-members:
@@ -51,4 +75,3 @@ Module contents
    :members:
    :show-inheritance:
    :undoc-members:
-

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Apertura de Turno de Caja — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <!-- Breadcrumb / Volver -->
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver a Gestión de Cajas
+        </a>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <div style="margin-bottom: 1.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 2rem;">🔓</span>
+                <div>
+                    <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main);">
+                        Apertura de Turno en Ventanilla
+                    </h1>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">
+                        Registro de asignación de puesto físico y dotación de fondo inicial en efectivo (RF-22, RN05).
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="." novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div style="background: var(--danger-bg); border-left: 4px solid var(--danger); padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem; color: #fca5a5;">
+                {{ form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <!-- Sección 1: Selección de Caja -->
+            <div style="margin-bottom: 1.75rem;">
+                <label for="{{ form.cash_register.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                    {{ form.cash_register.label }} <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.cash_register }}
+                {% if form.cash_register.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                    {{ form.cash_register.errors.0 }}
+                </div>
+                {% endif %}
+                <p style="font-size: 0.8rem; color: var(--text-subtle); margin-top: 0.35rem;">
+                    {{ form.cash_register.help_text }}
+                </p>
+            </div>
+
+            <!-- Sección 2: Dotación de Fondo Inicial por Divisa -->
+            <div style="margin-bottom: 1.75rem; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.25rem;">
+                    💵 Declaración de Fondo Inicial de Efectivo (RF-22)
+                </h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+                    Ingrese el monto físico inicial recibido en la gaveta para cada divisa con la que operará. Si no recibe fondo en alguna moneda, deje 0.
+                </p>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+                    {% for cfield in form.currency_fields %}
+                    <div style="background: var(--bg-card); padding: 1rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <label for="{{ cfield.bound_field.id_for_label }}" style="display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-main);">
+                            <span>{{ cfield.currency.code }} — {{ cfield.currency.name }}</span>
+                            <span style="color: var(--primary);">{{ cfield.currency.symbol }}</span>
+                        </label>
+                        {{ cfield.bound_field }}
+                        {% if cfield.bound_field.errors %}
+                        <div style="color: var(--danger); font-size: 0.8rem; margin-top: 0.25rem;">
+                            {{ cfield.bound_field.errors.0 }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Sección 3: Observaciones -->
+            <div style="margin-bottom: 2rem;">
+                <label for="{{ form.opening_notes.id_for_label }}" style="display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">
+                    {{ form.opening_notes.label }}
+                </label>
+                {{ form.opening_notes }}
+                {% if form.opening_notes.errors %}
+                <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem;">
+                    {{ form.opening_notes.errors.0 }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Botones de Acción -->
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                <a href="{% url 'cash:dashboard' %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main);">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary" style="background: var(--success); border-color: var(--success); font-weight: 700; padding: 0.65rem 1.5rem;">
+                    🔓 Confirmar Apertura de Turno
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
