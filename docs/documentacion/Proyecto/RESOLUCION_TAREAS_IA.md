@@ -29,6 +29,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-106** | Generación de docstrings Sphinx, actualización de docs/chat_ia.md y etiquetado Git Tag v4.0.0-sprint4 | Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-121** | Terminal Táctil /kiosk/ y Consulta, Visualización y Descarga de KuDE PDF y XML | Hotfix / Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-122** | Protocolo de Cuota y FacturaSeguraClient con Reserva Blindada de 10 Pruebas y KioskCashService | Sprint 4 / Kiosk | Mauricio González | Finalizado |
+| **SCRUM-114** | Modelado de datos para Cajas, Turnos y Movimientos de Efectivo en `apps/cash/` | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
 
 
 ---
@@ -626,5 +627,43 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `transactions/tests_kiosk_cash_facturasegura.py`
   * `transactions/tests.py`
   * `docs/documentacion/SCRUM-122.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 22. SCRUM-114: Modelado de datos para Cajas, Turnos y Movimientos de Efectivo en apps/cash/
+
+* **Objetivo:** Construir la aplicación `apps/cash/` y sus modelos de datos para puestos físicos de atención (Cajas), sesiones operativas de trabajo con dotación de fondo inicial y arqueo (Turnos) y trazabilidad inmutable de entradas y salidas de efectivo (Movimientos), cumpliendo las normativas RF-22, RF-23, RF-24 y RN05.
+* **Aportes y Solución con IA:**
+  * **Modelado de Dominio (`apps/cash/models.py`):**
+    * `CashRegister` (alias `Caja`): Representación de la terminal física en ventanilla, código unívoco, sucursal, estado operativo (`CLOSED`, `OPEN`, `MAINTENANCE`, `INACTIVE`), cajero asignado y bloqueo de apertura para cajas deshabilitadas.
+    * `CashShift` (alias `TurnoCaja`): Ciclo de vida de la jornada, fondo inicial por divisa (`initial_balances_json`), saldos teóricos esperados (`expected_balances_json`), conteo físico de arqueo (`final_balances_json`) y cálculo matemático de diferencias (`difference_balances_json`) con categorización en `RECONCILED` o `DISCREPANCY`.
+    * `CashMovement` (alias `MovimientoEfectivo`): Auditoría forense inmutable de movimientos físicos (8 tipos formales, flujos `IN`/`OUT`, saldos anteriores y resultantes, divisa, comprobantes e inmutabilidad garantizada bloqueando `save()` y `delete()`).
+  * **Capa de Servicios de Dominio (`apps/cash/services.py`):**
+    * `open_shift`: Apertura atómica con validación de RN05 (caja libre y cajero sin turnos paralelos), generación de movimientos de fondo inicial y transición de estado.
+    * `register_movement`: Registro atómico de movimientos con cálculo de saldos y prevención de descubiertos (`InsufficientCashBalanceError`).
+    * `register_transaction_cash`: Integración con transacciones cambiarias presenciales generando cobros y entregas físicas.
+    * `close_shift`: Arqueo físico formal y cálculo matemático de descuadres.
+    * `get_shift_summary`: Reporte financiero consolidado por divisa.
+  * **Administración y Documentación:**
+    * Panel de administración Django (`apps/cash/admin.py`) con badges visuales, filtros y modo estricto de solo lectura para auditoría.
+    * Documentación Sphinx con módulo `cash.rst` integrado en `modules.rst` (compilación limpia con 0 errores y 0 advertencias).
+  * **Verificación y Calidad:**
+    * Suite automatizada de 18 pruebas unitarias e integradas (`apps/cash/tests.py`) cubriendo todo el ciclo de vida y casos de borde (100% OK).
+    * Suite completa del proyecto: **518 tests aprobados al 100% de éxito (OK)**, 0 fallos, sin regresiones.
+* **Archivos intervenidos:**
+  * `apps/cash/__init__.py`
+  * `apps/cash/apps.py`
+  * `apps/cash/models.py`
+  * `apps/cash/services.py`
+  * `apps/cash/admin.py`
+  * `apps/cash/tests.py`
+  * `apps/cash/migrations/0001_initial.py`
+  * `apps/__init__.py`
+  * `config/settings/base.py`
+  * `docs/sphinx/source/cash.rst`
+  * `docs/sphinx/source/modules.rst`
+  * `docs/documentacion/SCRUM-114.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`

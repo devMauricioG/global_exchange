@@ -29,3 +29,12 @@ if hasattr(rates, 'tests'):
     sys.modules['apps.rates.tests'] = rates.tests
 if hasattr(transactions, 'tests'):
     sys.modules['apps.transactions.tests'] = transactions.tests
+
+try:
+    from . import cash
+    sys.modules['apps.cash'] = cash
+    sys.modules['cash'] = cash
+    if hasattr(cash, 'tests'):
+        sys.modules['apps.cash.tests'] = cash.tests
+except (ImportError, AttributeError):
+    pass

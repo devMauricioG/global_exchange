@@ -9,4 +9,5 @@ global_exchange
    payments
    rates
    transactions
+   cash
    config
