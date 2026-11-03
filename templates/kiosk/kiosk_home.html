@@ -130,6 +130,25 @@
             transition: width 1s linear;
         }
 
+        .btn-cancel {
+            background-color: rgba(148, 163, 184, 0.15);
+            color: #cbd5e1;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            padding: 0.5rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .btn-cancel:hover {
+            background-color: rgba(148, 163, 184, 0.3);
+            color: #ffffff;
+        }
+
         .btn-reset {
             background-color: rgba(239, 68, 68, 0.2);
             color: #fca5a5;
@@ -140,6 +159,10 @@
             font-weight: 700;
             cursor: pointer;
             transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
         }
         .btn-reset:hover {
             background-color: var(--danger);
@@ -391,6 +414,10 @@
             font-weight: 700;
             cursor: pointer;
             transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
         }
 
         .customer-status {
@@ -586,7 +613,8 @@
             <div class="timer-progress">
                 <div class="timer-progress-bar" id="timerProgressBar"></div>
             </div>
-            <button type="button" class="btn-reset" onclick="resetKiosk()">✕ Salir</button>
+            <button type="button" class="btn-cancel" onclick="resetKiosk()" title="Cancelar operación y reiniciar formulario">🔄 Reiniciar</button>
+            <a href="{% url 'home' %}" class="btn-reset" title="Salir del Kiosco y volver al portal">✕ Salir</a>
         </div>
     </header>
 

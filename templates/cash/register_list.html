@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Puestos de Atención y Cajas — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto;">
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                🏢 Puestos de Atención y Cajas Registradoras
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Inventario físico de ventanillas y terminales de atención presencial de Global Exchange.
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="{% url 'cash:dashboard' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                💵 Dashboard de Caja
+            </a>
+            <a href="{% url 'cash:shift_open' %}" class="btn btn-primary" style="background: var(--success); border-color: var(--success);">
+                🔓 Abrir Turno en Caja
+            </a>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+        {% for reg in registers %}
+        <div class="card" style="padding: 1.5rem; border-top: 4px solid {% if reg.status == 'OPEN' %}var(--success){% elif reg.status == 'CLOSED' %}var(--border-light){% elif reg.status == 'MAINTENANCE' %}var(--warning){% else %}var(--danger){% endif %};">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                <div>
+                    <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--text-main);">
+                        {{ reg.register_code }}
+                    </h2>
+                    <div style="font-size: 0.9rem; color: var(--text-muted); font-weight: 600;">
+                        {{ reg.name }}
+                    </div>
+                </div>
+                <span style="font-size: 0.75rem; font-weight: 800; padding: 0.25rem 0.6rem; border-radius: 9999px; {% if reg.status == 'OPEN' %}background: var(--success-bg); color: var(--success); border: 1px solid var(--success);{% else %}background: rgba(148, 163, 184, 0.1); color: var(--text-muted); border: 1px solid var(--border-color);{% endif %}">
+                    {{ reg.get_status_display }}
+                </span>
+            </div>
+
+            <div style="background: rgba(15, 23, 42, 0.4); padding: 0.85rem 1rem; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 1rem; font-size: 0.85rem;">
+                <div style="margin-bottom: 0.35rem; display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Sucursal:</span>
+                    <strong style="color: var(--text-main);">{{ reg.branch_name }}</strong>
+                </div>
+                <div style="margin-bottom: 0.35rem; display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Cajero Asignado:</span>
+                    {% if reg.current_cashier %}
+                    <strong style="color: var(--primary);">{{ reg.current_cashier.username }}</strong>
+                    {% else %}
+                    <span style="color: var(--text-subtle);">Ninguno</span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Habilitada:</span>
+                    {% if reg.is_active %}
+                    <span style="color: var(--success); font-weight: 700;">Sí (Operable)</span>
+                    {% else %}
+                    <span style="color: var(--danger); font-weight: 700;">No (Inactiva)</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                {% if reg.status == 'OPEN' and reg.current_shift %}
+                <a href="{% url 'cash:shift_detail' reg.current_shift.pk %}" class="btn" style="background: var(--bg-card-hover); color: var(--text-main); font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                    Ver Turno Activo
+                </a>
+                {% elif reg.status == 'CLOSED' and reg.is_active %}
+                <a href="{% url 'cash:shift_open' %}" class="btn" style="background: var(--success); color: white; font-size: 0.8rem; padding: 0.35rem 0.75rem; font-weight: 700;">
+                    Abrir Turno
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="card" style="padding: 2rem; text-align: center; grid-column: 1 / -1; color: var(--text-muted);">
+            No se han registrado cajas físicas en el sistema.
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+

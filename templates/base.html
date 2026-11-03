@@ -957,6 +957,11 @@
                     <!-- Opción Visible para roles Admin y Operator: Comisiones y Límites -->
                     {% if is_operator or user|has_any_role:"admin,operator" %}
                         <li>
+                            <a href="{% url 'cash:dashboard' %}" class="nav-link {% if '/cash/' in request.path %}active{% endif %}">
+                                💵 Cajas
+                            </a>
+                        </li>
+                        <li>
                             <a href="{% url 'rates:commission_list' %}" class="nav-link {% if '/rates/commissions/' in request.path %}active{% endif %}">
                                 💱 Comisiones
                             </a>
