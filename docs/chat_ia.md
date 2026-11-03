@@ -381,3 +381,33 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
   - Suite completa del sistema: **500 tests ejecutados y aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
   - Compilación limpia de documentación Sphinx en modo estricto (`sphinx-build -W -b html`) con 0 advertencias.
   - Redacción del informe formal en `docs/documentacion/SCRUM-122.md` y actualización de `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Pablo Elizeche — 03/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Cajas — Modelado de datos para Cajas, Turnos y Movimientos de Efectivo en `apps/cash/` (SCRUM-114)
+
+**Resumen:**
+- Diseñé e implementé la arquitectura de datos y la capa de servicios de dominio para la gestión presencial de ventanilla en sucursales dentro de la aplicación `apps/cash/`, dando cumplimiento formal a las normativas de la plataforma (RF-22, RF-23, RF-24 y RN05):
+  - **Puestos de Atención Física (`CashRegister` / alias `Caja`):**
+    - Modelo para administración de ventanillas y terminales físicas con identificador único (`register_code`), asignación de sucursal (`branch_name`), estado operativo (`CLOSED`, `OPEN`, `MAINTENANCE`, `INACTIVE`), cajero activo y saldos iniciales y finales históricos.
+    - Regla de validación que bloquea la apertura de cajas dadas de baja o inactivas.
+  - **Sesiones y Turnos de Caja (`CashShift` / alias `TurnoCaja`):**
+    - Ciclo de vida completo del turno: apertura con dotación de fondo inicial en efectivo por divisa (`initial_balances_json`, RF-22) y vinculación inmutable al `keycloak_user_id` del cajero (RN05).
+    - Métodos para cálculo en tiempo real de saldos disponibles (`calculate_current_balance`), determinación de saldos teóricos esperados (`calculate_expected_balances`) y proceso formal de arqueo físico (`close_and_reconcile`, RF-23).
+    - Detección matemática de sobrantes o faltantes en el conteo de billetes (`difference_balances_json`), clasificando el cierre como Cuadrado (`RECONCILED`) o Con Discrepancias (`DISCREPANCY`).
+  - **Auditoría Inmutable de Movimientos de Efectivo (`CashMovement` / alias `MovimientoEfectivo`):**
+    - Registro inmutable de transacciones físicas de efectivo para auditoría forense (RF-24), tipificado en 8 categorías formales (apertura, cobro, entrega, dotación, remesa, ajustes y cierre) y flujos `IN`/`OUT`.
+    - Blindaje estricto de inmutabilidad: validación en `clean()`, `save()` y `delete()` impidiendo cualquier alteración o supresión de movimientos registrados.
+  - **Capa de Servicios de Dominio (`apps/cash/services.py`):**
+    - `CashService`: Orquestación atómica de apertura de turnos (`open_shift`), registro de movimientos con validación de saldo disponible para evitar descubiertos (`InsufficientCashBalanceError`), integración con transacciones cambiarias presenciales (`register_transaction_cash`), conciliación y arqueo (`close_shift`) y resumen consolidado (`get_shift_summary`).
+  - **Administración y Documentación:**
+    - Panel de administración Django (`apps/cash/admin.py`) con badges por color, filtros y modo estricto de solo lectura para auditoría.
+    - Incorporación del módulo en Sphinx (`docs/sphinx/source/cash.rst` y `modules.rst`), logrando compilación limpia (`build succeeded`).
+  - **Suite de Pruebas Unitarias e Integración (`apps/cash/tests.py`):**
+    - 18 pruebas automáticas cubriendo modelos, unicidad, validaciones, ciclo de vida de turnos, arqueos con/sin descuadre, control de saldo, inmutabilidad y formalización con transacciones cambiarias (100% OK).
+  - **Verificación de Calidad:**
+    - Suite completa del proyecto: **518 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Generación de informe técnico en `docs/documentacion/SCRUM-114.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
+
