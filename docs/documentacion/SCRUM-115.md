@@ -121,3 +121,4 @@ Se expandió la suite de pruebas del módulo de 18 a **36 pruebas unitarias e in
 - `docs/documentacion/SCRUM-115.md` (documento técnico de la tarea)
 - `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md` (registro de resolución #23)
 - `docs/chat_ia.md` (bitácora de interacción y cambios)
+
