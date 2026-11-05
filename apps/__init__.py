@@ -38,3 +38,12 @@ try:
         sys.modules['apps.cash.tests'] = cash.tests
 except (ImportError, AttributeError):
     pass
+
+try:
+    from . import invoicing
+    sys.modules['apps.invoicing'] = invoicing
+    sys.modules['invoicing'] = invoicing
+    if hasattr(invoicing, 'tests'):
+        sys.modules['apps.invoicing.tests'] = invoicing.tests
+except (ImportError, AttributeError):
+    pass

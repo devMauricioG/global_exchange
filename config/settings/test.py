@@ -51,3 +51,7 @@ OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_SCOPES = "openid email profile"
 OIDC_CREATE_USER = True
 OIDC_VERIFY_SSL = False
+
+# Facturación Electrónica Mock para suite de pruebas (0 consumo de cuota real)
+FACTURA_SEGURA_LIVE_ENABLED = False
+

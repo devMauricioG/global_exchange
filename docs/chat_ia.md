@@ -441,7 +441,6 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Suite completa del proyecto: **536 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Generación de informe técnico detallado en `docs/documentacion/SCRUM-115.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
 
-
 ---
 
 ## Pablo Elizeche — 05/11/2026 — Antigravity IDE (Gemini)
@@ -511,3 +510,34 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Creada suite `apps/cash/tests_inventory.py` con 27 pruebas unitarias e integración que verifican modelos, servicios, concurrencia, dotaciones parciales, excepciones de dominio, inmutabilidad y arqueos.
     - Suite completa del proyecto: **581/581 tests OK** (100% éxito, 0 fallos, 0 errores).
     - Compilación limpia de documentación Sphinx.
+
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Invoicing — Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider) (SCRUM-117)
+
+**Resumen:**
+- Diseñé e implementé en la nueva aplicación `apps/invoicing/` el patrón Strategy / Adapter para la integración con Facturación Electrónica SIFEN / e-Kuatia, rigurosamente basado en la especificación técnica oficial del PDF *"API de Factura Segura para ESI (External Systems Interoperation) v01"*:
+  - **Patrón Strategy / Adapter y Contratos Formales (`apps/invoicing/providers/` y `types.py`):**
+    - Interfaz abstracta base `InvoiceProvider` (`apps/invoicing/providers/base.py`) que estandariza las 8 operaciones oficiales del manual ESI: `calcular_de`, `generar_de`, `get_estado_sifen`, `sol_cancelacion`, `sol_inutilizacion`, `dwn_kude`, `dwn_xml` y la fachada `emitir_factura`.
+    - DTOs inmutables con dataclasses en `apps/invoicing/types.py` (`InvoiceResponse`, `StatusResponse`, `CalculationResult`, `EstadoSifenEnum`).
+    - Jerarquía de excepciones en `apps/invoicing/exceptions.py` (`InvoiceProviderError`, `QuotaExhaustedError`, `LiveModeDisabledError`, `InvoiceValidationError`).
+  - **Motor Matemático SIFEN Canónico (`apps/invoicing/calculators.py`):**
+    - Implementación del algoritmo oficial de Módulo 11 (`compute_mod11_dv`) para RUC y claves de acceso.
+    - Generador de CDC oficial de 44 dígitos (`generate_cdc`) con tipo de documento, RUC emisor, DV, establecimiento, punto de expedición, número correlativo, tipo de contribuyente, fecha YYYYMMDD, tipo de emisión, código de seguridad de 9 dígitos y DV Módulo 11 final.
+    - Motor de cálculo matemático `calculate_de` que reproduce con exactitud las fórmulas de las páginas 17 a 21 del manual ESI para ítems gravados (10% y 5%), gravado parcial (proporción gravada y base exenta), exentos y exonerados, con liquidación de IVA y cálculo de subtotales.
+  - **Simulador de Alta Fidelidad (`MockInvoiceProvider`):**
+    - Generación de CDCs de 44 dígitos válidos y estado SIFEN `0260 - Aprobado`.
+    - Generador autónomo de PDF binario KuDE 1.4 sin dependencias externas.
+    - Generador de XML firmado canónico bajo esquema `rDE` (`http://ekuatia.set.gov.py/sifen/xsd`).
+    - Almacén en memoria para registro de CDC emitidos, cancelaciones simuladas e inutilizaciones, garantizando **0 consumo de cuota real de la API de Factura Segura**.
+  - **Adaptador Real y Blindaje de Seguridad (`FacturaSeguraProvider` y `factory.py`):**
+    - Implementación del protocolo envelope ESI (`/misife00/v1/esi`), autenticación `/login?include_auth_token` y header `Authentication-Token`.
+    - Guardián estricto que dispara `LiveModeDisabledError` ante cualquier intento de llamada externa cuando `FACTURA_SEGURA_LIVE_ENABLED=False` (configurado por defecto).
+    - Fábrica `get_invoice_provider()` con selección automática según entorno e inyección de mocks para tests.
+  - **Documentación Técnica Sphinx y Calidad:**
+    - Documentación completa en `docs/sphinx/source/invoicing.rst` integrada en `modules.rst`. Compilación limpia de Sphinx (`build succeeded`).
+    - Suite de **25 pruebas unitarias e integración en `apps/invoicing/tests.py`** con **93% de cobertura**.
+    - Suite completa del proyecto: **561 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Redacción del reporte de ingeniería en `docs/documentacion/SCRUM-117.md` y actualización de `TAREAS.md` y `RESOLUCION_TAREAS_IA.md`.

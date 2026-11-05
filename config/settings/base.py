@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'rates',
     'transactions',
     'apps.cash',
+    'apps.invoicing',
 ]
 
 MIDDLEWARE = [
@@ -123,3 +124,15 @@ LOGGING = {
         },
     },
 }
+
+# ==============================================================================
+# FACTURACIÓN ELECTRÓNICA SIFEN / FACTURA SEGURA (SCRUM-110 / SCRUM-117)
+# ==============================================================================
+FACTURA_SEGURA_LIVE_ENABLED = os.getenv('FACTURA_SEGURA_LIVE_ENABLED', 'False').lower() in ('true', '1')
+FACTURA_SEGURA_API_URL = os.getenv('FACTURA_SEGURA_API_URL', 'https://apitest.facturasegura.com.py')
+FACTURA_SEGURA_EMAIL = os.getenv('FACTURA_SEGURA_EMAIL', '')
+FACTURA_SEGURA_PASSWORD = os.getenv('FACTURA_SEGURA_PASSWORD', '')
+FACTURA_SEGURA_TOKEN = os.getenv('FACTURA_SEGURA_TOKEN', '')
+FACTURA_SEGURA_EMISOR_RUC = os.getenv('FACTURA_SEGURA_EMISOR_RUC', '80012345')
+FACTURA_SEGURA_EMISOR_DV = os.getenv('FACTURA_SEGURA_EMISOR_DV', '7')
+FACTURA_SEGURA_EMISOR_TIMBRADO = os.getenv('FACTURA_SEGURA_EMISOR_TIMBRADO', '12548963')
