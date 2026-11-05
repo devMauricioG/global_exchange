@@ -576,6 +576,7 @@ class CashMovement(models.Model):
 Caja = CashRegister
 TurnoCaja = CashShift
 MovimientoEfectivo = CashMovement
+MovimientoCaja = CashMovement
 
 
 # ==============================================================================

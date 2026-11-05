@@ -18,6 +18,14 @@ sys.modules['apps.rates'] = rates
 sys.modules['apps.transactions'] = transactions
 sys.modules['apps.kiosk'] = transactions
 
+try:
+    import transactions.models
+    import transactions.services
+    sys.modules['apps.transactions.models'] = transactions.models
+    sys.modules['apps.transactions.services'] = transactions.services
+except Exception:
+    pass
+
 # Export test module references for apps.* paths
 if hasattr(authentication, 'tests'):
     sys.modules['apps.authentication.tests'] = authentication.tests

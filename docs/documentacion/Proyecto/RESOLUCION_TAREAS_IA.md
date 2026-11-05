@@ -34,6 +34,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-116** | Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
 | **SCRUM-117** | Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider) | Sprint 5 / Invoicing | Mauricio González | Finalizado |
 | **SCRUM-118** | Modelado de Factura Electrónica y persistencia de CDC, estados SIFEN, KuDE PDF y XML | Sprint 5 / Invoicing | Mauricio González | Finalizado |
+| **SCRUM-123** | Orquestación transaccional atómica de operaciones en efectivo con caja y facturación | Sprint 5 / Cajas | Mauricio González | Finalizado |
 
 
 ---
@@ -888,3 +889,39 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+---
+
+### 27. SCRUM-123: Orquestación transaccional atómica de operaciones en efectivo con caja y facturación
+
+* **Objetivo:** Extender `apps/transactions/services.py` con `TransactionService.process_cash_payment()` para vincular el cobro/pago en efectivo con el turno de caja activo, generar el MovimientoCaja correspondiente, transicionar la transacción a COMPLETADA y disparar de forma atómica la emisión de la Factura Electrónica.
+* **Aportes y Solución con IA:**
+  * **Orquestación en `TransactionService.process_cash_payment()` (`transactions/services.py`):**
+    * Operación atómica estricta bajo decorador `@transaction.atomic` y bloqueo pesimista con `select_for_update()`.
+    * Validación de estados previos: rechaza transacciones ya completadas o canceladas (`ValidationError`).
+    * Resolución y validación flexible del turno de caja (`CashShift`), aceptando instancias de `CashShift`, `CashRegister`, identificadores numéricos o por inferencia automática del turno abierto asignado al cajero.
+    * Verificación rigurosa de disponibilidad de efectivo físico en caja; ante fondos insuficientes se dispara `InsufficientCashBalanceError` y se realiza rollback completo de la transacción.
+    * Generación inmutable de movimientos de cobro y entrega (`CashMovement` / `MovimientoCaja`) registrando divisas, importes, cajero y `denominations_json` con desglose de billetes físicos.
+    * Transición irreversible de la orden a `COMPLETADA`, seteando `pasarela='EFECTIVO'` y `referencia_externa=f"CASH-{caja}-{tx.id}"`.
+    * Disparo atómico de la facturación electrónica dual: `FacturaElectronica` SIFEN (vía `apps.invoicing`) y `ElectronicInvoice` KuDE (vía `transactions.kude_service`).
+    * Trazabilidad completa con Keycloak User ID (`keycloak_user_id`) para fines de auditoría forense (RF-24).
+  * **Ampliación de Dominio y Servicios:**
+    * Incorporación del alias `MovimientoCaja = CashMovement` en `apps/cash/models.py`.
+    * Soporte de `denominations_in` y `denominations_out` en `CashService.register_transaction_cash()`.
+    * Enrutamiento de compatibilidad en `apps/__init__.py` para `apps.transactions.models` y `apps.transactions.services`.
+    * Fix defensivo en `MockInvoiceProvider.emitir_factura` para tolerar clientes sin RUC explícito.
+  * **Pruebas y Verificación:**
+    * 11 nuevas pruebas unitarias y de integración en `transactions/tests_cash_orchestration.py`.
+    * Suite global completa: **642 tests aprobados al 100% (OK)** sin regresiones.
+* **Archivos intervenidos:**
+  * `transactions/services.py`
+  * `apps/cash/models.py`
+  * `apps/cash/services.py`
+  * `apps/__init__.py`
+  * `apps/invoicing/providers/mock.py`
+  * `transactions/tests_cash_orchestration.py`
+  * `transactions/tests.py`
+  * `docs/documentacion/SCRUM-123.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+

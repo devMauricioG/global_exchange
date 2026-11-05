@@ -251,6 +251,8 @@ class CashService:
         keycloak_user_id: str = '',
         is_cash_in: Optional[bool] = None,
         is_cash_out: Optional[bool] = None,
+        denominations_in: Optional[Dict[str, Any]] = None,
+        denominations_out: Optional[Dict[str, Any]] = None,
     ) -> List[CashMovement]:
         """
         Registra los movimientos de efectivo derivados de una transacción cambiaria (compra o venta).
@@ -281,6 +283,7 @@ class CashService:
                 flow=MovementFlow.IN,
                 transaction=transaction,
                 receipt_number=f"REC-TX-{transaction.id}-IN",
+                denominations=denominations_in,
                 keycloak_user_id=keycloak_user_id,
             )
             movements.append(mov_in)
@@ -297,6 +300,7 @@ class CashService:
                 flow=MovementFlow.OUT,
                 transaction=transaction,
                 receipt_number=f"REC-TX-{transaction.id}-OUT",
+                denominations=denominations_out,
                 keycloak_user_id=keycloak_user_id,
             )
             movements.append(mov_out)

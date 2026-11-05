@@ -577,3 +577,30 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Diseñadas **25 nuevas pruebas unitarias e integración en `apps/invoicing/tests.py`** (`FacturaElectronicaModelTests` e `InvoiceServiceTests`), alcanzando 50 tests en la app.
     - Suite global completa: **631 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Documentación técnica redactada en `docs/documentacion/SCRUM-118.md` y actualización de `TAREAS.md` y `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Cajas & Transacciones — Orquestación transaccional atómica de operaciones en efectivo con caja y facturación (SCRUM-123)
+
+**Resumen:**
+- Implementé y blindé la orquestación transaccional atómica para la liquidación en efectivo de operaciones cambiarias en ventanilla y terminales físicas:
+  - **Método `TransactionService.process_cash_payment()` (`transactions/services.py`):**
+    - Envoltorio atómico integral `@transaction.atomic` y bloqueo pesimista `select_for_update()` sobre la orden cambiaria.
+    - Validación de estados previos de la transacción: rechazo estricto de órdenes previamente `COMPLETADA` o `CANCELADA` con `ValidationError`.
+    - Resolución flexible y desacoplada del turno de caja (`CashShift`), permitiendo recibir instancias de `CashShift`, `CashRegister`, identificadores numéricos o inferencia automática del turno abierto asignado al cajero.
+    - Control de saldo físico y rechazo ante fondos insuficientes: disparo de `InsufficientCashBalanceError` y rollback completo en caso de que la caja no cuente con saldo físico suficiente en la divisa a dispensar.
+    - Registro inmutable de movimientos de cobro y entrega física de dinero (`CashMovement` / `MovimientoCaja`) vinculando montos, divisas, cajero y desglose de billetes físicos en `denominations_json`.
+    - Transición de la orden cambiaria a `COMPLETADA` con registro de fecha de pago, referencia externa `CASH-{caja}-{tx.id}` y pasarela `EFECTIVO`.
+    - Disparo atómico de la emisión de Factura Electrónica e-Kuatia / SIFEN (`FacturaElectronica`) y comprobante gráfico KuDE (`ElectronicInvoice`).
+    - Trazabilidad y auditoría de identidad mediante el claim inmutable de Keycloak (`keycloak_user_id`).
+  - **Integración y Ajustes de Dominio:**
+    - Exportación del alias en español `MovimientoCaja = CashMovement` en `apps/cash/models.py`.
+    - Extensión de `CashService.register_transaction_cash()` para admitir parámetros opcionales `denominations_in` y `denominations_out`.
+    - Enrutamiento y compatibilidad de namespaces en `apps/__init__.py` para `apps.transactions.models` y `apps.transactions.services`.
+    - Respaldo defensivo en `MockInvoiceProvider.emitir_factura` ante clientes sin RUC explícito.
+  - **Pruebas y Verificación:**
+    - Diseñé **11 pruebas unitarias e integración en `transactions/tests_cash_orchestration.py`** integradas en `transactions/tests.py`.
+    - Suite global completa: **642 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Documentación técnica redactada en `docs/documentacion/SCRUM-123.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
