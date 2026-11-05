@@ -25,12 +25,16 @@ from apps.invoicing.calculators import (
     compute_mod11_dv,
     generate_cdc,
 )
+from apps.invoicing.client import FacturaSeguraClient
 from apps.invoicing.exceptions import (
     InvoiceNotFoundError,
     InvoiceProviderError,
     InvoiceValidationError,
     LiveModeDisabledError,
+    PresentationQuotaExhaustedError,
     QuotaExhaustedError,
+    QuotaShieldExhaustedError,
+    TestQuotaExhaustedError,
 )
 from apps.invoicing.providers import (
     FacturaSeguraProvider,
@@ -1175,3 +1179,362 @@ class InvoicingViewsTests(FacturaElectronicaModelMixin, TestCase):
         self.assertIn('btnSyncSifen', content)
         self.assertIn('copyCdcToClipboard', content)
         self.assertIn('syncSifenStatus', content)
+
+
+class FacturaSeguraClientAndQuotaProtocolTests(TestCase):
+    """
+    Suite de pruebas para FacturaSeguraClient y Protocolo de Cuota con Reserva Blindada (SCRUM-120).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client_fs = FacturaSeguraClient(
+            api_url='https://apitest.facturasegura.com.py',
+            email='demo@facturasegura.com.py',
+            password='secret_password',
+            emisor_ruc='80012345',
+            timeout=10,
+        )
+        self.client_fs.reset_quotas(total=100)
+
+    def tearDown(self):
+        self.client_fs.reset_quotas(total=100)
+        super().tearDown()
+
+    def test_client_initialization_and_properties(self):
+        """Verifica la configuración y propiedades por defecto de FacturaSeguraClient."""
+        self.assertEqual(self.client_fs.api_url, 'https://apitest.facturasegura.com.py')
+        self.assertEqual(self.client_fs.email, 'demo@facturasegura.com.py')
+        self.assertEqual(self.client_fs.emisor_ruc, '80012345')
+        self.assertEqual(self.client_fs.timeout, 10)
+        self.assertEqual(self.client_fs.test_quota_reserved, 10)
+        self.assertEqual(self.client_fs.total_quota, 100)
+        self.assertEqual(self.client_fs.used_quota, 0)
+        self.assertEqual(self.client_fs.test_quota_used, 0)
+        self.assertEqual(self.client_fs.operational_quota_available, 90)
+        self.assertEqual(self.client_fs.test_quota_available, 10)
+        self.assertFalse(self.client_fs.is_operational_quota_exhausted)
+        self.assertFalse(self.client_fs.is_test_quota_exhausted)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=False)
+    def test_client_blocks_live_calls_when_live_disabled(self):
+        """Verifica que todas las operaciones lancen LiveModeDisabledError si FACTURA_SEGURA_LIVE_ENABLED=False."""
+        self.assertFalse(self.client_fs.is_live_enabled)
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.login()
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.calcular_de({'test': 1})
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.generar_de({'test': 1})
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.get_estado_sifen('01800123457001001000000122026110511234567890')
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.dwn_kude('01800123457001001000000122026110511234567890')
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.dwn_xml('01800123457001001000000122026110511234567890')
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.sol_cancelacion('01800123457001001000000122026110511234567890')
+
+        with self.assertRaises(LiveModeDisabledError):
+            self.client_fs.sol_inutilizacion(
+                ruc_emisor='80012345',
+                timbrado='12548963',
+                est='001',
+                pun_exp='001',
+                num_doc='0000001',
+            )
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_login_success(self):
+        """Verifica la autenticación exitosa vía POST /login?include_auth_token."""
+        login_resp = json.dumps({
+            'meta': {'code': 200},
+            'response': {
+                'user': {'authentication_token': 'auth_token_mock_abc_123'},
+            },
+        }).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = login_resp
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            token = self.client_fs.login()
+            self.assertEqual(token, 'auth_token_mock_abc_123')
+            self.assertEqual(self.client_fs.get_auth_token(), 'auth_token_mock_abc_123')
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_login_missing_credentials(self):
+        """Verifica que login sin credenciales dispare InvoiceProviderError con código 401."""
+        client_no_creds = FacturaSeguraClient(email='', password='')
+        with self.assertRaises(InvoiceProviderError) as ctx:
+            client_no_creds.login()
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_calcular_de_flow(self):
+        """Verifica la invocación formal de calcular_de y retorno del DE enriquecido."""
+        self.client_fs._auth_token = 'token_test_123'
+        resp_data = json.dumps({
+            'code': 0,
+            'description': 'OK',
+            'results': [{'DE': {'dNumDoc': '0000001', 'dTotOpe': 550000, 'dTotIVA': 50000}}],
+        }).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = resp_data
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            res = self.client_fs.calcular_de({'dNumDoc': '0000001'})
+            self.assertEqual(res['dTotOpe'], 550000)
+            self.assertEqual(res['dTotIVA'], 50000)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_generar_de_flow(self):
+        """Verifica la invocación formal de generar_de y obtención del CDC."""
+        self.client_fs._auth_token = 'token_test_123'
+        resp_data = json.dumps({
+            'code': 0,
+            'description': 'OK',
+            'operation_info': {'id': 'fs-op-999'},
+            'results': [{'CDC': '01800123457001001000000122026110511234567890'}],
+        }).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = resp_data
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            res = self.client_fs.generar_de({'dNumDoc': '0000001'})
+            self.assertEqual(res['code'], 0)
+            self.assertEqual(res['results'][0]['CDC'], '01800123457001001000000122026110511234567890')
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_get_estado_sifen_flow(self):
+        """Verifica la consulta get_estado_sifen y deserialización del estado SIFEN."""
+        self.client_fs._auth_token = 'token_test_123'
+        resp_data = json.dumps({
+            'code': 0,
+            'description': 'OK',
+            'results': [{
+                'estado_sifen': 'Aprobado',
+                'desc_sifen': '0260 - Aprobado',
+                'error_sifen': '',
+                'fch_sifen': '2026-11-05T12:00:00',
+            }],
+        }).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = resp_data
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            res = self.client_fs.get_estado_sifen('01800123457001001000000122026110511234567890')
+            self.assertEqual(res['code'], 0)
+            self.assertEqual(res['results'][0]['estado_sifen'], 'Aprobado')
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_dwn_kude_flow(self):
+        """Verifica la descarga de KuDE PDF vía GET."""
+        self.client_fs._auth_token = 'token_test_123'
+        cm = MagicMock()
+        cm.read.return_value = b'%PDF-1.4 official KuDE bytes stream'
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            pdf_bytes = self.client_fs.dwn_kude('01800123457001001000000122026110511234567890')
+            self.assertTrue(pdf_bytes.startswith(b'%PDF-1.4'))
+            self.assertIn(b'official KuDE', pdf_bytes)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_dwn_xml_flow(self):
+        """Verifica la descarga de XML firmado vía GET."""
+        self.client_fs._auth_token = 'token_test_123'
+        cm = MagicMock()
+        cm.read.return_value = b'<rDE xmlns="http://ekuatia.set.gov.py/sifen/xsd"><dFecFirma>2026-11-05</dFecFirma></rDE>'
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            xml_str = self.client_fs.dwn_xml('01800123457001001000000122026110511234567890')
+            self.assertIn('<rDE', xml_str)
+            self.assertIn('http://ekuatia.set.gov.py/sifen/xsd', xml_str)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_client_sol_cancelacion_and_inutilizacion(self):
+        """Verifica sol_cancelacion y sol_inutilizacion contra el PAC."""
+        self.client_fs._auth_token = 'token_test_123'
+        resp_data = json.dumps({'code': 0, 'description': 'OK'}).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = resp_data
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            res_can = self.client_fs.sol_cancelacion('01800123457001001000000122026110511234567890', motivo='Cancelación de prueba')
+            self.assertEqual(res_can['code'], 0)
+
+            res_inu = self.client_fs.sol_inutilizacion(
+                ruc_emisor='80012345',
+                timbrado='12548963',
+                est='001',
+                pun_exp='001',
+                num_doc='0000001',
+            )
+            self.assertEqual(res_inu['code'], 0)
+
+    # -------------------------------------------------------------------------
+    # Pruebas del Protocolo de Cuota y Reserva Blindada (SCRUM-120)
+    # -------------------------------------------------------------------------
+
+    def test_quota_protocol_operational_consumption(self):
+        """Verifica que el consumo de cuota comercial ordinaria descuente del saldo disponible."""
+        # Total: 100, Reserva: 10 -> Inicialmente disponible: 90
+        rem = self.client_fs.consume_quota(is_test=False)
+        self.assertEqual(rem, 89)
+        self.assertEqual(self.client_fs.used_quota, 1)
+        self.assertEqual(self.client_fs.operational_quota_available, 89)
+        self.assertEqual(self.client_fs.test_quota_available, 10)
+
+    def test_quota_protocol_shield_strictly_blocks_at_threshold(self):
+        """
+        Verifica que al alcanzar el umbral presupuestario comercial (consumidas 90 de 100),
+        las operaciones ordinarias sean estrictamente bloqueadas con QuotaShieldExhaustedError,
+        blindando las 10 llamadas restantes para la presentación en vivo.
+        """
+        self.client_fs.reset_quotas(total=100)
+        cfg = self.client_fs.get_db_config()
+        if cfg:
+            cfg.used_quota = 90
+            cfg.save()
+        else:
+            FacturaSeguraClient._in_memory_used_quota = 90
+
+        self.assertEqual(self.client_fs.operational_quota_available, 0)
+        self.assertTrue(self.client_fs.is_operational_quota_exhausted)
+        self.assertEqual(self.client_fs.test_quota_available, 10)
+
+        with self.assertRaises(QuotaShieldExhaustedError) as ctx:
+            self.client_fs.consume_quota(is_test=False)
+        self.assertIn("blindadas exclusivamente para la presentación en vivo", str(ctx.exception))
+
+    def test_quota_protocol_presentation_calls_allowed_within_shield(self):
+        """
+        Verifica que cuando la cuota operativa está agotada, las llamadas con
+        is_presentation=True o is_test=True sean permitidas consumiendo de las 10 blindadas.
+        """
+        self.client_fs.reset_quotas(total=100)
+        cfg = self.client_fs.get_db_config()
+        if cfg:
+            cfg.used_quota = 90
+            cfg.save()
+        else:
+            FacturaSeguraClient._in_memory_used_quota = 90
+
+        self.assertEqual(self.client_fs.operational_quota_available, 0)
+        self.assertEqual(self.client_fs.test_quota_available, 10)
+
+        rem = self.client_fs.consume_quota(is_presentation=True)
+        self.assertEqual(rem, 9)
+        self.assertEqual(self.client_fs.test_quota_used, 1)
+        self.assertEqual(self.client_fs.test_quota_available, 9)
+
+        rem2 = self.client_fs.consume_quota(is_test=True)
+        self.assertEqual(rem2, 8)
+        self.assertEqual(self.client_fs.test_quota_used, 2)
+        self.assertEqual(self.client_fs.test_quota_available, 8)
+
+    def test_quota_protocol_presentation_exhaustion_raises_error(self):
+        """Verifica que al agotarse las 10 llamadas blindadas de presentación se dispare TestQuotaExhaustedError."""
+        self.client_fs.reset_quotas(total=100)
+        cfg = self.client_fs.get_db_config()
+        if cfg:
+            cfg.test_quota_used = 10
+            cfg.save()
+        else:
+            FacturaSeguraClient._in_memory_test_used = 10
+
+        self.assertEqual(self.client_fs.test_quota_available, 0)
+        self.assertTrue(self.client_fs.is_test_quota_exhausted)
+
+        with self.assertRaises(TestQuotaExhaustedError) as ctx:
+            self.client_fs.consume_quota(is_presentation=True)
+        self.assertIn("Reserva blindada de 10", str(ctx.exception))
+
+    def test_quota_consultar_cuota_metrics(self):
+        """Verifica que consultar_cuota() retorne todas las métricas requeridas."""
+        data = self.client_fs.consultar_cuota()
+        self.assertIn('total_quota', data)
+        self.assertIn('used_quota', data)
+        self.assertIn('operational_quota_available', data)
+        self.assertIn('test_quota_reserved', data)
+        self.assertIn('test_quota_used', data)
+        self.assertIn('test_quota_available', data)
+        self.assertIn('is_operational_quota_exhausted', data)
+        self.assertIn('is_test_quota_exhausted', data)
+        self.assertIn('shield_active', data)
+        self.assertTrue(data['shield_active'])
+        self.assertEqual(data['test_quota_reserved'], 10)
+
+    def test_quota_reset_and_replenish(self):
+        """Verifica reset_quotas y replenish_quota."""
+        self.client_fs.consume_quota(is_test=False)
+        self.client_fs.consume_quota(is_presentation=True)
+
+        self.client_fs.reset_quotas(total=200)
+        self.assertEqual(self.client_fs.total_quota, 200)
+        self.assertEqual(self.client_fs.used_quota, 0)
+        self.assertEqual(self.client_fs.test_quota_used, 0)
+        self.assertEqual(self.client_fs.operational_quota_available, 190)
+
+        self.client_fs.replenish_quota(50)
+        self.assertEqual(self.client_fs.total_quota, 250)
+        self.assertEqual(self.client_fs.operational_quota_available, 240)
+
+    @override_settings(FACTURA_SEGURA_LIVE_ENABLED=True)
+    def test_provider_enforces_shield_via_client(self):
+        """
+        Verifica que FacturaSeguraProvider aplique el blindaje de cuota y bloquee
+        emisiones comerciales ordinarias cuando se alcanza el umbral de las 10 llamadas reservadas.
+        """
+        provider = FacturaSeguraProvider(
+            email='test@example.com',
+            password='pass',
+            client=self.client_fs,
+        )
+        self.client_fs._auth_token = 'token_test_123'
+
+        cfg = self.client_fs.get_db_config()
+        if cfg:
+            cfg.used_quota = 90
+            cfg.save()
+        else:
+            FacturaSeguraClient._in_memory_used_quota = 90
+
+        with self.assertRaises(QuotaShieldExhaustedError):
+            provider.generar_de({'dNumDoc': '0000001'}, is_test=False)
+
+        resp_data = json.dumps({
+            'code': 0,
+            'description': 'OK',
+            'operation_info': {'id': 'fs-op-test'},
+            'results': [{'CDC': '01800123457001001000000122026110511234567890'}],
+        }).encode('utf-8')
+
+        cm = MagicMock()
+        cm.read.return_value = resp_data
+        cm.__enter__.return_value = cm
+
+        with patch('urllib.request.urlopen', return_value=cm):
+            resp = provider.generar_de({'dNumDoc': '0000001'}, is_test=True)
+            self.assertEqual(resp.cdc, '01800123457001001000000122026110511234567890')
+            # generar_de + dwn_xml + dwn_kude ejecutan 3 llamadas al PAC
+            self.assertEqual(self.client_fs.test_quota_used, 3)
+

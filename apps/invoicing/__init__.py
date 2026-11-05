@@ -3,13 +3,17 @@ Módulo de Facturación Electrónica SIFEN (apps.invoicing - SCRUM-117 / SCRUM-1
 """
 
 from .calculators import calculate_de, compute_mod11_dv, generate_cdc
+from .client import FacturaSeguraClient
 from .exceptions import (
     InvoicingError,
     InvoiceNotFoundError,
     InvoiceProviderError,
     InvoiceValidationError,
     LiveModeDisabledError,
+    PresentationQuotaExhaustedError,
     QuotaExhaustedError,
+    QuotaShieldExhaustedError,
+    TestQuotaExhaustedError,
 )
 from .providers import (
     FacturaSeguraProvider,
@@ -27,10 +31,11 @@ from .types import (
 )
 
 __all__ = [
-    # Providers
+    # Providers & Client (SCRUM-117 / SCRUM-120)
     'InvoiceProvider',
     'MockInvoiceProvider',
     'FacturaSeguraProvider',
+    'FacturaSeguraClient',
     'get_invoice_provider',
     'set_invoice_provider',
     'reset_invoice_provider',
@@ -47,6 +52,9 @@ __all__ = [
     'InvoicingError',
     'InvoiceProviderError',
     'QuotaExhaustedError',
+    'QuotaShieldExhaustedError',
+    'TestQuotaExhaustedError',
+    'PresentationQuotaExhaustedError',
     'LiveModeDisabledError',
     'InvoiceValidationError',
     'InvoiceNotFoundError',
