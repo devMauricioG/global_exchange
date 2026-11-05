@@ -1,0 +1,3 @@
+Se debe implementar el modulo de caja y el rol de cajero para manejo de dinero en efectivo, se debe poder abrir y cerrar caja
+se debe poder manejar por turnos y tener traazbilidad del dinero en efectivo que ingresa al sistema.
+Se debe implementar tambien la facturacion electronica como se indica en la documentacion de la api
