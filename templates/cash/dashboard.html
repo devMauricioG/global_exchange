@@ -15,6 +15,14 @@
             </p>
         </div>
         <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            {% if is_admin or user.is_staff or user.is_superuser %}
+            <a href="{% url 'cash:vault_dashboard' %}" class="btn" style="background: var(--bg-card); color: var(--accent); border: 1px solid var(--accent); font-weight: 600;">
+                🏦 Bóveda Central
+            </a>
+            <a href="{% url 'cash:admin_reconciliation_list' %}" class="btn" style="background: var(--bg-card); color: var(--warning); border: 1px solid var(--warning); font-weight: 600;">
+                ⚖️ Control Arqueos
+            </a>
+            {% endif %}
             <a href="{% url 'cash:shift_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
                 📋 Historial de Turnos
             </a>
@@ -52,6 +60,12 @@
                 </p>
             </div>
             <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <a href="{% url 'cash:shift_inventory' active_shift.pk %}" class="btn" style="background: var(--bg-card); color: #38bdf8; border: 1px solid #38bdf8; font-weight: 600;">
+                    📦 Billetes en Caja
+                </a>
+                <a href="{% url 'cash:cashier_denomination_count' active_shift.pk %}" class="btn" style="background: var(--bg-card); color: var(--warning); border: 1px solid var(--warning); font-weight: 600;">
+                    🔢 Arqueo de Billetes
+                </a>
                 <a href="{% url 'cash:movement_create' %}" class="btn" style="background: var(--primary); color: #0b1120; font-weight: 700;">
                     ➕ Registrar Movimiento Manual
                 </a>
