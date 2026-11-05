@@ -15,3 +15,4 @@ __all__ = [
     'set_invoice_provider',
     'reset_invoice_provider',
 ]
+

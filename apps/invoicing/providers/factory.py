@@ -60,3 +60,4 @@ def get_invoice_provider(provider_type: Optional[str] = None, **kwargs: Any) -> 
         return FacturaSeguraProvider(**kwargs)
 
     return MockInvoiceProvider()
+

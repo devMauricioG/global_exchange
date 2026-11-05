@@ -501,3 +501,4 @@ class MockInvoiceProvider(InvoiceProvider):
         }
 
         return self.generar_de(de_data, is_test=is_test)
+

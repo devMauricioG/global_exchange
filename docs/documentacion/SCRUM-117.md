@@ -17,6 +17,7 @@
 Diseñar e implementar en la nueva aplicación modular `apps/invoicing/` el patrón **Strategy / Adapter** para la integración con el Sistema Integrado de Facturación Electrónica Nacional (**SIFEN** / e-Kuatia) y Proveedores de Autorización y Certificación (**PAC**), fundamentado rigurosamente en la especificación técnica oficial **"API de Factura Segura para ESI (External Systems Interoperation) v01"**.
 
 La arquitectura garantiza:
+
 1. **Desacoplamiento Absoluto:** La lógica de negocio transaccional interactúa exclusivamente contra la interfaz base `InvoiceProvider`.
 2. **Preservación Inviolable de Cuota:** La implementación `MockInvoiceProvider` atiende el 100% de los entornos de desarrollo local y suites de pruebas automatizadas (0 peticiones a la API comercial de Factura Segura).
 3. **Cálculo Matemático SIFEN Canónico:** Implementación exacta de las fórmulas de bases imponibles gravadas, exentas, exoneradas, liquidación del IVA (5% y 10%) y clave de acceso (CDC de 44 dígitos con Módulo 11 oficial de la DNIT).
@@ -123,6 +124,7 @@ Se diseñó e integró una suite completa de **25 pruebas unitarias** en `apps/i
    * Inyección de dependencias (`set_invoice_provider`, `reset_invoice_provider`).
 
 ### Resultados de Ejecución
+
 * **Suite Local Invoicing:** 25/25 tests aprobados (100% OK), cobertura del **93%**.
 * **Suite Global del Proyecto:** **561 tests aprobados (100% OK)**, 0 fallos, 0 regresiones.
 * **Compilación Sphinx:** Compilación limpia y exitosa (`build succeeded`).

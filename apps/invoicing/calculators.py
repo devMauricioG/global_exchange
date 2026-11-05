@@ -285,3 +285,4 @@ def calculate_de(de_data: Dict[str, Any]) -> Dict[str, Any]:
         res['dTotalGs'] = ''
 
     return res
+

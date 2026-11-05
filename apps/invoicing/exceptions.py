@@ -62,3 +62,4 @@ class InvoiceNotFoundError(InvoiceProviderError):
     Excepción disparada cuando un CDC o identificador de factura no existe en el sistema.
     """
     pass
+

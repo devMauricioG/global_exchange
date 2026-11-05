@@ -134,3 +134,4 @@ class InvoiceProvider(ABC):
         :return: Objeto :class:`InvoiceResponse`.
         """
         pass
+

@@ -166,3 +166,4 @@ class CalculationResult:
     base_gravada_5: Decimal = Decimal('0')
     base_gravada_10: Decimal = Decimal('0')
     total_base_gravada: Decimal = Decimal('0')
+

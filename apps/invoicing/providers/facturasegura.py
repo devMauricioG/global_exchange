@@ -334,3 +334,4 @@ class FacturaSeguraProvider(InvoiceProvider):
         from .mock import MockInvoiceProvider
         mock_helper = MockInvoiceProvider()
         return mock_helper.emitir_factura(transaction_or_data, is_test=is_test)
+

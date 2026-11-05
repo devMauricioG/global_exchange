@@ -71,3 +71,4 @@ apps.invoicing.providers.factory module
    :members:
    :show-inheritance:
    :undoc-members:
+
