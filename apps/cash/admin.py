@@ -64,6 +64,7 @@ class CashShiftAdmin(admin.ModelAdmin):
         'difference_balances_json',
         'keycloak_user_id',
     )
+    inlines = ['ShiftDenominationCountInline']  # se reemplaza abajo tras definir el inline
 
     @admin.display(description='Estado')
     def status_badge(self, obj: CashShift) -> str:
@@ -113,3 +114,101 @@ class CashMovementAdmin(admin.ModelAdmin):
         if obj.flow == 'IN':
             return format_html('<span style="color: #10B981; font-weight: bold;">▲ IN</span>')
         return format_html('<span style="color: #EF4444; font-weight: bold;">▼ OUT</span>')
+
+
+# ==============================================================================
+# SCRUM-116 — Inventario de Billetes por Denominación
+# ==============================================================================
+from .inventory_models import (
+    Vault,
+    CurrencyDenomination,
+    BanknoteInventory,
+    InitialFloatConfig,
+    BanknoteMovement,
+    ShiftDenominationCount,
+)
+
+
+class ShiftDenominationCountInline(admin.TabularInline):
+    """Inline de arqueo físico por denominación, embebido en el detalle del turno."""
+    model = ShiftDenominationCount
+    extra = 0
+    can_delete = False
+    readonly_fields = (
+        'currency', 'denomination', 'opening_quantity', 'operations_in',
+        'operations_out', 'system_expected_quantity', 'counted_quantity',
+        'difference_quantity', 'difference_amount', 'admin_adjusted_quantity', 'admin_notes',
+    )
+    ordering = ['currency__code', '-denomination__value']
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+# Parchamos el inline en CashShiftAdmin ahora que está definido
+CashShiftAdmin.inlines = [ShiftDenominationCountInline]
+
+
+@admin.register(Vault)
+class VaultAdmin(admin.ModelAdmin):
+    """Bóvedas centrales de efectivo por sucursal."""
+    list_display = ('code', 'name', 'branch_name', 'is_active', 'created_at')
+    list_filter = ('is_active', 'branch_name')
+    search_fields = ('code', 'name', 'branch_name')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(CurrencyDenomination)
+class CurrencyDenominationAdmin(admin.ModelAdmin):
+    """Denominaciones oficiales de billetes y monedas por divisa."""
+    list_display = ('currency', 'value', 'is_coin', 'is_active', 'order')
+    list_filter = ('currency', 'is_active', 'is_coin')
+    search_fields = ('currency__code', 'currency__name')
+    ordering = ['currency__code', '-value']
+
+
+@admin.register(BanknoteInventory)
+class BanknoteInventoryAdmin(admin.ModelAdmin):
+    """Stock físico actual de billetes por denominación y ubicación."""
+    list_display = ('denomination', 'currency', 'location_type', 'vault', 'cash_register', 'quantity', 'total_amount_display', 'updated_at')
+    list_filter = ('location_type', 'currency')
+    search_fields = ('denomination__value', 'currency__code', 'vault__code', 'cash_register__register_code')
+    readonly_fields = ('updated_at',)
+
+    @admin.display(description='Valor Total')
+    def total_amount_display(self, obj):
+        return f"{obj.total_amount:,.2f} {obj.currency.code}"
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InitialFloatConfig)
+class InitialFloatConfigAdmin(admin.ModelAdmin):
+    """Configuración de dotación inicial de billetes por denominación para apertura de turno."""
+    list_display = ('denomination', 'currency', 'default_quantity', 'allow_partial_fill', 'is_active')
+    list_filter = ('currency', 'is_active', 'allow_partial_fill')
+    search_fields = ('currency__code', 'denomination__value')
+    ordering = ['currency__code', '-denomination__value']
+
+
+@admin.register(BanknoteMovement)
+class BanknoteMovementAdmin(admin.ModelAdmin):
+    """Auditoría inmutable de movimientos físicos de billetes entre ubicaciones."""
+    list_display = (
+        'id', 'movement_type', 'denomination', 'currency', 'quantity',
+        'source_location_type', 'target_location_type', 'user', 'created_at',
+    )
+    list_filter = ('movement_type', 'currency', 'source_location_type', 'target_location_type', 'created_at')
+    search_fields = ('denomination__value', 'currency__code', 'reference', 'user__username', 'shift__shift_number')
+    readonly_fields = [f.name for f in BanknoteMovement._meta.fields]
+    ordering = ['-created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

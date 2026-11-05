@@ -1106,3 +1106,274 @@ class CustomerOwnershipIsolationTests(TestCase):
         """verify_customer_ownership funciona con IDs en formato string."""
         self.assertTrue(self.verify(self.user_a, str(self.cliente_a.id)))
         self.assertFalse(self.verify(self.user_a, str(self.cliente_b.id)))
+
+
+class CajeroRoleAndShiftIsolationTests(TestCase):
+    """
+    Pruebas SCRUM-116 para verificar el rol Cajero, herencia RBAC,
+    decoradores @cajero_required, mixin CashierRequiredMixin y aislamiento de turnos.
+    """
+
+    def setUp(self):
+        from apps.cash.models import CashRegister, CashShift, CashRegisterStatus, ShiftStatus
+        from authentication.permissions import (
+            has_role,
+            verify_shift_ownership,
+            cajero_required,
+            CashierRequiredMixin,
+            ShiftOwnershipRequiredMixin,
+        )
+
+        self.has_role = has_role
+        self.verify_shift_ownership = verify_shift_ownership
+
+        self.group_admin, _ = Group.objects.get_or_create(name='admin')
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+        self.group_cajero, _ = Group.objects.get_or_create(name='cajero')
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+
+        self.admin = User.objects.create_superuser(
+            username='admin_cajero_test',
+            email='admin_cajero@test.com',
+            password='Password123!',
+        )
+        self.operator = User.objects.create_user(
+            username='op_cajero_test',
+            email='op_cajero@test.com',
+            password='Password123!',
+            is_staff=True,
+        )
+        self.operator.groups.add(self.group_operator)
+
+        self.cajero_1 = User.objects.create_user(
+            username='cajero_1_test',
+            email='cajero1@test.com',
+            password='Password123!',
+        )
+        self.cajero_1.groups.add(self.group_cajero)
+
+        self.cajero_2 = User.objects.create_user(
+            username='cajero_2_test',
+            email='cajero2@test.com',
+            password='Password123!',
+        )
+        self.cajero_2.groups.add(self.group_cajero)
+
+        self.std_user = User.objects.create_user(
+            username='std_cajero_test',
+            email='std_cajero@test.com',
+            password='Password123!',
+        )
+        self.std_user.groups.add(self.group_user)
+
+        self.register_1 = CashRegister.objects.create(
+            register_code='CAJA-RBAC-01',
+            branch_name='Casa Central',
+            status=CashRegisterStatus.CLOSED,
+            is_active=True,
+        )
+        self.register_2 = CashRegister.objects.create(
+            register_code='CAJA-RBAC-02',
+            branch_name='Casa Central',
+            status=CashRegisterStatus.CLOSED,
+            is_active=True,
+        )
+
+        self.shift_1 = CashShift.objects.create(
+            cash_register=self.register_1,
+            cashier=self.cajero_1,
+            shift_number='SHIFT-RBAC-0001',
+            keycloak_user_id='sub-cajero-1',
+            status=ShiftStatus.OPEN,
+            initial_balances_json={'PYG': 1000000},
+        )
+        self.shift_2 = CashShift.objects.create(
+            cash_register=self.register_2,
+            cashier=self.cajero_2,
+            shift_number='SHIFT-RBAC-0002',
+            keycloak_user_id='sub-cajero-2',
+            status=ShiftStatus.OPEN,
+            initial_balances_json={'PYG': 2000000},
+        )
+
+    def test_cajero_role_context_processor(self):
+        """Verifica que el procesador de contexto inyecte is_cajero y primary_role='Cajero'."""
+        from authentication.context_processors import auth_roles
+        from django.test import RequestFactory
+
+        factory = RequestFactory()
+        req = factory.get('/')
+        req.user = self.cajero_1
+
+        ctx = auth_roles(req)
+        self.assertTrue(ctx['is_cajero'])
+        self.assertFalse(ctx['is_operator'])
+        self.assertFalse(ctx['is_admin'])
+        self.assertEqual(ctx['primary_role'], 'Cajero')
+        self.assertEqual(ctx['primary_role_code'], 'cajero')
+
+    def test_admin_and_operator_inherit_cajero_flag(self):
+        """Verifica que Admin y Operador tengan is_cajero=True en el procesador de contexto."""
+        from authentication.context_processors import auth_roles
+        from django.test import RequestFactory
+
+        factory = RequestFactory()
+
+        req_admin = factory.get('/')
+        req_admin.user = self.admin
+        self.assertTrue(auth_roles(req_admin)['is_cajero'])
+
+        req_op = factory.get('/')
+        req_op.user = self.operator
+        self.assertTrue(auth_roles(req_op)['is_cajero'])
+
+        req_std = factory.get('/')
+        req_std.user = self.std_user
+        self.assertFalse(auth_roles(req_std)['is_cajero'])
+
+    def test_has_role_hierarchy_cajero(self):
+        """Verifica la evaluación jerárquica de has_role para el rol cajero."""
+        self.assertTrue(self.has_role(self.admin, 'cajero'))
+        self.assertTrue(self.has_role(self.operator, 'cajero'))
+        self.assertTrue(self.has_role(self.cajero_1, 'cajero'))
+        self.assertFalse(self.has_role(self.std_user, 'cajero'))
+
+        # Cajero no hereda operator ni admin
+        self.assertFalse(self.has_role(self.cajero_1, 'operator'))
+        self.assertFalse(self.has_role(self.cajero_1, 'admin'))
+        self.assertTrue(self.has_role(self.cajero_1, 'user'))
+
+        # Soporte para sinónimo 'cashier'
+        self.assertTrue(self.has_role(self.cajero_1, 'cashier'))
+        self.assertFalse(self.has_role(self.std_user, 'cashier'))
+
+    def test_cajero_required_decorator(self):
+        """Verifica el decorador @cajero_required en vistas basadas en función."""
+        from authentication.permissions import cajero_required
+        from django.test import RequestFactory
+        from django.core.exceptions import PermissionDenied
+
+        @cajero_required(raise_exception=True)
+        def dummy_cash_view(request):
+            return HttpResponse("OK CAJERO")
+
+        factory = RequestFactory()
+
+        # Cajero autorizado
+        req = factory.get('/')
+        req.user = self.cajero_1
+        res = dummy_cash_view(req)
+        self.assertEqual(res.content.decode(), "OK CAJERO")
+
+        # Operador y Admin autorizados por jerarquía
+        req.user = self.operator
+        self.assertEqual(dummy_cash_view(req).content.decode(), "OK CAJERO")
+        req.user = self.admin
+        self.assertEqual(dummy_cash_view(req).content.decode(), "OK CAJERO")
+
+        # Usuario estándar denegado con PermissionDenied
+        req.user = self.std_user
+        with self.assertRaises(PermissionDenied):
+            dummy_cash_view(req)
+
+    def test_cashier_required_mixin(self):
+        """Verifica el mixin CashierRequiredMixin en vistas basadas en clases."""
+        from authentication.permissions import CashierRequiredMixin
+        from django.views.generic import View
+        from django.test import RequestFactory
+        from django.core.exceptions import PermissionDenied
+
+        class DummyCashierCBV(CashierRequiredMixin, View):
+            raise_exception = True
+
+            def get(self, request):
+                return HttpResponse("OK CASHIER CBV")
+
+        factory = RequestFactory()
+        cbv = DummyCashierCBV.as_view()
+
+        req = factory.get('/')
+        req.user = self.cajero_1
+        self.assertEqual(cbv(req).content.decode(), "OK CASHIER CBV")
+
+        req.user = self.std_user
+        with self.assertRaises(PermissionDenied):
+            cbv(req)
+
+    def test_verify_shift_ownership(self):
+        """Verifica el aislamiento multi-usuario de turnos de caja."""
+        # Cajero 1 es dueño de shift 1, no de shift 2
+        self.assertTrue(self.verify_shift_ownership(self.cajero_1, self.shift_1))
+        self.assertFalse(self.verify_shift_ownership(self.cajero_1, self.shift_2))
+
+        # Cajero 2 es dueño de shift 2, no de shift 1
+        self.assertTrue(self.verify_shift_ownership(self.cajero_2, self.shift_2))
+        self.assertFalse(self.verify_shift_ownership(self.cajero_2, self.shift_1))
+
+        # Admin y Operador tienen supervisión sobre cualquier turno
+        self.assertTrue(self.verify_shift_ownership(self.admin, self.shift_1))
+        self.assertTrue(self.verify_shift_ownership(self.admin, self.shift_2))
+        self.assertTrue(self.verify_shift_ownership(self.operator, self.shift_1))
+        self.assertTrue(self.verify_shift_ownership(self.operator, self.shift_2))
+
+        # Usuario estándar no tiene acceso a ningún turno
+        self.assertFalse(self.verify_shift_ownership(self.std_user, self.shift_1))
+        self.assertFalse(self.verify_shift_ownership(self.std_user, self.shift_2))
+
+    def test_shift_ownership_required_mixin(self):
+        """Verifica el mixin ShiftOwnershipRequiredMixin para control de acceso a turnos."""
+        from authentication.permissions import ShiftOwnershipRequiredMixin
+        from django.views.generic import View
+        from django.test import RequestFactory
+        from django.core.exceptions import PermissionDenied
+
+        class DummyShiftDetailCBV(ShiftOwnershipRequiredMixin, View):
+            raise_exception = True
+
+            def get(self, request, pk):
+                return HttpResponse(f"SHIFT {pk} OK")
+
+        factory = RequestFactory()
+        cbv = DummyShiftDetailCBV.as_view()
+
+        # Cajero 1 accede a su turno -> éxito
+        req = factory.get('/')
+        req.user = self.cajero_1
+        res = cbv(req, pk=self.shift_1.pk)
+        self.assertEqual(res.content.decode(), f"SHIFT {self.shift_1.pk} OK")
+
+        # Cajero 1 intenta acceder al turno de Cajero 2 -> PermissionDenied (403)
+        req.user = self.cajero_1
+        with self.assertRaises(PermissionDenied):
+            cbv(req, pk=self.shift_2.pk)
+
+        # Admin puede acceder al turno de cualquier cajero
+        req.user = self.admin
+        res = cbv(req, pk=self.shift_2.pk)
+        self.assertEqual(res.content.decode(), f"SHIFT {self.shift_2.pk} OK")
+
+    def test_auth_tags_cajero_support(self):
+        """Verifica los filtros y etiquetas de plantilla con el rol cajero."""
+        from authentication.templatetags.auth_tags import has_role, user_role_badge
+
+        self.assertTrue(has_role(self.cajero_1, 'cajero'))
+        self.assertTrue(has_role(self.cajero_1, 'cashier'))
+        self.assertFalse(has_role(self.std_user, 'cajero'))
+
+        badge_cajero = user_role_badge(self.cajero_1)
+        self.assertIn('role-cajero', badge_cajero)
+        self.assertIn('Cajero', badge_cajero)
+
+    def test_keycloak_backend_maps_cajero_role(self):
+        """Verifica que el backend OIDC de Keycloak asigne el grupo 'cajero' al recibir el claim."""
+        from authentication.backends import KeycloakOIDCAuthenticationBackend
+
+        backend = KeycloakOIDCAuthenticationBackend()
+        test_user = User.objects.create_user(username='oidc_cajero_test', email='oidc_cajero@test.com')
+
+        backend._map_roles_to_permissions(test_user, ['cajero'])
+        self.assertTrue(test_user.groups.filter(name='cajero').exists())
+
+        # Test synonym 'cashier'
+        backend._map_roles_to_permissions(test_user, ['cashier'])
+        self.assertTrue(test_user.groups.filter(name='cajero').exists())

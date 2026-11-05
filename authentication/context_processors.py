@@ -37,6 +37,7 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
             'user_roles': [],
             'is_admin': False,
             'is_operator': False,
+            'is_cajero': False,
             'is_user_role': False,
             'primary_role': 'Invitado',
             'primary_role_code': 'guest',
@@ -64,6 +65,7 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
 
     is_admin = 'admin' in roles or user.is_superuser
     is_operator = 'operator' in roles or is_admin
+    is_cajero = 'cajero' in roles or 'cashier' in roles or is_operator or is_admin
     is_user_role = 'user' in roles
 
     if is_admin:
@@ -72,6 +74,9 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
     elif 'operator' in roles:
         primary_role = 'Operador'
         primary_role_code = 'operator'
+    elif 'cajero' in roles or 'cashier' in roles:
+        primary_role = 'Cajero'
+        primary_role_code = 'cajero'
     else:
         primary_role = 'Usuario'
         primary_role_code = 'user'
@@ -87,6 +92,7 @@ def auth_roles(request: HttpRequest) -> Dict[str, Any]:
         'user_roles': sorted(list(roles)),
         'is_admin': is_admin,
         'is_operator': is_operator,
+        'is_cajero': is_cajero,
         'is_user_role': is_user_role,
         'primary_role': primary_role,
         'primary_role_code': primary_role_code,

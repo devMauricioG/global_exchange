@@ -28,6 +28,46 @@ apps.cash.forms module
    :show-inheritance:
    :undoc-members:
 
+apps.cash.inventory_models module
+---------------------------------
+
+.. automodule:: apps.cash.inventory_models
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.inventory_services module
+-----------------------------------
+
+.. automodule:: apps.cash.inventory_services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.inventory_urls module
+-------------------------------
+
+.. automodule:: apps.cash.inventory_urls
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.inventory_views module
+--------------------------------
+
+.. automodule:: apps.cash.inventory_views
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.cash.tests_inventory module
+--------------------------------
+
+.. automodule:: apps.cash.tests_inventory
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 apps.cash.models module
 -----------------------
 

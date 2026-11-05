@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Ingreso de Billetes a Bóveda — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 700px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:vault_dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver al Panel de Bóvedas
+        </a>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <div style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 2rem;">💰</span>
+                <div>
+                    <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                        Ingreso de Billetes a Bóveda
+                    </h1>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0.25rem 0 0 0;">
+                        Registro manual de reposición o dotación externa de efectivo a la tesorería central.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+
+            <!-- Selección de Bóveda -->
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; font-size: 0.9rem;">
+                    Bóveda Destino <span style="color: var(--danger);">*</span>
+                </label>
+                <select name="vault" required class="form-select" style="width: 100%; padding: 0.65rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                    <option value="">-- Seleccione una Bóveda --</option>
+                    {% for vault in vaults %}
+                    <option value="{{ vault.id }}">{{ vault.name }} ({{ vault.code }}) - {{ vault.branch_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Selección de Denominación -->
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; font-size: 0.9rem;">
+                    Denominación y Divisa <span style="color: var(--danger);">*</span>
+                </label>
+                <select name="denomination" required class="form-select" style="width: 100%; padding: 0.65rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                    <option value="">-- Seleccione Denominación --</option>
+                    {% for denom in denominations %}
+                    <option value="{{ denom.id }}">{{ denom.currency.code }} - {{ denom }} (Valor facial: {{ denom.value|floatformat:2 }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Cantidad de billetes -->
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; font-size: 0.9rem;">
+                    Cantidad de Billetes <span style="color: var(--danger);">*</span>
+                </label>
+                <input type="number" name="quantity" min="1" step="1" required placeholder="Ej. 100" class="form-input" style="width: 100%; padding: 0.65rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                <small style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                    Número de billetes físicos a incorporar. La cantidad debe ser estrictamente positiva.
+                </small>
+            </div>
+
+            <!-- Notas / Referencia -->
+            <div style="margin-bottom: 1.75rem;">
+                <label style="display: block; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; font-size: 0.9rem;">
+                    Concepto / Referencia de Auditoría
+                </label>
+                <textarea name="notes" rows="3" placeholder="Ej. Reposición de remesa de Banco Central, acta de entrega N°..." class="form-textarea" style="width: 100%; padding: 0.65rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);"></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <a href="{% url 'cash:vault_dashboard' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary" style="background: var(--success); border-color: var(--success); font-weight: 700;">
+                    ✓ Confirmar Depósito
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+

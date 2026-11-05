@@ -711,3 +711,80 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-115.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+
+---
+
+### 24. SCRUM-116: Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes por Denominación
+
+* **Objetivo:** Incorporar en Keycloak y en `authentication/permissions.py` el rol Cajero y los mixins `@cajero_required` / `CashierRequiredMixin` para restringir el acceso a los módulos de apertura, cobranza y arqueo exclusivamente a operadores autorizados, aislando los turnos por usuario; e implementar el módulo de inventario físico de billetes por moneda y denominación para bóveda central y cajas con apertura, operación presencial, arqueo ciego y control administrativo.
+* **Aportes y Solución con IA:**
+  * **Configuración en Keycloak (`keycloak/imports/realm-export.json`):**
+    * Definición formal del rol de realm `cajero` en el archivo de exportación del realm.
+    * Creación en vivo del rol en `GlobalExchangeRealm` mediante `kcadm.sh`.
+    * Mapeo de claims OIDC (`realm_roles`) en `authentication/backends.py` asegurando la sincronización de usuarios hacia el grupo nativo `'cajero'`.
+  * **Permisos, Jerarquía y Aislamiento (`authentication/permissions.py`):**
+    * Actualización de `normalize_roles` y `has_role` estableciendo la jerarquía de herencia: Admin $\ge$ Operator $\ge$ Cajero $\ge$ User.
+    * Función `verify_shift_ownership`: Valida que el usuario sea el cajero titular del turno o cuente con privilegios de supervisión transversal (`admin`/`operator`).
+    * Decorador `@cajero_required`: Restringe FBVs a usuarios autorizados de ventanilla.
+    * Mixin `CashierRequiredMixin`: Hereda de `RoleRequiredMixin` protegiendo CBVs contra accesos no autorizados.
+    * Mixin `ShiftOwnershipRequiredMixin`: Control automático de propiedad y aislamiento de turnos.
+  * **Contexto Global y UI (`authentication/context_processors.py`, `auth_tags.py`, `templates/base.html`):**
+    * Inyección de `is_cajero`, `primary_role='Cajero'` y `primary_role_code='cajero'` en el procesador de contexto `auth_roles`.
+    * Soporte para filtros `has_role:"cajero"` y badge visual `<span class="role-badge role-cajero">💵 Cajero</span>`.
+    * Separación en el navbar del acceso `💵 Cajas` accesible para cajeros, operadores y administradores.
+  * **Blindaje de Vistas de Caja (`apps/cash/views.py`):**
+    * Actualización de `CashBaseMixin` para heredar de `CashierRequiredMixin`.
+    * Aislamiento estricto por usuario en `CashShiftCloseView`, `CashShiftDetailView`, `CashShiftReceiptView` y `CashShiftStatusApiView` lanzando `PermissionDenied` (HTTP 403) ante intentos de consulta o cierre de turnos ajenos.
+    * Filtrado automático de turnos por cajero titular en `CashShiftListView`.
+  * **Módulo de Inventario Físico de Billetes (`apps/cash/inventory_models.py`, `inventory_services.py`):**
+    * Modelos: `Vault`, `CurrencyDenomination`, `BanknoteInventory` (stock no negativo con validación en `clean()`), `InitialFloatConfig`, `BanknoteMovement` (auditoría forense inmutable) y `ShiftDenominationCount` (control y arqueo detallado por turno).
+    * Nuevos estados del sistema: `CashRegisterStatus.PENDING_CONTROL` y `ShiftStatus.PENDING_REVIEW` integrados al ciclo de vida de caja.
+    * `InventoryService`:
+      * `open_shift_inventory`: Transferencia atómica de dotación inicial desde bóveda a caja para divisas con tasa activa, con soporte de dotación parcial configurable (`allow_partial_fill`).
+      * `register_exchange_operation`: Actualización de stock en caja para billetes recibidos y entregados, validando stock físico antes de confirmar egresos (`InsufficientRegisterStockError`).
+      * `submit_cashier_count`: Declaración de arqueo físico por el cajero (arqueo ciego), cálculo de diferencias y transición a `PENDING_REVIEW` / `PENDING_CONTROL`.
+      * `approve_reconciliation`: Resolución por el administrador con acciones `APPROVE` (transfiere a bóveda y cierra), `REJECT` (devuelve a `OPEN` para reconteo) y `APPROVE_WITH_ADJUSTMENT` (cantidades ajustadas con motivo obligatorio).
+      * `get_register_stock_summary`, `get_vault_stock_summary` y `vault_deposit`.
+  * **Vistas, Rutas y Plantillas de Inventario (`apps/cash/inventory_views.py`, `inventory_urls.py`, `templates/cash/`):**
+    * `VaultDashboardView` y `VaultDepositView` (acceso exclusivo administrador).
+    * `ShiftInventoryView` (stock físico del puesto de atención para cajero/operador).
+    * `CashierDenominationCountView` (formulario de arqueo ciego por denominación para el cajero titular).
+    * `AdminReconciliationListView` y `AdminReconciliationActionView` (revisión y aprobación/ajuste/rechazo de arqueos por el administrador).
+    * Plantillas dark-theme responsivas: `vault_dashboard.html`, `vault_deposit.html`, `shift_inventory.html`, `cashier_denomination_count.html`, `admin_reconciliation_list.html` y `admin_reconciliation_detail.html`.
+  * **Administrador Django (`apps/cash/admin.py`):**
+    * Registro de `VaultAdmin`, `CurrencyDenominationAdmin`, `BanknoteInventoryAdmin`, `InitialFloatConfigAdmin`, `BanknoteMovementAdmin` y el inline `ShiftDenominationCountInline` dentro de `CashShiftAdmin`.
+  * **Calidad y Verificación:**
+    * 9 pruebas en `authentication/tests.py` (`CajeroRoleAndShiftIsolationTests`) -> 70 tests OK.
+    * 9 pruebas en `apps/cash/tests.py` (`CashRBACAndShiftIsolationTests`) -> 45 tests OK.
+    * 27 pruebas en `apps/cash/tests_inventory.py` (`InventoryModelTests`, `InventoryServiceOpenTests`, `InventoryServiceOperationTests`, `InventoryServiceReconciliationTests`, `InventoryServiceStockSummaryTests`) -> 27 tests OK.
+    * Suite global del proyecto: **581 tests aprobados al 100% de éxito (OK)**, 0 fallos, sin regresiones.
+    * Compilación limpia de documentación Sphinx (`build succeeded`).
+* **Archivos intervenidos:**
+  * `keycloak/imports/realm-export.json`
+  * `authentication/backends.py`
+  * `authentication/permissions.py`
+  * `authentication/context_processors.py`
+  * `authentication/templatetags/auth_tags.py`
+  * `authentication/tests.py`
+  * `templates/base.html`
+  * `apps/cash/models.py`
+  * `apps/cash/inventory_models.py`
+  * `apps/cash/inventory_services.py`
+  * `apps/cash/inventory_views.py`
+  * `apps/cash/inventory_urls.py`
+  * `apps/cash/urls.py`
+  * `apps/cash/admin.py`
+  * `apps/cash/migrations/0002_vault_alter_cashregister_status_and_more.py`
+  * `apps/cash/views.py`
+  * `apps/cash/tests.py`
+  * `apps/cash/tests_inventory.py`
+  * `templates/cash/vault_dashboard.html`
+  * `templates/cash/vault_deposit.html`
+  * `templates/cash/shift_inventory.html`
+  * `templates/cash/cashier_denomination_count.html`
+  * `templates/cash/admin_reconciliation_list.html`
+  * `templates/cash/admin_reconciliation_detail.html`
+  * `docs/documentacion/SCRUM-116.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
