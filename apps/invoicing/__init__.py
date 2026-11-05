@@ -54,6 +54,12 @@ __all__ = [
     'FacturaElectronica',
     # Services (SCRUM-118)
     'InvoiceService',
+    # Views (SCRUM-119)
+    'FacturaElectronicaDetailView',
+    'FacturaElectronicaPdfDownloadView',
+    'FacturaElectronicaXmlDownloadView',
+    'FacturaElectronicaSifenSyncAjaxView',
+    'FacturaConsultaApiView',
 ]
 
 # Importaciones tardías para evitar circular imports con Django ORM
@@ -64,5 +70,14 @@ def __getattr__(name):
     if name == 'InvoiceService':
         from .services import InvoiceService
         return InvoiceService
+    if name in (
+        'FacturaElectronicaDetailView',
+        'FacturaElectronicaPdfDownloadView',
+        'FacturaElectronicaXmlDownloadView',
+        'FacturaElectronicaSifenSyncAjaxView',
+        'FacturaConsultaApiView',
+    ):
+        from . import views
+        return getattr(views, name)
     raise AttributeError(f"module 'apps.invoicing' has no attribute {name!r}")
 

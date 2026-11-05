@@ -888,3 +888,33 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+### 27. SCRUM-119: Vistas y Endpoints para Consulta, Visualización y Descarga de KuDE PDF y XML Firmado
+
+* **Objetivo:** Implementar vistas web, endpoints REST y componentes AJAX para visualización integrada del KuDE, descarga directa de PDF/XML firmado y sincronización en tiempo real del estado SIFEN.
+* **Aportes y Solución con IA:**
+  * Card integrada de KuDE en `transaction_detail.html` con CDC formateado, badge de estado, botones de descarga y botón AJAX de sincronización SIFEN.
+  * 5 vistas/endpoints en `apps/invoicing/views.py`: `FacturaElectronicaDetailView`, `FacturaElectronicaPdfDownloadView`, `FacturaElectronicaXmlDownloadView`, `FacturaElectronicaSifenSyncAjaxView`, `FacturaConsultaApiView`.
+  * Endpoint transaccional `TransactionSifenSyncAjaxView` en `transactions/kude_views.py`.
+  * `InvoicingAccessMixin` con control IDOR estricto por `CustomerUserAssignment`.
+  * Enriquecimiento de `TransactionDetailView.get_context_data` con auto-emisión de factura.
+  * 11 pruebas unitarias en `InvoicingViewsTests`.
+  * Suite global: **642/642 tests OK**, Sphinx: `build succeeded`.
+* **Archivos intervenidos:**
+  * `apps/invoicing/views.py`
+  * `apps/invoicing/urls.py`
+  * `config/urls.py`
+  * `transactions/kude_views.py`
+  * `transactions/urls.py`
+  * `transactions/views.py`
+  * `templates/transactions/transaction_detail.html`
+  * `templates/transactions/kude.html`
+  * `apps/invoicing/__init__.py`
+  * `apps/invoicing/providers/mock.py`
+  * `apps/invoicing/tests.py`
+  * `docs/sphinx/source/invoicing.rst`
+  * `docs/documentacion/SCRUM-119.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+

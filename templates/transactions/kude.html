@@ -330,7 +330,13 @@
             {% endif %}
             <a href="{{ receipt_url }}" class="btn-toolbar" style="background-color: #475569; color: #ffffff;">📄 Recibo de Caja</a>
         </div>
-        <div style="display: flex; gap: 0.5rem;">
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            {% if sync_url %}
+            <button type="button" class="btn-toolbar" id="btnKudeSyncSifen" style="background-color: #10b981; color: #ffffff;" onclick="syncKudeSifen('{{ sync_url }}')">
+                <span id="kudeSyncSpinner" style="display:none;">⏳ </span>
+                <span id="kudeSyncLabel">🔄 Actualizar SIFEN</span>
+            </button>
+            {% endif %}
             <a href="{{ pdf_url }}" class="btn-toolbar btn-pdf" download>📥 Descargar KuDE (PDF)</a>
             <a href="{{ xml_url }}" class="btn-toolbar btn-xml" download>💾 Descargar XML Firmado</a>
             <button type="button" class="btn-toolbar btn-print" onclick="window.print()">🖨️ Imprimir</button>
@@ -487,6 +493,44 @@
 
     </div>
 
+    <script>
+        function syncKudeSifen(url) {
+            const spinner = document.getElementById('kudeSyncSpinner');
+            const label = document.getElementById('kudeSyncLabel');
+            const btn = document.getElementById('btnKudeSyncSifen');
+
+            if (spinner) spinner.style.display = 'inline-block';
+            if (label) label.innerText = 'Consultando...';
+            if (btn) btn.disabled = true;
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (spinner) spinner.style.display = 'none';
+                if (label) label.innerText = '🔄 Actualizar SIFEN';
+                if (btn) btn.disabled = false;
+
+                if (data.success) {
+                    alert(`✅ Estado SIFEN: ${data.descripcion_sifen || data.estado_sifen_display}\nActualizado a las: ${data.updated_at}`);
+                    window.location.reload();
+                } else {
+                    alert(`⚠️ ${data.error || 'No se pudo sincronizar con SIFEN.'}`);
+                }
+            })
+            .catch(() => {
+                if (spinner) spinner.style.display = 'none';
+                if (label) label.innerText = '🔄 Actualizar SIFEN';
+                if (btn) btn.disabled = false;
+                alert('⚠️ Error de comunicación al consultar el estado SIFEN.');
+            });
+        }
+    </script>
 </body>
 </html>
 

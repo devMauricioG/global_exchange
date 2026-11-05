@@ -22,6 +22,7 @@ urlpatterns = [
     path('rates/', include('rates.urls')),
     path('transactions/', include('transactions.urls')),
     path('cash/', include('apps.cash.urls')),
+    path('invoicing/', include('apps.invoicing.urls')),
     path('kiosk/', include('transactions.kiosk_urls')),
     path('kude/<str:identifier>/', TransactionKudeConsultaApiView.as_view(), name='kude_lookup'),
     re_path(r'^docs/(?P<path>.*)$', serve_sphinx_docs, name='sphinx_docs'),

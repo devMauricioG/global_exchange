@@ -98,3 +98,20 @@ apps.invoicing.admin module
    :show-inheritance:
    :undoc-members:
 
+apps.invoicing.views module
+---------------------------
+
+.. automodule:: apps.invoicing.views
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.urls module
+--------------------------
+
+.. automodule:: apps.invoicing.urls
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+
