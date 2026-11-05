@@ -30,6 +30,9 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-121** | Terminal Táctil /kiosk/ y Consulta, Visualización y Descarga de KuDE PDF y XML | Hotfix / Sprint 4 | Mauricio González | Finalizado |
 | **SCRUM-122** | Protocolo de Cuota y FacturaSeguraClient con Reserva Blindada de 10 Pruebas y KioskCashService | Sprint 4 / Kiosk | Mauricio González | Finalizado |
 | **SCRUM-114** | Modelado de datos para Cajas, Turnos y Movimientos de Efectivo en `apps/cash/` | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
+| **SCRUM-115** | Vistas y formularios para Apertura, Registro de Efectivo y Cierre con Arqueo de Caja | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
+| **SCRUM-116** | Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
+| **SCRUM-117** | Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider) | Sprint 5 / Invoicing | Mauricio González | Finalizado |
 
 
 ---
@@ -712,6 +715,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
 
+<<<<<<< HEAD
 
 ---
 
@@ -786,5 +790,52 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `templates/cash/admin_reconciliation_list.html`
   * `templates/cash/admin_reconciliation_detail.html`
   * `docs/documentacion/SCRUM-116.md`
+
+---
+
+### 25. SCRUM-117: Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider)
+
+* **Objetivo:** Diseñar en la nueva aplicación modular `apps/invoicing/` el patrón Strategy/Adapter con la interfaz base `InvoiceProvider` y la implementación simulada `MockInvoiceProvider` que retorne CDCs válidos de 44 dígitos (Módulo 11 oficial de DNIT/SET), estados SIFEN Aprobado y KUDE/XML locales representativos, asegurando que el desarrollo local y las pruebas unitarias ejecuten con 0 consumo de cuota real de la API de Factura Segura, basándose en la especificación técnica "API de Factura Segura para ESI v01".
+* **Aportes y Solución con IA:**
+  * **Patrón Strategy / Adapter y DTOs (`apps/invoicing/`):**
+    * Interfaz abstracta base `InvoiceProvider` (`apps/invoicing/providers/base.py`) formalizando las operaciones oficiales ESI: `calcular_de`, `generar_de`, `get_estado_sifen`, `sol_cancelacion`, `sol_inutilizacion`, `dwn_kude`, `dwn_xml` y `emitir_factura`.
+    * DTOs tipados en `apps/invoicing/types.py`: `InvoiceResponse`, `StatusResponse`, `CalculationResult` y enum `EstadoSifenEnum`.
+    * Jerarquía de excepciones en `apps/invoicing/exceptions.py`: `InvoicingError`, `InvoiceProviderError`, `QuotaExhaustedError`, `LiveModeDisabledError`, `InvoiceValidationError`.
+  * **Motor Matemático SIFEN Canónico (`apps/invoicing/calculators.py`):**
+    * Algoritmo reglamentario de Módulo 11 (`compute_mod11_dv`) para RUC y claves de acceso.
+    * Generador oficial de Clave de Acceso CDC de 44 dígitos numéricos (`generate_cdc`).
+    * Implementación exacta de las fórmulas del manual ESI (páginas 17-21) para ítems gravados (10% y 5%), gravado parcial, exentos y exonerados, así como cálculo de bases imponibles y liquidación global de IVA.
+  * **Simulador de Alta Fidelidad (`MockInvoiceProvider`):**
+    * Generación de CDCs de 44 dígitos con checksum válido.
+    * Generador autónomo de PDF binario KuDE 1.4 sin librerías externas.
+    * Generador de XML firmado representativo bajo espacio de nombres `http://ekuatia.set.gov.py/sifen/xsd` (`rDE`).
+    * Registro en memoria para trazabilidad en pruebas de estados SIFEN, cancelaciones e inutilizaciones sin llamadas externas.
+  * **Adaptador Real y Blindaje (`FacturaSeguraProvider` y Factory):**
+    * Implementación del protocolo envelope ESI (`/misife00/v1/esi`) y login (`/login?include_auth_token`).
+    * Blindaje estricto de seguridad: bloqueo con `LiveModeDisabledError` si `FACTURA_SEGURA_LIVE_ENABLED=False`.
+    * Selector dinámico en `apps/invoicing/providers/factory.py` (`get_invoice_provider`, `set_invoice_provider`, `reset_invoice_provider`).
+  * **Verificación y Calidad:**
+    * Suite automatizada de **25 pruebas unitarias e integración en `apps/invoicing/tests.py`** con **93% de cobertura**.
+    * Suite completa del proyecto: **561 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 regresiones.
+    * Compilación limpia de Sphinx con el nuevo módulo `invoicing.rst` (`build succeeded`).
+* **Archivos intervenidos:**
+  * `apps/invoicing/__init__.py`
+  * `apps/invoicing/apps.py`
+  * `apps/invoicing/exceptions.py`
+  * `apps/invoicing/types.py`
+  * `apps/invoicing/calculators.py`
+  * `apps/invoicing/providers/__init__.py`
+  * `apps/invoicing/providers/base.py`
+  * `apps/invoicing/providers/mock.py`
+  * `apps/invoicing/providers/facturasegura.py`
+  * `apps/invoicing/providers/factory.py`
+  * `apps/invoicing/tests.py`
+  * `apps/__init__.py`
+  * `config/settings/base.py`
+  * `config/settings/test.py`
+  * `docs/sphinx/source/invoicing.rst`
+  * `docs/sphinx/source/modules.rst`
+  * `docs/documentacion/SCRUM-117.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`

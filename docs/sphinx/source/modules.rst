@@ -10,4 +10,5 @@ global_exchange
    rates
    transactions
    cash
+   invoicing
    config
