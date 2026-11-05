@@ -711,3 +711,47 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-115.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
+
+
+---
+
+### 24. SCRUM-116: Configuración de Rol Cajero, permisos RBAC y blindaje de vistas de tesorería
+
+* **Objetivo:** Incorporar en Keycloak y en `authentication/permissions.py` el rol Cajero y los mixins `@cajero_required` / `CashierRequiredMixin` para restringir el acceso a los módulos de apertura, cobranza y arqueo exclusivamente a operadores autorizados, aislando los turnos por usuario.
+* **Aportes y Solución con IA:**
+  * **Configuración en Keycloak (`keycloak/imports/realm-export.json`):**
+    * Definición formal del rol de realm `cajero` en el archivo de exportación del realm.
+    * Creación en vivo del rol en `GlobalExchangeRealm` mediante `kcadm.sh`.
+    * Mapeo de claims OIDC (`realm_roles`) en `authentication/backends.py` asegurando la sincronización de usuarios hacia el grupo nativo `'cajero'`.
+  * **Permisos, Jerarquía y Aislamiento (`authentication/permissions.py`):**
+    * Actualización de `normalize_roles` y `has_role` estableciendo la jerarquía de herencia: Admin $\ge$ Operator $\ge$ Cajero $\ge$ User.
+    * Función `verify_shift_ownership`: Valida que el usuario sea el cajero titular del turno o cuente con privilegios de supervisión transversal (`admin`/`operator`).
+    * Decorador `@cajero_required`: Restringe FBVs a usuarios autorizados de ventanilla.
+    * Mixin `CashierRequiredMixin`: Hereda de `RoleRequiredMixin` protegiendo CBVs contra accesos no autorizados.
+    * Mixin `ShiftOwnershipRequiredMixin`: Control automático de propiedad y aislamiento de turnos.
+  * **Contexto Global y UI (`authentication/context_processors.py`, `auth_tags.py`, `templates/base.html`):**
+    * Inyección de `is_cajero`, `primary_role='Cajero'` y `primary_role_code='cajero'` en el procesador de contexto `auth_roles`.
+    * Soporte para filtros `has_role:"cajero"` y badge visual `<span class="role-badge role-cajero">💵 Cajero</span>`.
+    * Separación en el navbar del acceso `💵 Cajas` accesible para cajeros, operadores y administradores.
+  * **Blindaje de Vistas de Caja (`apps/cash/views.py`):**
+    * Actualización de `CashBaseMixin` para heredar de `CashierRequiredMixin`.
+    * Aislamiento estricto por usuario en `CashShiftCloseView`, `CashShiftDetailView`, `CashShiftReceiptView` y `CashShiftStatusApiView` lanzando `PermissionDenied` (HTTP 403) ante intentos de consulta o cierre de turnos ajenos.
+    * Filtrado automático de turnos por cajero titular en `CashShiftListView`.
+  * **Calidad y Verificación:**
+    * 9 nuevas pruebas en `authentication/tests.py` (`CajeroRoleAndShiftIsolationTests`) -> 70 tests OK.
+    * 9 nuevas pruebas en `apps/cash/tests.py` (`CashRBACAndShiftIsolationTests`) -> 45 tests OK.
+    * Suite global del proyecto: **554 tests aprobados al 100% de éxito (OK)**, 0 fallos, sin regresiones.
+    * Compilación limpia de documentación Sphinx (`build succeeded`).
+* **Archivos intervenidos:**
+  * `keycloak/imports/realm-export.json`
+  * `authentication/backends.py`
+  * `authentication/permissions.py`
+  * `authentication/context_processors.py`
+  * `authentication/templatetags/auth_tags.py`
+  * `authentication/tests.py`
+  * `templates/base.html`
+  * `apps/cash/views.py`
+  * `apps/cash/tests.py`
+  * `docs/documentacion/SCRUM-116.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`

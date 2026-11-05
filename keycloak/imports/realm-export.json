@@ -76,6 +76,10 @@
       {
         "name": "operator",
         "description": "Operations and transactions manager role"
+      },
+      {
+        "name": "cajero",
+        "description": "Cajero / Cashier role for physical branch tellers and cash management"
       }
     ]
   },

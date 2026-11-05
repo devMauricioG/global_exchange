@@ -32,9 +32,11 @@ def _extract_user_roles(user: Any) -> Set[str]:
     if getattr(user, 'is_superuser', False):
         roles.add('admin')
         roles.add('operator')
+        roles.add('cajero')
 
     if getattr(user, 'is_staff', False) and not roles:
         roles.add('operator')
+        roles.add('cajero')
 
     if not roles:
         roles.add('user')
@@ -71,6 +73,8 @@ def has_role(user: Any, role_name: str) -> bool:
         return 'admin' in roles or getattr(user, 'is_superuser', False)
     elif target == 'operator':
         return 'operator' in roles or 'admin' in roles or getattr(user, 'is_staff', False)
+    elif target in ('cajero', 'cashier'):
+        return 'cajero' in roles or 'operator' in roles or 'admin' in roles or getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False)
     elif target == 'user':
         return 'user' in roles or len(roles) > 0
 
@@ -126,5 +130,7 @@ def user_role_badge(user: Any) -> str:
         return mark_safe('<span class="role-badge role-admin">👑 Administrador</span>')
     elif 'operator' in roles or getattr(user, 'is_staff', False):
         return mark_safe('<span class="role-badge role-operator">⚡ Operador</span>')
+    elif 'cajero' in roles or 'cashier' in roles:
+        return mark_safe('<span class="role-badge role-cajero">💵 Cajero</span>')
     else:
         return mark_safe('<span class="role-badge role-user">👤 Usuario</span>')

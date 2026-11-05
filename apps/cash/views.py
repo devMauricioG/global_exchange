@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -26,7 +26,7 @@ from django.utils import timezone
 from django.views import View
 from django.views.generic import DetailView, ListView, TemplateView
 
-from authentication.permissions import RoleRequiredMixin
+from authentication.permissions import CashierRequiredMixin, RoleRequiredMixin, has_role, verify_shift_ownership
 from rates.models import Currency
 from .forms import (
     BlindReconciliationForm,
@@ -55,8 +55,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_CASH_ROLES = ['admin', 'operator', 'cajero']
 
 
-class CashBaseMixin(LoginRequiredMixin, RoleRequiredMixin):
-    """Mixin base de seguridad para las vistas operativas de caja."""
+class CashBaseMixin(LoginRequiredMixin, CashierRequiredMixin):
+    """Mixin base de seguridad para las vistas operativas de caja y tesorería (SCRUM-116)."""
 
     allowed_roles = ALLOWED_CASH_ROLES
     permission_denied_message = "Requiere rol de Cajero, Operador o Administrador para operar en este módulo."
@@ -226,9 +226,9 @@ class CashShiftCloseView(CashBaseMixin, View):
     def get_shift(self, request: HttpRequest, pk: Optional[int] = None) -> CashShift:
         if pk:
             shift = get_object_or_404(CashShift, pk=pk)
-            # Permitir que el cajero titular o un supervisor/admin cierren
-            if shift.cashier != request.user and not (request.user.is_staff or request.user.is_superuser):
-                raise Http404("No tiene autorización para cerrar este turno ajeno.")
+            # Aislamiento por usuario: solo el cajero titular o supervisores (admin/operator) pueden cerrar
+            if not verify_shift_ownership(request.user, shift):
+                raise PermissionDenied("No tiene autorización para cerrar un turno de caja asignado a otro usuario.")
             return shift
 
         shift = CashShift.objects.filter(cashier=request.user, status=ShiftStatus.OPEN).first()
@@ -295,12 +295,18 @@ class CashShiftCloseView(CashBaseMixin, View):
 
 class CashShiftDetailView(CashBaseMixin, DetailView):
     """
-    Ficha técnica y acta completa de arqueo y cierre del turno.
+    Ficha técnica y acta completa de arqueo y cierre del turno con aislamiento por usuario (SCRUM-116).
     """
 
     model = CashShift
     template_name = 'cash/shift_detail.html'
     context_object_name = 'shift'
+
+    def get_object(self, queryset=None) -> CashShift:
+        shift = super().get_object(queryset=queryset)
+        if not verify_shift_ownership(self.request.user, shift):
+            raise PermissionDenied("No tiene autorización para visualizar los detalles de un turno asignado a otro cajero.")
+        return shift
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
         context = super().get_context_data(**kwargs)
@@ -346,9 +352,9 @@ class CashShiftListView(CashBaseMixin, ListView):
         if register_id:
             qs = qs.filter(cash_register_id=register_id)
 
-        # Si el usuario no es staff/admin ni supervisor, ve sus propios turnos
+        # Aislamiento por usuario: si el usuario no es admin ni operador, solo ve sus propios turnos
         user = self.request.user
-        if not (user.is_staff or user.is_superuser):
+        if not has_role(user, "admin,operator"):
             qs = qs.filter(cashier=user)
 
         return qs
@@ -382,6 +388,8 @@ class CashShiftStatusApiView(CashBaseMixin, View):
 
     def get(self, request: HttpRequest, pk: int, *args: Any, **kwargs: Any) -> JsonResponse:
         shift = get_object_or_404(CashShift, pk=pk)
+        if not verify_shift_ownership(request.user, shift):
+            raise PermissionDenied("No tiene autorización para consultar saldos de un turno ajeno.")
         summary = CashService.get_shift_summary(shift)
         return JsonResponse({
             'success': True,

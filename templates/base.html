@@ -152,6 +152,12 @@
             border: 1px solid rgba(99, 102, 241, 0.4);
         }
 
+        .role-cajero {
+            background-color: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+        }
+
         .role-user {
             background-color: rgba(16, 185, 129, 0.15);
             color: #34d399;
@@ -954,13 +960,17 @@
                     </li>
                     {% endif %}
 
-                    <!-- Opción Visible para roles Admin y Operator: Comisiones y Límites -->
-                    {% if is_operator or user|has_any_role:"admin,operator" %}
+                    <!-- Opción Visible para roles Admin, Operator y Cajero: Cajas y Tesorería (SCRUM-116) -->
+                    {% if is_cajero or is_operator or user|has_any_role:"admin,operator,cajero" %}
                         <li>
                             <a href="{% url 'cash:dashboard' %}" class="nav-link {% if '/cash/' in request.path %}active{% endif %}">
                                 💵 Cajas
                             </a>
                         </li>
+                    {% endif %}
+
+                    <!-- Opción Visible para roles Admin y Operator: Comisiones y Límites -->
+                    {% if is_operator or user|has_any_role:"admin,operator" %}
                         <li>
                             <a href="{% url 'rates:commission_list' %}" class="nav-link {% if '/rates/commissions/' in request.path %}active{% endif %}">
                                 💱 Comisiones

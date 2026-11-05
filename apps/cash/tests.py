@@ -737,3 +737,216 @@ class CashViewsTests(CashTestCaseBase):
         self.assertEqual(data['shift_number'], shift.shift_number)
         self.assertTrue(data['is_open'])
         self.assertIn('summary', data)
+
+
+
+class CashRBACAndShiftIsolationTests(TestCase):
+    """
+    Pruebas SCRUM-116: Blindaje RBAC de tesorería y aislamiento de turnos de caja por usuario.
+    """
+
+    def setUp(self) -> None:
+        self.cur_pyg = Currency.objects.create(
+            code='PYG',
+            name='Guaraní Paraguayo',
+            symbol='Gs.',
+            decimals=0,
+            is_active=True,
+        )
+        self.cur_usd = Currency.objects.create(
+            code='USD',
+            name='Dólar Estadounidense',
+            symbol='$',
+            decimals=2,
+            is_active=True,
+        )
+
+        self.group_cajero, _ = Group.objects.get_or_create(name='cajero')
+        self.group_operator, _ = Group.objects.get_or_create(name='operator')
+        self.group_user, _ = Group.objects.get_or_create(name='user')
+
+        self.cajero_1 = User.objects.create_user(
+            username='cajero_juan',
+            email='cajero_juan@test.com',
+            password='Password123!',
+        )
+        self.cajero_1.groups.add(self.group_cajero)
+        self.client_cajero_1 = Client()
+        self.client_cajero_1.force_login(self.cajero_1)
+
+        self.cajero_2 = User.objects.create_user(
+            username='cajero_maria',
+            email='cajero_maria@test.com',
+            password='Password123!',
+        )
+        self.cajero_2.groups.add(self.group_cajero)
+        self.client_cajero_2 = Client()
+        self.client_cajero_2.force_login(self.cajero_2)
+
+        self.user_std = User.objects.create_user(
+            username='cliente_carlos',
+            email='carlos@test.com',
+            password='Password123!',
+        )
+        self.user_std.groups.add(self.group_user)
+        self.client_std = Client()
+        self.client_std.force_login(self.user_std)
+
+        self.admin_user = User.objects.create_superuser(
+            username='admin_tesoreria',
+            email='admin_tesoreria@test.com',
+            password='Password123!',
+        )
+        self.client_admin = Client()
+        self.client_admin.force_login(self.admin_user)
+
+        self.op_user = User.objects.create_user(
+            username='op_tesoreria',
+            email='op_tesoreria@test.com',
+            password='Password123!',
+            is_staff=True,
+        )
+        self.op_user.groups.add(self.group_operator)
+        self.client_op = Client()
+        self.client_op.force_login(self.op_user)
+
+        self.reg_1 = CashRegister.objects.create(
+            register_code='CAJA-ISO-01',
+            branch_name='Sucursal Asunción',
+            status=CashRegisterStatus.CLOSED,
+            is_active=True,
+        )
+        self.reg_2 = CashRegister.objects.create(
+            register_code='CAJA-ISO-02',
+            branch_name='Sucursal Asunción',
+            status=CashRegisterStatus.CLOSED,
+            is_active=True,
+        )
+
+    def test_user_with_only_cajero_role_can_access_dashboard(self) -> None:
+        """Un usuario con rol 'cajero' puede acceder a la gestión de caja."""
+        res = self.client_cajero_1.get(reverse('cash:dashboard'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "CAJA-ISO-01")
+
+    def test_standard_user_cannot_access_cash_dashboard(self) -> None:
+        """Un usuario estándar sin rol de caja es redirigido al intentar ingresar a /cash/."""
+        res = self.client_std.get(reverse('cash:dashboard'))
+        # RoleRequiredMixin redirige a home con warning message
+        self.assertEqual(res.status_code, 302)
+        self.assertIn(reverse('home'), res.url)
+
+    def test_standard_user_cannot_open_shift(self) -> None:
+        """Un usuario estándar sin rol de cajero no puede abrir turnos de ventanilla."""
+        res = self.client_std.get(reverse('cash:shift_open'))
+        self.assertEqual(res.status_code, 302)
+
+        data = {
+            'cash_register': self.reg_1.pk,
+            'initial_PYG': '1000000',
+        }
+        res_post = self.client_std.post(reverse('cash:shift_open'), data=data)
+        self.assertEqual(res_post.status_code, 302)
+        self.reg_1.refresh_from_db()
+        self.assertFalse(self.reg_1.is_open)
+
+    def test_cajero_cannot_close_other_cajero_shift(self) -> None:
+        """Aislamiento: Un cajero no puede cerrar el turno abierto de otro compañero."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        # Cajero 2 intenta cerrar el turno de Cajero 1 especificando su pk
+        res_get = self.client_cajero_2.get(reverse('cash:shift_close', kwargs={'pk': shift_1.pk}))
+        self.assertEqual(res_get.status_code, 403)
+
+        data = {
+            'counted_PYG': '500000',
+        }
+        res_post = self.client_cajero_2.post(reverse('cash:shift_close', kwargs={'pk': shift_1.pk}), data=data)
+        self.assertEqual(res_post.status_code, 403)
+        shift_1.refresh_from_db()
+        self.assertTrue(shift_1.is_open)
+
+    def test_cajero_cannot_view_other_cajero_shift_detail(self) -> None:
+        """Aislamiento: Un cajero no puede consultar el acta de cierre ni movimientos de otro cajero."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        res = self.client_cajero_2.get(reverse('cash:shift_detail', kwargs={'pk': shift_1.pk}))
+        self.assertEqual(res.status_code, 403)
+
+    def test_cajero_cannot_view_other_cajero_shift_receipt(self) -> None:
+        """Aislamiento: Un cajero no puede imprimir el ticket/acta de otro cajero."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        res = self.client_cajero_2.get(reverse('cash:shift_receipt', kwargs={'pk': shift_1.pk}))
+        self.assertEqual(res.status_code, 403)
+
+    def test_cajero_cannot_query_other_cajero_shift_status_api(self) -> None:
+        """Aislamiento: Un cajero no puede consultar saldos en tiempo real de otra ventanilla por API."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        res = self.client_cajero_2.get(reverse('cash:api_shift_status', kwargs={'pk': shift_1.pk}))
+        self.assertEqual(res.status_code, 403)
+
+    def test_cajero_shift_list_filters_out_other_cajeros_shifts(self) -> None:
+        """Aislamiento en lista: Cada cajero solo ve su propio historial de turnos."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        shift_2 = CashService.open_shift(
+            cash_register=self.reg_2,
+            cashier=self.cajero_2,
+            initial_balances={'PYG': 800000},
+        )
+
+        # Cajero 1 ve shift_1 pero NO shift_2
+        res_1 = self.client_cajero_1.get(reverse('cash:shift_list'))
+        self.assertEqual(res_1.status_code, 200)
+        self.assertContains(res_1, shift_1.shift_number)
+        self.assertNotContains(res_1, shift_2.shift_number)
+
+        # Cajero 2 ve shift_2 pero NO shift_1
+        res_2 = self.client_cajero_2.get(reverse('cash:shift_list'))
+        self.assertEqual(res_2.status_code, 200)
+        self.assertContains(res_2, shift_2.shift_number)
+        self.assertNotContains(res_2, shift_1.shift_number)
+
+    def test_admin_and_operator_can_view_and_close_any_shift(self) -> None:
+        """Supervisión: Administradores y Operadores de tesorería pueden supervisar y auditar todos los turnos."""
+        shift_1 = CashService.open_shift(
+            cash_register=self.reg_1,
+            cashier=self.cajero_1,
+            initial_balances={'PYG': 500000},
+        )
+        shift_2 = CashService.open_shift(
+            cash_register=self.reg_2,
+            cashier=self.cajero_2,
+            initial_balances={'PYG': 800000},
+        )
+
+        # Operador ve ambos en la lista
+        res_op_list = self.client_op.get(reverse('cash:shift_list'))
+        self.assertEqual(res_op_list.status_code, 200)
+        self.assertContains(res_op_list, shift_1.shift_number)
+        self.assertContains(res_op_list, shift_2.shift_number)
+
+        # Operador puede consultar detalle de turno de Cajero 1
+        res_op_detail = self.client_op.get(reverse('cash:shift_detail', kwargs={'pk': shift_1.pk}))
+        self.assertEqual(res_op_detail.status_code, 200)
+
+        # Admin puede consultar detalle de turno de Cajero 2
+        res_admin_detail = self.client_admin.get(reverse('cash:shift_detail', kwargs={'pk': shift_2.pk}))
+        self.assertEqual(res_admin_detail.status_code, 200)

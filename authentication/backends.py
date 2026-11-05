@@ -173,6 +173,7 @@ class KeycloakOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         Esquema de mapeo:
             * ``admin``: ``is_staff=True``, ``is_superuser=True``, grupo 'admin'.
             * ``operator``: ``is_staff=True``, ``is_superuser=False``, grupo 'operator'.
+            * ``cajero``: ``is_staff=False``, ``is_superuser=False``, grupo 'cajero' (ventanilla y tesorería).
             * ``user``: ``is_staff=False``, ``is_superuser=False``, grupo 'user'.
 
         :param user: Usuario al que se le aplicarán los roles y grupos.
@@ -198,8 +199,11 @@ class KeycloakOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 user.is_staff = True
 
             # Crear el grupo si no existe y asignar al usuario
-            if role_lower in ("admin", "operator", "user"):
+            if role_lower in ("admin", "operator", "user", "cajero"):
                 group, _ = Group.objects.get_or_create(name=role_lower)
+                user.groups.add(group)
+            elif role_lower == "cashier":
+                group, _ = Group.objects.get_or_create(name="cajero")
                 user.groups.add(group)
 
         logger.debug(

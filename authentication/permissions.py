@@ -43,8 +43,17 @@ def normalize_roles(roles_input: Union[str, Iterable[str]]) -> Set[str]:
     if not roles_input:
         return set()
     if isinstance(roles_input, str):
-        return {r.strip().lower() for r in roles_input.split(",") if r.strip()}
-    return {str(r).strip().lower() for r in roles_input if str(r).strip()}
+        raw_roles = {r.strip().lower() for r in roles_input.split(",") if r.strip()}
+    else:
+        raw_roles = {str(r).strip().lower() for r in roles_input if str(r).strip()}
+
+    normalized: Set[str] = set()
+    for r in raw_roles:
+        if r == "cashier":
+            normalized.add("cajero")
+        else:
+            normalized.add(r)
+    return normalized
 
 
 def has_role(user: Any, allowed_roles: Union[str, Iterable[str]]) -> bool:
@@ -82,23 +91,31 @@ def has_role(user: Any, allowed_roles: Union[str, Iterable[str]]) -> bool:
         for r in user.realm_roles:
             user_roles.add(str(r).lower())
 
-    # Privilegios elevados y herencia de roles (Admin > Operator > User)
+    # Privilegios elevados y herencia de roles (Admin > Operator > Cajero > User)
     if getattr(user, "is_superuser", False):
         user_roles.add("admin")
         user_roles.add("operator")
+        user_roles.add("cajero")
         user_roles.add("user")
 
     if getattr(user, "is_staff", False):
         user_roles.add("operator")
+        user_roles.add("cajero")
         user_roles.add("user")
 
-    # Si el usuario es admin, tiene implícitamente operator y user
+    # Si el usuario es admin, tiene implícitamente operator, cajero y user
     if "admin" in user_roles:
         user_roles.add("operator")
+        user_roles.add("cajero")
         user_roles.add("user")
 
-    # Si el usuario es operator, tiene implícitamente user
+    # Si el usuario es operator, tiene implícitamente cajero y user
     if "operator" in user_roles:
+        user_roles.add("cajero")
+        user_roles.add("user")
+
+    # Si el usuario es cajero, tiene implícitamente user
+    if "cajero" in user_roles:
         user_roles.add("user")
 
     # Si no tiene ningún rol explícito pero está autenticado, asigna rol 'user'
@@ -394,6 +411,98 @@ class CustomerOwnershipRequiredMixin(AccessMixin):
             if self.permission_denied_message:
                 messages.error(request, self.permission_denied_message)
             target = self.redirect_url or "home"
+            return redirect(target)
+
+        return super().dispatch(request, *args, **kwargs)
+
+
+def verify_shift_ownership(user: Any, shift: Any) -> bool:
+    """
+    Verifica si un usuario autenticado tiene autorización para operar o visualizar un turno de caja específico.
+
+    Reglas de aislamiento y auditoría (RN05, RF-23, RF-24):
+    - Administradores y Operadores de tesorería cuentan con privilegios de supervisión global.
+    - Cajeros de ventanilla exclusivamente pueden consultar, operar o cerrar sus propios turnos asignados.
+
+    :param user: Usuario autenticado en la sesión.
+    :type user: django.contrib.auth.models.AbstractBaseUser
+    :param shift: Instancia del modelo CashShift o TurnoCaja.
+    :return: True si el usuario es el cajero titular o cuenta con privilegios de supervisión.
+    :rtype: bool
+    """
+    if not user or not user.is_authenticated:
+        return False
+
+    # Supervisión global para administradores y operadores
+    if has_role(user, "admin,operator"):
+        return True
+
+    if not shift:
+        return False
+
+    shift_cashier = getattr(shift, "cashier", None)
+    return shift_cashier == user
+
+
+def cajero_required(
+    redirect_url: Optional[str] = None,
+    raise_exception: bool = False,
+    message: str = "Acceso restringido. Requiere rol de Cajero, Operador o Administrador.",
+) -> Callable:
+    """
+    Decorador para proteger Vistas Basadas en Función (FBVs) de tesorería y caja (SCRUM-116).
+    Exige que el usuario cuente con rol 'cajero', 'operator' o 'admin'.
+    """
+    return role_required(
+        allowed_roles=["cajero", "operator", "admin"],
+        redirect_url=redirect_url,
+        raise_exception=raise_exception,
+        message=message,
+    )
+
+
+class CashierRequiredMixin(RoleRequiredMixin):
+    """
+    Mixin para Vistas Basadas en Clases (CBVs) que restringe el acceso exclusivamente
+    a usuarios con rol Cajero, Operador o Administrador (SCRUM-116).
+    """
+    allowed_roles = ["cajero", "operator", "admin"]
+    permission_denied_message = "Acceso restringido. Se requiere rol de Cajero, Operador o Administrador para operar en este módulo."
+
+
+class ShiftOwnershipRequiredMixin(AccessMixin):
+    """
+    Mixin para CBVs que valida que el usuario autenticado sea el cajero titular del turno accedido
+    o cuente con privilegios de supervisión (Admin / Operador) para garantizar el aislamiento por usuario.
+    """
+    shift_id_param: str = "pk"
+    redirect_url: Optional[str] = None
+    raise_exception: bool = True
+    permission_denied_message: str = "No posee autorización para operar o visualizar un turno de caja asignado a otro usuario."
+
+    def get_target_shift(self) -> Optional[Any]:
+        if hasattr(self, "get_object"):
+            try:
+                return self.get_object()
+            except Exception:
+                pass
+        pk = self.kwargs.get(self.shift_id_param) or self.request.GET.get(self.shift_id_param)
+        if pk:
+            from apps.cash.models import CashShift
+            return CashShift.objects.filter(pk=pk).first()
+        return None
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+
+        shift = self.get_target_shift()
+        if shift and not verify_shift_ownership(request.user, shift):
+            if self.raise_exception:
+                raise PermissionDenied(self.permission_denied_message)
+            if self.permission_denied_message:
+                messages.error(request, self.permission_denied_message)
+            target = self.redirect_url or "cash:dashboard"
             return redirect(target)
 
         return super().dispatch(request, *args, **kwargs)
