@@ -30,6 +30,7 @@ class CashRegisterStatus(models.TextChoices):
 
     CLOSED = 'CLOSED', 'Cerrada'
     OPEN = 'OPEN', 'Abierta'
+    PENDING_CONTROL = 'PENDING_CONTROL', 'Pendiente de Control'
     MAINTENANCE = 'MAINTENANCE', 'En Mantenimiento'
     INACTIVE = 'INACTIVE', 'Inactiva'
 
@@ -38,6 +39,7 @@ class ShiftStatus(models.TextChoices):
     """Estados del ciclo de vida de un turno o sesión de caja."""
 
     OPEN = 'OPEN', 'Abierto'
+    PENDING_REVIEW = 'PENDING_REVIEW', 'Pendiente de Control'
     CLOSED = 'CLOSED', 'Cerrado'
     RECONCILED = 'RECONCILED', 'Arqueado / Cuadrado'
     DISCREPANCY = 'DISCREPANCY', 'Cerrado con Diferencias'
@@ -574,3 +576,25 @@ class CashMovement(models.Model):
 Caja = CashRegister
 TurnoCaja = CashShift
 MovimientoEfectivo = CashMovement
+
+
+# ==============================================================================
+# MÓDULO DE INVENTARIO DE BILLETES Y BÓVEDA (SCRUM-116)
+# ==============================================================================
+from .inventory_models import (
+    LocationType,
+    BanknoteMovementType,
+    ReconciliationAction,
+    Vault,
+    CurrencyDenomination,
+    BanknoteInventory,
+    InitialFloatConfig,
+    BanknoteMovement,
+    ShiftDenominationCount,
+)
+
+Boveda = Vault
+DenominacionMoneda = CurrencyDenomination
+InventarioBilletes = BanknoteInventory
+MovimientoBilletes = BanknoteMovement
+ArqueoDenominacion = ShiftDenominationCount

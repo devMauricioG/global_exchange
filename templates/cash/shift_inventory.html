@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Inventario de Caja — Turno {{ shift.shift_number }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 900px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <a href="{% url 'cash:shift_detail' pk=shift.pk %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver al Detalle del Turno
+        </a>
+        {% if is_open and shift.cashier == request.user %}
+        <a href="{% url 'cash:cashier_denomination_count' pk=shift.pk %}" class="btn btn-primary" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 700; font-size: 0.85rem;">
+            🔢 Declarar Arqueo Físico
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="card" style="padding: 1.75rem;">
+        <div style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    📦 Inventario Físico de Caja
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0.25rem 0 0 0;">
+                    Turno: <strong>{{ shift.shift_number }}</strong> &bull; Caja: <strong>{{ shift.cash_register.register_code }}</strong> &bull; Cajero: <strong>{{ shift.cashier.username }}</strong>
+                </p>
+            </div>
+            <div>
+                <span style="background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); padding: 0.35rem 0.75rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600;">
+                    {{ shift.get_status_display }}
+                </span>
+            </div>
+        </div>
+
+        {% if stock %}
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                        <th style="padding: 0.75rem;">Divisa</th>
+                        <th style="padding: 0.75rem;">Denominación</th>
+                        <th style="padding: 0.75rem;">Valor Facial</th>
+                        <th style="padding: 0.75rem; text-align: right;">Billetes en Caja</th>
+                        <th style="padding: 0.75rem; text-align: right;">Monto Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in stock %}
+                    <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                        <td style="padding: 0.75rem;">
+                            <strong style="color: var(--accent);">{{ row.currency_code }}</strong>
+                        </td>
+                        <td style="padding: 0.75rem; color: var(--text-main); font-weight: 600;">
+                            {{ row.denomination }}
+                        </td>
+                        <td style="padding: 0.75rem; color: var(--text-muted);">
+                            {{ row.value|floatformat:2 }}
+                        </td>
+                        <td style="padding: 0.75rem; text-align: right; font-weight: 700; color: #38bdf8;">
+                            {{ row.quantity }} u.
+                        </td>
+                        <td style="padding: 0.75rem; text-align: right; font-weight: 700; color: var(--success);">
+                            {{ row.total_amount|floatformat:2 }} {{ row.currency_code }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+            <span style="font-size: 2.5rem; display: block; margin-bottom: 0.5rem;">📭</span>
+            <p style="margin: 0; font-size: 0.95rem;">No hay billetes registrados en el inventario de esta caja.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

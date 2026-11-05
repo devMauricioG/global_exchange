@@ -471,3 +471,43 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Suite global del proyecto: **554 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Compilación de Sphinx limpia (`build succeeded`).
     - Elaboración del informe técnico en `docs/documentacion/SCRUM-116.md` y registro en `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+### Entrada #25: Incorporación del Módulo de Inventario de Billetes por Denominación en SCRUM-116
+
+**Usuario:** Todo lo del scrum 117, debe entrar como scrum 116, que todavía no se commiteó, cualquier cosa que creaste como rama u otra cosa, distinta al del scrum 116, elimina. Y mete todo lo que hiciste del 117 al 116.
+
+**Resumen:**
+- Unifiqué todo el alcance del módulo de inventario de billetes por denominación y control de bóveda central dentro de la rama y tarea `feature/SCRUM-116`:
+  - **Eliminación y Limpieza:**
+    - Eliminé la rama git `feature/SCRUM-117` retornando al branch activo `feature/SCRUM-116`.
+    - Eliminé los archivos temporales y documentos separados de SCRUM-117, unificando especificaciones e historias Gherkin en `docs/documentacion/SCRUM-116.md`.
+    - Actualicé todos los docstrings y comentarios en `apps/cash/*.py` para alinearlos a SCRUM-116.
+  - **Modelos de Datos y Migración (`apps/cash/inventory_models.py`, `models.py`):**
+    - `Vault`: Bóvedas centrales de efectivo por sucursal.
+    - `CurrencyDenomination`: Denominaciones oficiales reconocidas por cada divisa activa con restricción `unique_together = ('currency', 'value')`.
+    - `BanknoteInventory`: Existencias físicas no negativas en bóveda o caja con validación en `clean()` y propiedad calculada `total_amount`.
+    - `InitialFloatConfig`: Reglas configurables de dotación inicial por denominación con soporte de dotación parcial (`allow_partial_fill`).
+    - `BanknoteMovement`: Registro forense inmutable de transferencias físicas con protección en `save()` y `delete()`.
+    - `ShiftDenominationCount`: Arqueo físico por turno con métodos `calculate_expected()` y `update_reconciliation()`.
+    - Nuevos estados en `apps/cash/models.py`: `CashRegisterStatus.PENDING_CONTROL` y `ShiftStatus.PENDING_REVIEW`.
+    - Migración aplicada en base de datos: `apps/cash/migrations/0002_vault_alter_cashregister_status_and_more.py`.
+  - **Capa de Servicios de Dominio (`apps/cash/inventory_services.py`):**
+    - `InventoryService.open_shift_inventory()`: Transferencia atómica bóveda $\to$ caja para divisas con tasa de cambio activa, select_for_update y advertencia de dotación parcial.
+    - `InventoryService.register_exchange_operation()`: Actualización de stock de caja en tiempo real y validación previa de existencias (`InsufficientRegisterStockError`).
+    - `InventoryService.submit_cashier_count()`: Protocolo de arqueo ciego donde el cajero declara el conteo físico, transicionando a `PENDING_REVIEW` / `PENDING_CONTROL`.
+    - `InventoryService.approve_reconciliation()`: Resolución del Administrador con acciones `APPROVE` (transferencia caja $\to$ bóveda y cierre), `REJECT` (reapertura para reconteo) y `APPROVE_WITH_ADJUSTMENT` (con motivo obligatorio y cantidades ajustadas).
+    - `InventoryService.get_register_stock_summary()`, `get_vault_stock_summary()` y `vault_deposit()`.
+  - **Vistas CBV, Rutas y Plantillas Web (`apps/cash/inventory_views.py`, `inventory_urls.py`, `templates/cash/`):**
+    - `VaultDashboardView` y `VaultDepositView` (acceso exclusivo administrador).
+    - `ShiftInventoryView` (stock físico del puesto de atención para cajero/operador con `verify_shift_ownership`).
+    - `CashierDenominationCountView` (formulario de arqueo ciego por denominación para el cajero titular).
+    - `AdminReconciliationListView` y `AdminReconciliationActionView` (revisión y aprobación/ajuste/rechazo de arqueos por el administrador).
+    - Plantillas responsivas diseñadas bajo el tema oscuro del proyecto: `vault_dashboard.html`, `vault_deposit.html`, `shift_inventory.html`, `cashier_denomination_count.html`, `admin_reconciliation_list.html` y `admin_reconciliation_detail.html`.
+  - **Panel de Administración (`apps/cash/admin.py`):**
+    - Registro de `VaultAdmin`, `CurrencyDenominationAdmin`, `BanknoteInventoryAdmin`, `InitialFloatConfigAdmin`, `BanknoteMovementAdmin` y el inline `ShiftDenominationCountInline` en `CashShiftAdmin`.
+  - **Pruebas Automatizadas y Calidad:**
+    - Creada suite `apps/cash/tests_inventory.py` con 27 pruebas unitarias e integración que verifican modelos, servicios, concurrencia, dotaciones parciales, excepciones de dominio, inmutabilidad y arqueos.
+    - Suite completa del proyecto: **581/581 tests OK** (100% éxito, 0 fallos, 0 errores).
+    - Compilación limpia de documentación Sphinx.

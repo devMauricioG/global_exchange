@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block title %}Auditoría de Arqueo — Turno {{ shift.shift_number }} — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:admin_reconciliation_list' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver a Arqueos Pendientes
+        </a>
+    </div>
+
+    <!-- Cabecera del Turno -->
+    <div class="card" style="padding: 1.75rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+            <div>
+                <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                    🔍 Auditoría y Control de Arqueo Físico
+                </h1>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0.25rem 0 0 0;">
+                    Turno: <strong>{{ shift.shift_number }}</strong> &bull; Caja: <strong>{{ shift.cash_register.register_code }}</strong>
+                </p>
+            </div>
+            <div>
+                <span style="background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); padding: 0.35rem 0.75rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">
+                    Pendiente de Control
+                </span>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; font-size: 0.875rem;">
+            <div>
+                <span style="color: var(--text-muted); display: block;">Cajero Asignado:</span>
+                <strong style="color: var(--text-main);">👤 {{ shift.cashier.username }}</strong>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); display: block;">Apertura de Turno:</span>
+                <strong style="color: var(--text-main);">{{ shift.opened_at|date:"d/m/Y H:i:s" }}</strong>
+            </div>
+            <div>
+                <span style="color: var(--text-muted); display: block;">Sucursal / Ubicación:</span>
+                <strong style="color: var(--text-main);">{{ shift.cash_register.branch_name }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cuadro Comparativo Teórico vs Físico -->
+    <div class="card" style="padding: 1.75rem; margin-bottom: 1.5rem;">
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 1rem;">
+            📊 Detalle Comparativo por Denominación
+        </h2>
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                        <th style="padding: 0.65rem;">Divisa</th>
+                        <th style="padding: 0.65rem;">Denominación</th>
+                        <th style="padding: 0.65rem; text-align: right;">Fondo Inicial</th>
+                        <th style="padding: 0.65rem; text-align: right;">Ops (+)</th>
+                        <th style="padding: 0.65rem; text-align: right;">Ops (-)</th>
+                        <th style="padding: 0.65rem; text-align: right;">Teórico Esperado</th>
+                        <th style="padding: 0.65rem; text-align: right;">Físico Declarado</th>
+                        <th style="padding: 0.65rem; text-align: right;">Diferencia (Cant.)</th>
+                        <th style="padding: 0.65rem; text-align: right;">Diferencia (Monto)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for count in counts %}
+                    <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                        <td style="padding: 0.65rem;">
+                            <strong style="color: var(--accent);">{{ count.currency.code }}</strong>
+                        </td>
+                        <td style="padding: 0.65rem; color: var(--text-main); font-weight: 600;">
+                            {{ count.denomination }}
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; color: var(--text-muted);">
+                            {{ count.opening_quantity }} u.
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; color: var(--success);">
+                            +{{ count.operations_in }}
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; color: var(--danger);">
+                            -{{ count.operations_out }}
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; font-weight: 700; color: #38bdf8;">
+                            {{ count.system_expected_quantity }} u.
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; font-weight: 700; color: var(--text-main);">
+                            {{ count.counted_quantity|default:"-" }} u.
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; font-weight: 700;">
+                            {% if count.difference_quantity == 0 %}
+                                <span style="color: var(--success);">0</span>
+                            {% elif count.difference_quantity > 0 %}
+                                <span style="color: #60a5fa;">+{{ count.difference_quantity }} (Sobrante)</span>
+                            {% else %}
+                                <span style="color: #f87171;">{{ count.difference_quantity }} (Faltante)</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.65rem; text-align: right; font-weight: 700;">
+                            {% if count.difference_amount == 0 %}
+                                <span style="color: var(--success);">$0.00</span>
+                            {% elif count.difference_amount > 0 %}
+                                <span style="color: #60a5fa;">+{{ count.difference_amount|floatformat:2 }}</span>
+                            {% else %}
+                                <span style="color: #f87171;">{{ count.difference_amount|floatformat:2 }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Formulario de Resolución por el Administrador -->
+    <div class="card" style="padding: 1.75rem;">
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
+            ⚖️ Resolución Administrativa
+        </h2>
+        <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
+            Seleccione la acción correspondiente para finalizar el turno y regularizar el inventario físico.
+        </p>
+
+        <form method="post" id="reconciliationForm">
+            {% csrf_token %}
+
+            <!-- Opciones de Decisión -->
+            <div style="margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; background: rgba(16, 185, 129, 0.05);">
+                    <input type="radio" name="action" value="{{ APPROVE }}" required style="margin-top: 0.25rem;" onchange="toggleAdjustment(false)">
+                    <div>
+                        <strong style="color: var(--success); display: block; font-size: 0.95rem;">
+                            ✓ Aprobar Arqueo
+                        </strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">
+                            Acepta el arqueo físico declarado. Se transfieren automáticamente los billetes de la caja a la bóveda central y el turno queda cerrado formalmente.
+                        </span>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; background: rgba(239, 68, 68, 0.05);">
+                    <input type="radio" name="action" value="{{ REJECT }}" style="margin-top: 0.25rem;" onchange="toggleAdjustment(false)">
+                    <div>
+                        <strong style="color: var(--danger); display: block; font-size: 0.95rem;">
+                            ✗ Rechazar Arqueo (Solicitar Reconteo)
+                        </strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">
+                            Devuelve el turno y la caja al estado ABIERTO para que el cajero efectúe un nuevo conteo físico. No se transfiere nada a la bóveda.
+                        </span>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; background: rgba(245, 158, 11, 0.05);">
+                    <input type="radio" name="action" value="{{ APPROVE_WITH_ADJUSTMENT }}" style="margin-top: 0.25rem;" onchange="toggleAdjustment(true)">
+                    <div>
+                        <strong style="color: var(--warning); display: block; font-size: 0.95rem;">
+                            ⚠️ Aprobar con Ajuste Manual
+                        </strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">
+                            Permite especificar las cantidades finales reales verificadas por supervisión. El turno se cerrará con estado DISCREPANCY. Motivo obligatorio.
+                        </span>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Panel de Cantidades Ajustadas (visible solo al seleccionar ajuste) -->
+            <div id="adjustmentPanel" style="display: none; margin-bottom: 1.5rem; padding: 1.25rem; border: 1px dashed var(--warning); border-radius: 8px; background: rgba(245, 158, 11, 0.03);">
+                <h4 style="color: var(--warning); font-size: 0.95rem; margin-top: 0; margin-bottom: 0.75rem;">
+                    Cantidades Ajustadas por Denominación
+                </h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+                    {% for count in counts %}
+                    <div>
+                        <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.2rem;">
+                            {{ count.denomination }} (Declarado: {{ count.counted_quantity|default:0 }} u.)
+                        </label>
+                        <input type="number" 
+                               name="adjusted_{{ count.denomination.id }}" 
+                               value="{{ count.counted_quantity|default:0 }}" 
+                               min="0" 
+                               step="1" 
+                               class="form-input" 
+                               style="width: 100%; padding: 0.4rem; border-radius: 4px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Notas de Revisión -->
+            <div style="margin-bottom: 1.75rem;">
+                <label style="display: block; font-weight: 600; color: var(--text-main); margin-bottom: 0.4rem; font-size: 0.9rem;">
+                    Motivo / Notas de Revisión del Administrador
+                </label>
+                <textarea name="notes" id="reconciliationNotes" rows="3" placeholder="Obligatorio si se aprueba con ajuste. Describa la justificación o anomalía observada..." class="form-textarea" style="width: 100%; padding: 0.65rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);"></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+                <a href="{% url 'cash:admin_reconciliation_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary" style="background: var(--accent); border-color: var(--accent); font-weight: 700; padding: 0.65rem 1.5rem;">
+                    Confirmar Decisión
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function toggleAdjustment(show) {
+    var panel = document.getElementById('adjustmentPanel');
+    var notes = document.getElementById('reconciliationNotes');
+    if (show) {
+        panel.style.display = 'block';
+        notes.setAttribute('required', 'required');
+    } else {
+        panel.style.display = 'none';
+        notes.removeAttribute('required');
+    }
+}
+</script>
+{% endblock %}

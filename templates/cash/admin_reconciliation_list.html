@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Arqueos Pendientes de Revisión — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1100px; margin: 0 auto;">
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="margin-bottom: 0.5rem;">
+                <a href="{% url 'cash:vault_dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                    &larr; Volver al Panel de Bóvedas
+                </a>
+            </div>
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                ⚖️ Arqueos Pendientes de Revisión
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Turnos de caja finalizados por cajeros en espera de control y transferencia a bóveda.
+            </p>
+        </div>
+        <div>
+            <span style="background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); padding: 0.45rem 1rem; border-radius: 9999px; font-size: 0.9rem; font-weight: 700;">
+                {{ pending_shifts|length }} pendientes
+            </span>
+        </div>
+    </div>
+
+    {% if pending_shifts %}
+    <div class="card" style="padding: 1.5rem; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                    <th style="padding: 0.75rem;">Turno</th>
+                    <th style="padding: 0.75rem;">Caja Registradora</th>
+                    <th style="padding: 0.75rem;">Cajero</th>
+                    <th style="padding: 0.75rem;">Apertura</th>
+                    <th style="padding: 0.75rem; text-align: center;">Estado</th>
+                    <th style="padding: 0.75rem; text-align: right;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for shift in pending_shifts %}
+                <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                    <td style="padding: 0.75rem;">
+                        <strong style="color: var(--text-main);">{{ shift.shift_number }}</strong>
+                    </td>
+                    <td style="padding: 0.75rem; color: var(--accent); font-weight: 600;">
+                        {{ shift.cash_register.register_code }}
+                    </td>
+                    <td style="padding: 0.75rem; color: var(--text-main);">
+                        👤 {{ shift.cashier.username }}
+                    </td>
+                    <td style="padding: 0.75rem; color: var(--text-muted);">
+                        {{ shift.opened_at|date:"d/m/Y H:i" }}
+                    </td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                        <span style="background: rgba(245, 158, 11, 0.15); color: var(--warning); padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">
+                            Pendiente Control
+                        </span>
+                    </td>
+                    <td style="padding: 0.75rem; text-align: right;">
+                        <a href="{% url 'cash:admin_reconciliation_action' pk=shift.pk %}" class="btn btn-primary" style="background: var(--accent); border-color: var(--accent); font-size: 0.85rem; padding: 0.4rem 0.85rem; text-decoration: none;">
+                            🔍 Auditar y Resolver
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card" style="padding: 3rem; text-align: center;">
+        <span style="font-size: 3rem; display: block; margin-bottom: 0.75rem;">✅</span>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
+            No hay arqueos pendientes de control
+        </h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0;">
+            Todos los turnos finalizados han sido conciliados y aprobados por la administración.
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Panel de Bóveda Central — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto;">
+    <!-- Encabezado Principal -->
+    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <div style="margin-bottom: 0.5rem;">
+                <a href="{% url 'cash:dashboard' %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                    &larr; Volver a Gestión de Cajas
+                </a>
+            </div>
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                🏦 Panel de Bóvedas Centrales
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Inventario centralizado y existencias físicas de billetes por denominación y divisa.
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <a href="{% url 'cash:admin_reconciliation_list' %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                ⚖️ Arqueos Pendientes
+            </a>
+            <a href="{% url 'cash:vault_deposit' %}" class="btn btn-primary" style="background: var(--accent); border-color: var(--accent);">
+                💰 Registrar Depósito
+            </a>
+        </div>
+    </div>
+
+    <!-- Lista de Bóvedas -->
+    {% if vault_data %}
+        {% for item in vault_data %}
+        <div class="card" style="padding: 1.5rem; margin-bottom: 2rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+                <div>
+                    <h2 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                        {{ item.vault.name }} <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: 400;">({{ item.vault.code }})</span>
+                    </h2>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.25rem 0 0 0;">
+                        Sucursal: <strong>{{ item.vault.branch_name }}</strong> &bull; Estado: <span style="color: var(--success); font-weight: 600;">Activa</span>
+                    </p>
+                </div>
+                <div>
+                    <span style="background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.3); padding: 0.35rem 0.75rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600;">
+                        {{ item.total_items }} denominaciones con stock
+                    </span>
+                </div>
+            </div>
+
+            {% if item.stock %}
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                            <th style="padding: 0.75rem;">Divisa</th>
+                            <th style="padding: 0.75rem;">Denominación</th>
+                            <th style="padding: 0.75rem;">Valor Facial</th>
+                            <th style="padding: 0.75rem; text-align: right;">Cantidad de Billetes</th>
+                            <th style="padding: 0.75rem; text-align: right;">Importe Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in item.stock %}
+                        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                            <td style="padding: 0.75rem;">
+                                <strong style="color: var(--accent);">{{ row.currency_code }}</strong>
+                            </td>
+                            <td style="padding: 0.75rem; color: var(--text-main); font-weight: 600;">
+                                {{ row.denomination }}
+                            </td>
+                            <td style="padding: 0.75rem; color: var(--text-muted);">
+                                {{ row.value|floatformat:2 }}
+                            </td>
+                            <td style="padding: 0.75rem; text-align: right; font-weight: 700; color: #38bdf8;">
+                                {{ row.quantity }} u.
+                            </td>
+                            <td style="padding: 0.75rem; text-align: right; font-weight: 700; color: var(--success);">
+                                {{ row.total_amount|floatformat:2 }} {{ row.currency_code }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                <p style="margin: 0; font-size: 0.95rem;">Esta bóveda no cuenta con existencias físicas registradas.</p>
+                <a href="{% url 'cash:vault_deposit' %}" class="btn" style="margin-top: 1rem; display: inline-block; background: var(--accent); color: white;">
+                    Registrar primer ingreso
+                </a>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="card" style="padding: 3rem; text-align: center;">
+        <span style="font-size: 3rem; display: block; margin-bottom: 1rem;">🏛️</span>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.5rem;">
+            No hay bóvedas activas configuradas
+        </h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 500px; margin: 0 auto 1.5rem auto;">
+            Para gestionar el inventario físico de efectivo debe existir al menos una bóveda central registrada y habilitada en el sistema.
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Arqueo Físico por Denominación — Global Exchange{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'cash:shift_detail' pk=shift.pk %}" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+            &larr; Volver al Turno
+        </a>
+    </div>
+
+    <div class="card" style="padding: 2rem;">
+        <div style="margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 2.25rem;">🔒</span>
+                <div>
+                    <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.25rem;">
+                        Arqueo Físico por Denominación
+                    </h1>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0;">
+                        Turno: <strong>{{ shift.shift_number }}</strong> &bull; Caja: <strong>{{ shift.cash_register.register_code }}</strong> &bull; Cajero: <strong>{{ shift.cashier.username }}</strong>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Protocolo de Arqueo Ciego -->
+        <div style="background: rgba(99, 102, 241, 0.1); border-left: 4px solid var(--accent); padding: 1rem 1.25rem; border-radius: 6px; margin-bottom: 1.75rem;">
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                <span style="font-size: 1.25rem;">👁️‍🗨️</span>
+                <div>
+                    <strong style="color: #c7d2fe; display: block; margin-bottom: 0.25rem; font-size: 0.95rem;">
+                        Protocolo de Arqueo Ciego por Billetes
+                    </strong>
+                    <p style="color: #e0e7ff; font-size: 0.875rem; line-height: 1.45; margin: 0;">
+                        Los saldos teóricos calculados por el sistema están ocultos durante el conteo.
+                        Ingrese la <strong>cantidad física real</strong> de billetes/monedas que tiene en su gaveta para cada denominación.
+                        Una vez enviado, el turno quedará <em>Pendiente de Control</em> hasta que el Administrador revise y autorice la transferencia a la bóveda central.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+
+            {% if grouped_counts %}
+                {% for group in grouped_counts %}
+                <div style="margin-bottom: 1.75rem; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+                        <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin: 0;">
+                            Divisa: <span style="color: var(--accent);">{{ group.currency.code }}</span> ({{ group.currency.name }})
+                        </h3>
+                        <span style="font-size: 0.85rem; color: var(--text-muted);">
+                            Símbolo: {{ group.currency.symbol }}
+                        </span>
+                    </div>
+
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="text-align: left; color: var(--text-muted); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
+                                <th style="padding: 0.5rem;">Denominación</th>
+                                <th style="padding: 0.5rem;">Valor Facial</th>
+                                <th style="padding: 0.5rem; text-align: right;">Cantidad Contada Físicamente</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for count in group.counts %}
+                            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.03);">
+                                <td style="padding: 0.75rem 0.5rem; font-weight: 600; color: var(--text-main);">
+                                    {{ count.denomination }}
+                                </td>
+                                <td style="padding: 0.75rem 0.5rem; color: var(--text-muted);">
+                                    {{ count.denomination.value|floatformat:2 }}
+                                </td>
+                                <td style="padding: 0.75rem 0.5rem; text-align: right;">
+                                    <div style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                        <input type="number" 
+                                               name="denom_{{ count.denomination.id }}" 
+                                               value="{{ count.counted_quantity|default:0 }}" 
+                                               min="0" 
+                                               step="1" 
+                                               required
+                                               class="form-input" 
+                                               style="width: 120px; text-align: right; font-weight: 700; font-size: 1rem; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                                        <span style="color: var(--text-muted); font-size: 0.85rem;">u.</span>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endfor %}
+
+                <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                    <a href="{% url 'cash:shift_detail' pk=shift.pk %}" class="btn" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                        Cancelar
+                    </a>
+                    <button type="submit" class="btn btn-primary" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 800; padding: 0.75rem 1.5rem; font-size: 0.95rem;">
+                        🔒 Confirmar y Enviar Arqueo para Control
+                    </button>
+                </div>
+            {% else %}
+            <div style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                <p>No hay registros de denominaciones asociadas a este turno para realizar arqueo físico.</p>
+                <a href="{% url 'cash:shift_detail' pk=shift.pk %}" class="btn">Volver al turno</a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+{% endblock %}

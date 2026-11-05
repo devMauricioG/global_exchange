@@ -1,8 +1,8 @@
 """
-Enrutamiento URL para el módulo de Cajas, Turnos y Efectivo (apps.cash.urls).
+Enrutamiento URL para el modulo de Cajas, Turnos y Efectivo (apps.cash.urls).
 """
 
-from django.urls import path
+from django.urls import include, path
 from .views import (
     CashDashboardView,
     CashMovementCreateView,
@@ -32,10 +32,12 @@ urlpatterns = [
     # Movimientos de efectivo
     path('movements/create/', CashMovementCreateView.as_view(), name='movement_create'),
 
-    # Cajas y puestos de atención
+    # Cajas y puestos de atencion
     path('registers/', CashRegisterListView.as_view(), name='register_list'),
 
     # API JSON en tiempo real
     path('api/shift/<int:pk>/status/', CashShiftStatusApiView.as_view(), name='api_shift_status'),
-]
 
+    # Inventario de billetes por denominacion (SCRUM-116)
+    path('', include('apps.cash.inventory_urls')),
+]
