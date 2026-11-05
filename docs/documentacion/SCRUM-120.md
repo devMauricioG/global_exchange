@@ -92,7 +92,8 @@ Se diseñó la clase de prueba `FacturaSeguraClientAndQuotaProtocolTests` en `ap
 16. `test_quota_reset_and_replenish`: Verificación de reinicio e incremento de cuotas.
 17. `test_provider_enforces_shield_via_client`: Verificación de que `FacturaSeguraProvider` delega en `FacturaSeguraClient` y respeta el blindaje.
 
-### Resultados de Ejecución:
+### Resultados de Ejecución
+
 * **`apps.invoicing`:** **78/78 tests aprobados (100% OK)** en 0.784s.
 * **Suite Global del Sistema:** **659/659 tests aprobados (100% OK)**, 0 fallos, 0 errores, sin regresiones.
 * **Documentación Sphinx:** Compilación limpia HTML (`build succeeded`, 0 warnings, 0 errors).
