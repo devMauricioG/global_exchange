@@ -271,6 +271,30 @@ class TransactionDetailView(LoginRequiredMixin, DetailView):
         )
         if self.request.GET.get('checkout') == 'success':
             context['stripe_success'] = True
+
+        # Factura Electrónica SIFEN / KuDE (SCRUM-119)
+        factura = getattr(tx, 'factura_sifen', None)
+        if not factura:
+            from apps.invoicing.models import FacturaElectronica
+            factura = FacturaElectronica.objects.filter(transaction=tx).first()
+
+        if not factura and tx.estado == Transaction.Estado.COMPLETADA:
+            try:
+                from apps.invoicing.providers import get_invoice_provider
+                from apps.invoicing.services import InvoiceService
+                provider = get_invoice_provider()
+                resp = provider.emitir_factura(tx)
+                factura, _ = InvoiceService.get_or_create_for_transaction(tx, resp)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("No se pudo autogenerar FacturaElectronica para tx %s: %s", tx.pk, e)
+
+        legacy_invoice = getattr(tx, 'factura_electronica', None)
+        if not factura and legacy_invoice:
+            factura = legacy_invoice
+
+        context['factura'] = factura
+        context['invoice'] = factura
         return context
 
 

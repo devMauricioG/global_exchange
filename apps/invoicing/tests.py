@@ -661,8 +661,15 @@ class FacturaElectronicaModelMixin:
         User = get_user_model()
         cls.user = User.objects.create_user(
             username='test_inv_user',
-            email='test_inv@test.com',
+            email='receptor@test.com',
             password='Password123!',
+        )
+        from customers.models import CustomerUserAssignment
+        CustomerUserAssignment.objects.create(
+            customer=cls.cliente,
+            user=cls.user,
+            is_primary_representative=True,
+            is_active=True,
         )
         cls.medio_pago = PaymentMethod.objects.create(
             cliente=cls.cliente,
@@ -695,6 +702,7 @@ class FacturaElectronicaModelMixin:
         )
         cls.tx = Transaction.objects.create(
             cliente=cls.cliente,
+            usuario=cls.user,
             tipo_operacion=Transaction.TipoOperacion.COMPRA,
             base_currency=cls.usd,
             target_currency=cls.pyg,
@@ -999,3 +1007,171 @@ class InvoiceServiceTests(FacturaElectronicaModelMixin, TestCase):
         """Verifica que un estado desconocido retorne EMITIDO."""
         result = InvoiceService._map_estado('Estado Desconocido XYZ')
         self.assertEqual(result, FacturaElectronica.EstadoSifen.EMITIDO)
+
+
+# =============================================================================
+# SCRUM-119 — Tests de Vistas y Endpoints KuDE PDF, XML y SIFEN Sync AJAX
+# =============================================================================
+
+from django.urls import reverse
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class InvoicingViewsTests(FacturaElectronicaModelMixin, TestCase):
+    """
+    Tests de vistas y endpoints de KuDE PDF, XML y sincronización AJAX (SCRUM-119).
+    """
+
+    def setUp(self):
+        self.provider = MockInvoiceProvider()
+        self.provider.reset_registry()
+        set_invoice_provider(self.provider)
+
+        # Crear otro usuario para validaciones de permisos / IDOR
+        self.otro_user = User.objects.create_user(
+            username='otro_usuario_invoicing',
+            email='otro@test.com',
+            password='Password123!',
+        )
+
+        # Crear una FacturaElectronica vinculada a self.tx
+        resp = self.provider.emitir_factura(self.tx)
+        self.factura = InvoiceService.create_from_response(self.tx, resp)
+
+    def tearDown(self):
+        reset_invoice_provider()
+
+    def test_factura_detail_view_authenticated_owner(self):
+        """Verifica que el titular de la transacción pueda visualizar el KuDE en HTML."""
+        self.client.force_login(self.user)
+        url = reverse('invoicing:detail', kwargs={'pk': self.factura.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'transactions/kude.html')
+        self.assertIn('invoice', response.context)
+        self.assertEqual(response.context['invoice'].pk, self.factura.pk)
+
+    def test_factura_detail_view_unauthenticated_forbidden(self):
+        """Verifica que un usuario anónimo no pueda acceder a la factura."""
+        url = reverse('invoicing:detail', kwargs={'pk': self.factura.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_factura_detail_view_other_user_forbidden(self):
+        """Verifica prevención IDOR: un usuario ajeno no puede ver la factura."""
+        self.client.force_login(self.otro_user)
+        url = reverse('invoicing:detail', kwargs={'pk': self.factura.pk})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_factura_pdf_download_view(self):
+        """Verifica la descarga directa del KuDE PDF binario."""
+        self.client.force_login(self.user)
+        url = reverse('invoicing:pdf', kwargs={'pk': self.factura.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn('attachment;', response['Content-Disposition'])
+        self.assertTrue(response.content.startswith(b'%PDF-1.4'))
+
+    def test_factura_xml_download_view(self):
+        """Verifica la descarga directa del archivo XML firmado digitalmente."""
+        self.client.force_login(self.user)
+        url = reverse('invoicing:xml', kwargs={'pk': self.factura.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('application/xml', response['Content-Type'])
+        self.assertIn('attachment;', response['Content-Disposition'])
+        self.assertIn(b'<rDE', response.content)
+        self.assertIn(self.factura.cdc.encode('utf-8'), response.content)
+
+    def test_factura_sifen_sync_ajax_success(self):
+        """Verifica la sincronización AJAX del estado SIFEN vía POST."""
+        self.client.force_login(self.user)
+        url = reverse('invoicing:sync_sifen', kwargs={'pk': self.factura.pk})
+        response = self.client.post(url, content_type='application/json')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['cdc'], self.factura.cdc)
+        self.assertEqual(data['estado_sifen'], FacturaElectronica.EstadoSifen.APROBADO)
+        self.assertTrue(data['is_approved'])
+        self.assertIn('badge_html', data)
+
+    def test_factura_sifen_sync_ajax_updates_cancelled_state(self):
+        """Verifica que tras anular en el provider, el endpoint AJAX actualice la BD."""
+        self.client.force_login(self.user)
+
+        # Cancelar en el Mock provider
+        self.provider.sol_cancelacion(self.factura.cdc, motivo='Error de facturación')
+
+        url = reverse('invoicing:sync_sifen', kwargs={'pk': self.factura.pk})
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['estado_sifen'], FacturaElectronica.EstadoSifen.CANCELADO)
+        self.assertTrue(data['is_cancelled'])
+
+        # Verificar actualización en base de datos
+        self.factura.refresh_from_db()
+        self.assertEqual(self.factura.estado_sifen, FacturaElectronica.EstadoSifen.CANCELADO)
+
+    def test_factura_consulta_api_by_cdc(self):
+        """Verifica la consulta pública vía REST API con CDC."""
+        url = reverse('invoicing:consulta_api', kwargs={'identifier': self.factura.cdc})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['cdc'], self.factura.cdc)
+        self.assertEqual(data['numero_factura'], self.factura.numero_factura)
+        self.assertIn('pdf_url', data['urls'])
+        self.assertIn('xml_url', data['urls'])
+
+    def test_factura_consulta_api_not_found(self):
+        """Verifica 404 cuando no se encuentra el documento solicitado."""
+        non_existent_cdc = '01800123457001001000000120261105999999999999'
+        url = reverse('invoicing:consulta_api', kwargs={'identifier': non_existent_cdc})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)
+        data = response.json()
+        self.assertFalse(data['success'])
+
+    def test_transaction_kude_sync_sifen_endpoint(self):
+        """Verifica el endpoint de sincronización SIFEN a nivel de transacción."""
+        self.client.force_login(self.user)
+        url = reverse('transactions:kude_sync_sifen', kwargs={'pk': self.tx.pk})
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['cdc'], self.factura.cdc)
+        self.assertIn('badge_html', data)
+
+    def test_transaction_detail_renders_kude_integrated_card(self):
+        """Verifica que el detalle de la transacción renderice la card integrada de KuDE."""
+        self.client.force_login(self.user)
+        url = reverse('transactions:detail', kwargs={'pk': self.tx.pk})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode('utf-8')
+        self.assertIn('Factura Electrónica e-Kuatia (KuDE)', content)
+        self.assertIn(self.factura.numero_factura, content)
+        self.assertIn('Descargar PDF', content)
+        self.assertIn('Descargar XML', content)
+        self.assertIn('btnSyncSifen', content)
+        self.assertIn('copyCdcToClipboard', content)
+        self.assertIn('syncSifenStatus', content)

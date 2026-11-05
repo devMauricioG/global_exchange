@@ -577,3 +577,20 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - DiseÃ±adas **25 nuevas pruebas unitarias e integraciÃ³n en `apps/invoicing/tests.py`** (`FacturaElectronicaModelTests` e `InvoiceServiceTests`), alcanzando 50 tests en la app.
     - Suite global completa: **631 tests aprobados al 100% de Ã©xito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - DocumentaciÃ³n tÃ©cnica redactada en `docs/documentacion/SCRUM-118.md` y actualizaciÃ³n de `TAREAS.md` y `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Invoicing — Vistas y Endpoints para Consulta, Visualización y Descarga de KuDE PDF y XML Firmado (SCRUM-119)
+
+**Resumen:**
+- Implementé los endpoints y vistas del módulo canónico de facturación electrónica (pps/invoicing/):
+  - **Vistas y Endpoints (pps/invoicing/views.py):** FacturaElectronicaDetailView, FacturaElectronicaPdfDownloadView, FacturaElectronicaXmlDownloadView, FacturaElectronicaSifenSyncAjaxView y FacturaConsultaApiView.
+  - **Rutas (pps/invoicing/urls.py):** Configuración de 6 URLs bajo el prefijo invoicing/.
+  - **Integración transaccional:** TransactionSifenSyncAjaxView en 	ransactions/kude_views.py; enriquecimiento de TransactionDetailView con auto-emisión de factura.
+  - **Card integrada en 	ransaction_detail.html:** Badge de estado SIFEN en tiempo real, CDC formateado con botón de copiado 1-click, botones de descarga PDF/XML, botón AJAX de sincronización SIFEN con spinner y feedback visual.
+  - **Seguridad:** InvoicingAccessMixin con control IDOR por CustomerUserAssignment.
+  - **Correcciones críticas:** Shared registry en MockInvoiceProvider para coherencia entre instancias en tests AJAX; protección contra OverflowError SQLite en búsqueda por ID largo.
+  - **Pruebas:** 11 nuevas pruebas en InvoicingViewsTests ? 61/61 OK en pps.invoicing.
+  - **Suite global:** 642/642 tests OK, Sphinx: uild succeeded.
