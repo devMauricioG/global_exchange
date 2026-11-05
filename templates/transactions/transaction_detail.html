@@ -5,6 +5,7 @@
 
 {% block content %}
 <div style="max-width: 850px; margin: 0 auto;">
+    {% csrf_token %}
     <!-- Breadcrumb Header -->
     <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between;">
         <div>
@@ -234,6 +235,122 @@
             </div>
         {% endif %}
 
+        {% if factura or transaction.estado == 'COMPLETADA' %}
+            <!-- Card Integrada de Factura Electrónica e-Kuatia / KuDE (SCRUM-119) -->
+            <div id="kudeIntegratedCard" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.6) 100%); border: 1px solid rgba(2, 132, 199, 0.35); border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; border-bottom: 1px solid rgba(2, 132, 199, 0.2); padding-bottom: 1rem;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+                            <span style="font-size: 1.4rem;">🧾</span>
+                            <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-main); margin: 0;">
+                                Factura Electrónica e-Kuatia (KuDE)
+                            </h3>
+                            <span id="sifenStatusBadgeContainer">
+                                {% if factura.estado_sifen == 'APROBADO' or factura.estado == 'APROBADO' or factura.is_aprobado %}
+                                    <span class="badge" style="background-color: #10b981; color: #fff; font-weight: 700; padding: 0.35rem 0.75rem; border-radius: 9999px;">
+                                        ● Aprobado SIFEN
+                                    </span>
+                                {% elif factura.estado_sifen == 'CANCELADO' or factura.is_cancelado %}
+                                    <span class="badge" style="background-color: #f97316; color: #fff; font-weight: 700; padding: 0.35rem 0.75rem; border-radius: 9999px;">
+                                        ● Cancelado
+                                    </span>
+                                {% else %}
+                                    <span class="badge" style="background-color: #0284c7; color: #fff; font-weight: 700; padding: 0.35rem 0.75rem; border-radius: 9999px;">
+                                        ● {{ factura.get_estado_sifen_display|default:factura.get_estado_display|default:"Emitido" }}
+                                    </span>
+                                {% endif %}
+                            </span>
+                            {% if factura.es_simulada %}
+                                <span class="badge" style="background-color: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.75rem;">
+                                    ⚡ Simulador SIFEN (0 Cuota)
+                                </span>
+                            {% else %}
+                                <span class="badge" style="background-color: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem;">
+                                    🏛️ e-Kuatia Oficial
+                                </span>
+                            {% endif %}
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+                            Documento Tributario Electrónico homologado conforme a las normativas de la DNIT / SET.
+                        </p>
+                    </div>
+
+                    <!-- Botones de Acción Directa KuDE -->
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <a href="{% url 'transactions:kude_pdf' pk=transaction.pk %}" download class="btn btn-secondary" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 700; padding: 0.45rem 0.9rem;" title="Descargar KuDE oficial en PDF">
+                            📥 Descargar PDF
+                        </a>
+                        <a href="{% url 'transactions:kude_xml' pk=transaction.pk %}" download class="btn btn-secondary" style="background: rgba(37, 99, 235, 0.15); color: #3b82f6; border: 1px solid rgba(37, 99, 235, 0.3); font-weight: 700; padding: 0.45rem 0.9rem;" title="Descargar archivo XML firmado digitalmente">
+                            💾 Descargar XML
+                        </a>
+                        <button type="button" id="btnSyncSifen" onclick="syncSifenStatus({{ transaction.pk }})" class="btn btn-secondary" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700; padding: 0.45rem 0.9rem;" title="Consultar en tiempo real a SIFEN y actualizar estado">
+                            <span id="syncSifenSpinner" style="display: none;">⏳ </span>
+                            <span id="syncSifenLabel">🔄 Actualizar SIFEN</span>
+                        </button>
+                        <a href="{% url 'transactions:kude' pk=transaction.pk %}" target="_blank" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); font-weight: 700; padding: 0.45rem 1rem;">
+                            👁️ Ver KuDE Completo
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Desglose de Datos Fiscales -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+                    <div style="background: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-radius: 0.625rem; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Número de Factura</div>
+                        <div style="font-size: 1.05rem; font-weight: 800; color: var(--text-main); font-family: monospace;">
+                            {{ factura.numero_factura|default:"001-001-0000001" }}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-subtle);">Timbrado: {{ factura.timbrado|default:"12548963" }}</div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-radius: 0.625rem; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Receptor / Beneficiario</div>
+                        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            {{ factura.razon_social_receptor|default:transaction.cliente.nombre }}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-subtle);">RUC: {{ factura.ruc_receptor|default:transaction.cliente.documento_ruc }}</div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-radius: 0.625rem; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Condición & Importe</div>
+                        <div style="font-size: 1.05rem; font-weight: 800; color: var(--primary);">
+                            {{ transaction.monto_destino|format_currency:transaction.target_currency.code }}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-subtle);">
+                            Condición: {{ factura.get_condicion_venta_display|default:"Contado" }} (Exenta IVA)
+                        </div>
+                    </div>
+                    <div style="background: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-radius: 0.625rem; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Fecha de Emisión & Protocolo</div>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">
+                            {{ factura.fecha_emision|date:"d/m/Y H:i:s"|default:transaction.created_at|date:"d/m/Y H:i:s" }}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="sifenProtocoloText">
+                            Prot: {{ factura.protocolo_autorizacion|default:"SIFEN-AUT-PENDIENTE" }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bloque Clave de Acceso (CDC) con botón de copiado -->
+                <div style="background: rgba(2, 132, 199, 0.08); border: 1px dashed rgba(2, 132, 199, 0.4); border-radius: 0.75rem; padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+                    <div style="flex: 1; min-width: 250px;">
+                        <span style="font-size: 0.75rem; font-weight: 700; color: var(--primary); text-transform: uppercase; display: block; margin-bottom: 0.2rem;">
+                            Clave de Acceso / CDC (44 Dígitos SIFEN)
+                        </span>
+                        <code id="cdcRawValue" style="display: none;">{{ factura.cdc }}</code>
+                        <span id="cdcFormattedDisplay" style="font-family: monospace; font-size: 0.95rem; font-weight: 700; color: var(--text-main); letter-spacing: 0.04em;">
+                            {{ factura.cdc_formatted|default:factura.cdc }}
+                        </span>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button type="button" onclick="copyCdcToClipboard()" id="btnCopyCdc" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                            📋 Copiar CDC
+                        </button>
+                    </div>
+                </div>
+
+                <div id="syncFeedbackMessage" style="display: none; margin-top: 0.75rem; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.85rem;"></div>
+            </div>
+        {% endif %}
+
         {% if can_cancel %}
             <!-- Panel de Anulación Manual -->
             <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
@@ -292,6 +409,90 @@
 </style>
 
 <script>
+    function copyCdcToClipboard() {
+        const cdc = document.getElementById('cdcRawValue')?.innerText?.trim() || '';
+        if (!cdc) return;
+        navigator.clipboard.writeText(cdc).then(() => {
+            const btn = document.getElementById('btnCopyCdc');
+            if (btn) {
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✅ ¡Copiado!';
+                btn.style.color = '#10b981';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.style.color = '';
+                }, 2000);
+            }
+        });
+    }
+
+    function syncSifenStatus(txId) {
+        const spinner = document.getElementById('syncSifenSpinner');
+        const label = document.getElementById('syncSifenLabel');
+        const btn = document.getElementById('btnSyncSifen');
+        const feedback = document.getElementById('syncFeedbackMessage');
+        const badgeContainer = document.getElementById('sifenStatusBadgeContainer');
+        const protocolText = document.getElementById('sifenProtocoloText');
+
+        if (spinner) spinner.style.display = 'inline-block';
+        if (label) label.innerText = 'Consultando...';
+        if (btn) btn.disabled = true;
+
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+
+        fetch(`/transactions/${txId}/kude/sync-sifen/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrfToken,
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (spinner) spinner.style.display = 'none';
+            if (label) label.innerText = '🔄 Actualizar SIFEN';
+            if (btn) btn.disabled = false;
+
+            if (data.success) {
+                if (badgeContainer && data.badge_html) {
+                    badgeContainer.innerHTML = data.badge_html;
+                }
+                if (protocolText && data.protocolo_autorizacion) {
+                    protocolText.innerText = `Prot: ${data.protocolo_autorizacion}`;
+                }
+                if (feedback) {
+                    feedback.style.display = 'block';
+                    feedback.style.backgroundColor = 'rgba(16, 185, 129, 0.15)';
+                    feedback.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+                    feedback.style.color = '#10b981';
+                    feedback.innerHTML = `✅ <strong>SIFEN:</strong> ${data.descripcion_sifen || data.estado_sifen_display} — Sincronizado a las ${data.updated_at}.`;
+                    setTimeout(() => { feedback.style.display = 'none'; }, 6000);
+                }
+            } else {
+                if (feedback) {
+                    feedback.style.display = 'block';
+                    feedback.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                    feedback.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+                    feedback.style.color = '#ef4444';
+                    feedback.innerText = `⚠️ ${data.error || 'No se pudo sincronizar el estado SIFEN.'}`;
+                }
+            }
+        })
+        .catch(err => {
+            if (spinner) spinner.style.display = 'none';
+            if (label) label.innerText = '🔄 Actualizar SIFEN';
+            if (btn) btn.disabled = false;
+            if (feedback) {
+                feedback.style.display = 'block';
+                feedback.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                feedback.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+                feedback.style.color = '#ef4444';
+                feedback.innerText = '⚠️ Error de red o comunicación al consultar SIFEN.';
+            }
+        });
+    }
+
     {% if transaction.estado == 'PENDIENTE' and remaining_seconds > 0 %}
         let remainingSeconds = {{ remaining_seconds }};
         const timerElement = document.getElementById('countdownTimer');

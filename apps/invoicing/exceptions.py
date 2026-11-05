@@ -41,6 +41,24 @@ class QuotaExhaustedError(InvoiceProviderError):
     pass
 
 
+class QuotaShieldExhaustedError(QuotaExhaustedError):
+    """
+    Excepción disparada cuando la cuota operativa comercial se agota y las 10 llamadas
+    restantes se encuentran blindadas exclusivamente para la presentación en vivo y QA (SCRUM-120).
+    """
+    pass
+
+
+class TestQuotaExhaustedError(QuotaExhaustedError):
+    """
+    Excepción disparada cuando se consumen íntegramente las 10 unidades de la reserva blindada de pruebas/presentación.
+    """
+    pass
+
+
+PresentationQuotaExhaustedError = TestQuotaExhaustedError
+
+
 class LiveModeDisabledError(InvoiceProviderError):
     """
     Excepción disparada al intentar ejecutar peticiones contra la API real en vivo cuando

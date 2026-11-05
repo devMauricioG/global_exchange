@@ -138,3 +138,4 @@ Se incorporaron **25 pruebas unitarias** específicas para SCRUM-118, organizada
 ### Resultados Globales de la Suite:
 * **Pruebas en `apps.invoicing`:** 50/50 pasadas satisfactoriamente (0 fallos, 0 errores).
 * **Pruebas del proyecto global:** 631/631 pasadas satisfactoriamente (100% OK, sin regresiones).
+

@@ -6,6 +6,9 @@ Implementa la arquitectura desacoplada Strategy / Adapter para emisión,
 cálculo matemático y consulta de Documentos Tributarios Electrónicos (SCRUM-117).
 Agrega el modelo canónico ``FacturaElectronica`` y el servicio ``InvoiceService``
 para persistencia del CDC, estados SIFEN, XML firmado y KuDE PDF (SCRUM-118).
+Provee las vistas y endpoints para consulta, visualización y descarga de KuDE PDF y XML (SCRUM-119).
+Implementa el cliente HTTP ``FacturaSeguraClient`` con protocolo de cuota estricto y
+reserva blindada de 10 pruebas para la presentación en vivo (SCRUM-120).
 
 Submodules
 ----------
@@ -38,6 +41,14 @@ apps.invoicing.types module
 ---------------------------
 
 .. automodule:: apps.invoicing.types
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.client module
+----------------------------
+
+.. automodule:: apps.invoicing.client
    :members:
    :show-inheritance:
    :undoc-members:
@@ -97,4 +108,21 @@ apps.invoicing.admin module
    :members:
    :show-inheritance:
    :undoc-members:
+
+apps.invoicing.views module
+---------------------------
+
+.. automodule:: apps.invoicing.views
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.urls module
+--------------------------
+
+.. automodule:: apps.invoicing.urls
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 

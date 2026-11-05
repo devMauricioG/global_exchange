@@ -19,6 +19,7 @@ from transactions.kude_views import (
     TransactionKudePdfDownloadView,
     TransactionKudeView,
     TransactionKudeXmlDownloadView,
+    TransactionSifenSyncAjaxView,
 )
 
 app_name = 'transactions'
@@ -36,6 +37,7 @@ urlpatterns = [
     path('<int:pk>/kude/', TransactionKudeView.as_view(), name='kude'),
     path('<int:pk>/kude/pdf/', TransactionKudePdfDownloadView.as_view(), name='kude_pdf'),
     path('<int:pk>/kude/xml/', TransactionKudeXmlDownloadView.as_view(), name='kude_xml'),
+    path('<int:pk>/kude/sync-sifen/', TransactionSifenSyncAjaxView.as_view(), name='kude_sync_sifen'),
     path('api/kude/<str:identifier>/', TransactionKudeConsultaApiView.as_view(), name='kude_api'),
     path('api/create/', TransactionCreateApiView.as_view(), name='api_create'),
     path('api/<int:pk>/cancel/', TransactionCancelApiView.as_view(), name='api_cancel'),

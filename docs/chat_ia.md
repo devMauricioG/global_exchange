@@ -580,6 +580,38 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 
 ---
 
+## Mauricio Gonz�lez � 05/11/2026 � Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Invoicing � Vistas y Endpoints para Consulta, Visualizaci�n y Descarga de KuDE PDF y XML Firmado (SCRUM-119)
+
+**Resumen:**
+- Implement� los endpoints y vistas del m�dulo can�nico de facturaci�n electr�nica (pps/invoicing/):
+  - **Vistas y Endpoints (pps/invoicing/views.py):** FacturaElectronicaDetailView, FacturaElectronicaPdfDownloadView, FacturaElectronicaXmlDownloadView, FacturaElectronicaSifenSyncAjaxView y FacturaConsultaApiView.
+  - **Rutas (pps/invoicing/urls.py):** Configuraci�n de 6 URLs bajo el prefijo invoicing/.
+  - **Integraci�n transaccional:** TransactionSifenSyncAjaxView en 	ransactions/kude_views.py; enriquecimiento de TransactionDetailView con auto-emisi�n de factura.
+  - **Card integrada en 	ransaction_detail.html:** Badge de estado SIFEN en tiempo real, CDC formateado con bot�n de copiado 1-click, botones de descarga PDF/XML, bot�n AJAX de sincronizaci�n SIFEN con spinner y feedback visual.
+  - **Seguridad:** InvoicingAccessMixin con control IDOR por CustomerUserAssignment.
+  - **Correcciones cr�ticas:** Shared registry en MockInvoiceProvider para coherencia entre instancias en tests AJAX; protecci�n contra OverflowError SQLite en b�squeda por ID largo.
+  - **Pruebas:** 11 nuevas pruebas en InvoicingViewsTests ? 61/61 OK en pps.invoicing.
+  - **Suite global:** 642/642 tests OK, Sphinx: uild succeeded.
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Invoicing — Protocolo de Cuota y Cliente Real FacturaSeguraClient con Reserva Blindada de 10 Pruebas (SCRUM-120)
+
+**Resumen:**
+- Implementé el cliente HTTP nativo y gestor de cuotas en el módulo canónico de facturación electrónica (pps/invoicing/):
+  - **Cliente HTTP (pps/invoicing/client.py):** Conexión con https://apitest.facturasegura.com.py/ y portal productivo conforme a la especificación *API de Factura Segura para ESI v01*. Métodos implementados: login, calcular_de, generar_de, get_estado_sifen, dwn_kude, dwn_xml, sol_cancelacion, sol_inutilizacion.
+  - **Protocolo de Cuota y Reserva Blindada:** Mecanismo estricto con 	hreading.Lock que bloquea peticiones comerciales ordinarias cuando se alcanza el umbral (QuotaShieldExhaustedError), garantizando la preservación inalterable de **10 llamadas exclusivas para la presentación final en vivo y QA**.
+  - **Guardián de Modo Live:** Control estricto condicionado a FACTURA_SEGURA_LIVE_ENABLED=True, bloqueando llamadas accidentales a la API externa (LiveModeDisabledError) durante el desarrollo y ejecución de tests.
+  - **Integración con Adapter:** FacturaSeguraProvider adaptado para delegar transporte HTTP y cuotas en FacturaSeguraClient.
+  - **Excepciones de Dominio (pps/invoicing/exceptions.py):** QuotaShieldExhaustedError, TestQuotaExhaustedError y PresentationQuotaExhaustedError.
+  - **Pruebas Automatizadas:** 17 nuevas pruebas en FacturaSeguraClientAndQuotaProtocolTests alcanzando **78 tests en pps.invoicing**.
+  - **Suite Global:** **659/659 tests aprobados al 100% (OK)** sin regresiones. Documentación Sphinx HTML compilada con 0 warnings.
+
+---
+
 ## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
 
 **Contexto:** Sprint 5 / Cajas & Transacciones — Orquestación transaccional atómica de operaciones en efectivo con caja y facturación (SCRUM-123)

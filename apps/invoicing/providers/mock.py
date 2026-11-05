@@ -205,17 +205,21 @@ class MockInvoiceProvider(InvoiceProvider):
     - Registro en memoria de documentos emitidos y cancelados para verificación en tests.
     """
 
+    # Almacén en memoria compartido para CDC -> metadatos entre instancias de mock
+    _shared_registry: Dict[str, Dict[str, Any]] = {}
+    _shared_cancelled_cdcs: set = set()
+    _shared_voided_documents: set = set()
+
     def __init__(self):
-        # Almacén en memoria para CDC -> metadatos (útil para aserciones de tests)
-        self._registry: Dict[str, Dict[str, Any]] = {}
-        self._cancelled_cdcs: set = set()
-        self._voided_documents: set = set()
+        self._registry = self._shared_registry
+        self._cancelled_cdcs = self._shared_cancelled_cdcs
+        self._voided_documents = self._shared_voided_documents
 
     def reset_registry(self) -> None:
         """Limpia el registro de facturas emitidas y estados simulados."""
-        self._registry.clear()
-        self._cancelled_cdcs.clear()
-        self._voided_documents.clear()
+        self._shared_registry.clear()
+        self._shared_cancelled_cdcs.clear()
+        self._shared_voided_documents.clear()
 
     def calcular_de(self, de_data: Dict[str, Any]) -> Dict[str, Any]:
         """

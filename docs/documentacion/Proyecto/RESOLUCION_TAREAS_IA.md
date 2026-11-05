@@ -34,7 +34,9 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-116** | Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
 | **SCRUM-117** | Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider) | Sprint 5 / Invoicing | Mauricio González | Finalizado |
 | **SCRUM-118** | Modelado de Factura Electrónica y persistencia de CDC, estados SIFEN, KuDE PDF y XML | Sprint 5 / Invoicing | Mauricio González | Finalizado |
-| **SCRUM-123** | Orquestación transaccional atómica de operaciones en efectivo con caja y facturación | Sprint 5 / Cajas | Mauricio González | Finalizado |
+| **SCRUM-119** | Vistas y Endpoints para Consulta, Visualización y Descarga de KuDE PDF y XML | Sprint 5 / Invoicing | Mauricio González | Finalizado |
+| **SCRUM-120** | Protocolo de Cuota y Cliente Real FacturaSeguraClient con Reserva Blindada de 10 Pruebas | Sprint 5 / Invoicing | Mauricio González | Finalizado |
+| **SCRUM-123** | Orquestación transaccional atómica de operaciones en efectivo con caja y facturación | Sprint 5 / Cajas | Armando Machuca | Finalizado |
 
 
 ---
@@ -717,8 +719,6 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
 
-<<<<<<< HEAD
-
 ---
 
 ### 24. SCRUM-116: Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes por Denominación
@@ -890,9 +890,61 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
 
+### 27. SCRUM-119: Vistas y Endpoints para Consulta, Visualización y Descarga de KuDE PDF y XML Firmado
+
+* **Objetivo:** Implementar vistas web, endpoints REST y componentes AJAX para visualización integrada del KuDE, descarga directa de PDF/XML firmado y sincronización en tiempo real del estado SIFEN.
+* **Aportes y Solución con IA:**
+  * Card integrada de KuDE en `transaction_detail.html` con CDC formateado, badge de estado, botones de descarga y botón AJAX de sincronización SIFEN.
+  * 5 vistas/endpoints en `apps/invoicing/views.py`: `FacturaElectronicaDetailView`, `FacturaElectronicaPdfDownloadView`, `FacturaElectronicaXmlDownloadView`, `FacturaElectronicaSifenSyncAjaxView`, `FacturaConsultaApiView`.
+  * Endpoint transaccional `TransactionSifenSyncAjaxView` en `transactions/kude_views.py`.
+  * `InvoicingAccessMixin` con control IDOR estricto por `CustomerUserAssignment`.
+  * Enriquecimiento de `TransactionDetailView.get_context_data` con auto-emisión de factura.
+  * 11 pruebas unitarias en `InvoicingViewsTests`.
+  * Suite global: **642/642 tests OK**, Sphinx: `build succeeded`.
+* **Archivos intervenidos:**
+  * `apps/invoicing/views.py`
+  * `apps/invoicing/urls.py`
+  * `config/urls.py`
+  * `transactions/kude_views.py`
+  * `transactions/urls.py`
+  * `transactions/views.py`
+  * `templates/transactions/transaction_detail.html`
+  * `templates/transactions/kude.html`
+  * `apps/invoicing/__init__.py`
+  * `apps/invoicing/providers/mock.py`
+  * `apps/invoicing/tests.py`
+  * `docs/sphinx/source/invoicing.rst`
+  * `docs/documentacion/SCRUM-119.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+### 28. SCRUM-120: Protocolo de Cuota y Cliente Real FacturaSeguraClient con Reserva Blindada de 10 Pruebas
+
+* **Objetivo:** Implementar en pps/invoicing/ el cliente HTTP nativo FacturaSeguraClient para conexión con el PAC homologado SIFEN bajo estándar ESI v01, blindado por la bandera FACTURA_SEGURA_LIVE_ENABLED=True y gobernado por un protocolo estricto de cuota que reserva 10 llamadas exclusivas para la presentación y QA.
+* **Aportes y Solución con IA:**
+  * Implementado FacturaSeguraClient en pps/invoicing/client.py con operaciones login, calcular_de, generar_de, get_estado_sifen, dwn_kude, dwn_xml, sol_cancelacion, sol_inutilizacion.
+  * Protocolo de cuota estricto y thread-safe con 	hreading.Lock que bloquea peticiones ordinarias con QuotaShieldExhaustedError al alcanzar el umbral comercial, protegiendo 10 unidades exclusivas para la presentación.
+  * Jerarquía de excepciones en pps/invoicing/exceptions.py: QuotaShieldExhaustedError, TestQuotaExhaustedError y PresentationQuotaExhaustedError.
+  * Integración con FacturaSeguraProvider (pps/invoicing/providers/facturasegura.py) delegando el transporte HTTP en FacturaSeguraClient.
+  * Re-exportación unificada en pps/invoicing/__init__.py.
+  * 17 pruebas unitarias en FacturaSeguraClientAndQuotaProtocolTests alcanzando 78 tests en pps.invoicing.
+  * Suite global: **659/659 tests OK**, Sphinx: uild succeeded (0 warnings).
+* **Archivos intervenidos:**
+  * pps/invoicing/client.py
+  * pps/invoicing/exceptions.py
+  * pps/invoicing/providers/facturasegura.py
+  * pps/invoicing/__init__.py
+  * pps/invoicing/tests.py
+  * docs/sphinx/source/invoicing.rst
+  * docs/documentacion/SCRUM-120.md
+  * docs/documentacion/Jira workflow/TAREAS.md
+  * docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md
+  * docs/chat_ia.md
+
 ---
 
-### 27. SCRUM-123: Orquestación transaccional atómica de operaciones en efectivo con caja y facturación
+### 29. SCRUM-123: Orquestación transaccional atómica de operaciones en efectivo con caja y facturación
 
 * **Objetivo:** Extender `apps/transactions/services.py` con `TransactionService.process_cash_payment()` para vincular el cobro/pago en efectivo con el turno de caja activo, generar el MovimientoCaja correspondiente, transicionar la transacción a COMPLETADA y disparar de forma atómica la emisión de la Factura Electrónica.
 * **Aportes y Solución con IA:**
@@ -912,7 +964,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
     * Fix defensivo en `MockInvoiceProvider.emitir_factura` para tolerar clientes sin RUC explícito.
   * **Pruebas y Verificación:**
     * 11 nuevas pruebas unitarias y de integración en `transactions/tests_cash_orchestration.py`.
-    * Suite global completa: **642 tests aprobados al 100% (OK)** sin regresiones.
+    * Suite global completa: **659 tests aprobados al 100% (OK)** sin regresiones.
 * **Archivos intervenidos:**
   * `transactions/services.py`
   * `apps/cash/models.py`
@@ -924,4 +976,3 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/documentacion/SCRUM-123.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
-
