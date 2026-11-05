@@ -1,3 +1,4 @@
+from django import forms
 """
 Configuración del panel de administración Django para el módulo de Cajas, Turnos y Efectivo (apps.cash.admin).
 """
@@ -158,18 +159,58 @@ class VaultAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
 
 
+
+class BanknoteInventoryAdminForm(forms.ModelForm):
+    class Meta:
+        model = BanknoteInventory
+        fields = '__all__'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        denom = cleaned_data.get('denomination')
+        cur = cleaned_data.get('currency')
+        if denom:
+            if not cur:
+                cleaned_data['currency'] = denom.currency
+            elif denom.currency_id != cur.id:
+                raise forms.ValidationError({
+                    'denomination': f"La denominación '{denom}' pertenece a {denom.currency.code}, no a {cur.code}."
+                })
+        return cleaned_data
+
+
+class InitialFloatConfigAdminForm(forms.ModelForm):
+    class Meta:
+        model = InitialFloatConfig
+        fields = '__all__'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        denom = cleaned_data.get('denomination')
+        cur = cleaned_data.get('currency')
+        if denom:
+            if not cur:
+                cleaned_data['currency'] = denom.currency
+            elif denom.currency_id != cur.id:
+                raise forms.ValidationError({
+                    'denomination': f"La denominación '{denom}' pertenece a {denom.currency.code}, no a {cur.code}."
+                })
+        return cleaned_data
+
 @admin.register(CurrencyDenomination)
 class CurrencyDenominationAdmin(admin.ModelAdmin):
     """Denominaciones oficiales de billetes y monedas por divisa."""
     list_display = ('currency', 'value', 'is_coin', 'is_active', 'order')
     list_filter = ('currency', 'is_active', 'is_coin')
-    search_fields = ('currency__code', 'currency__name')
+    search_fields = ('currency__code', 'currency__name', 'value')
     ordering = ['currency__code', '-value']
 
 
 @admin.register(BanknoteInventory)
 class BanknoteInventoryAdmin(admin.ModelAdmin):
     """Stock físico actual de billetes por denominación y ubicación."""
+    form = BanknoteInventoryAdminForm
+    autocomplete_fields = ('denomination',)
     list_display = ('denomination', 'currency', 'location_type', 'vault', 'cash_register', 'quantity', 'total_amount_display', 'updated_at')
     list_filter = ('location_type', 'currency')
     search_fields = ('denomination__value', 'currency__code', 'vault__code', 'cash_register__register_code')
@@ -186,6 +227,8 @@ class BanknoteInventoryAdmin(admin.ModelAdmin):
 @admin.register(InitialFloatConfig)
 class InitialFloatConfigAdmin(admin.ModelAdmin):
     """Configuración de dotación inicial de billetes por denominación para apertura de turno."""
+    form = InitialFloatConfigAdminForm
+    autocomplete_fields = ('denomination',)
     list_display = ('denomination', 'currency', 'default_quantity', 'allow_partial_fill', 'is_active')
     list_filter = ('currency', 'is_active', 'allow_partial_fill')
     search_fields = ('currency__code', 'denomination__value')

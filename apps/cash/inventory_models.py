@@ -207,6 +207,10 @@ class BanknoteInventory(models.Model):
             raise ValidationError("Debe indicar la caja registradora correspondiente para una ubicación de tipo CAJA.")
         if self.quantity < 0:
             raise ValidationError("La cantidad física de billetes no puede ser negativa.")
+        if self.denomination_id and self.currency_id and self.denomination.currency_id != self.currency_id:
+            raise ValidationError({
+                'denomination': f"La denominación '{self.denomination}' pertenece a {self.denomination.currency.code}, no a la divisa seleccionada ({self.currency.code})."
+            })
 
 
 class InitialFloatConfig(models.Model):
@@ -247,6 +251,13 @@ class InitialFloatConfig(models.Model):
         verbose_name_plural = 'Configuraciones de Dotación Inicial'
         unique_together = ('currency', 'denomination')
         ordering = ['currency', '-denomination__value']
+
+    def clean(self) -> None:
+        super().clean()
+        if self.denomination_id and self.currency_id and self.denomination.currency_id != self.currency_id:
+            raise ValidationError({
+                'denomination': f"La denominación '{self.denomination}' pertenece a {self.denomination.currency.code}, no a la divisa seleccionada ({self.currency.code})."
+            })
 
     def __str__(self) -> str:
         return f"Dotación Inicial {self.denomination}: {self.default_quantity} u."
