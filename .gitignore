@@ -23,6 +23,12 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Media y archivos subidos en desarrollo/tests
+/media/
+/invoicing/
+
+
+
 # Documentacion Sphinx
 docs/sphinx/build/
 

@@ -4,6 +4,8 @@ invoicing package
 Módulo de Facturación Electrónica SIFEN / e-Kuatia (apps.invoicing).
 Implementa la arquitectura desacoplada Strategy / Adapter para emisión,
 cálculo matemático y consulta de Documentos Tributarios Electrónicos (SCRUM-117).
+Agrega el modelo canónico ``FacturaElectronica`` y el servicio ``InvoiceService``
+para persistencia del CDC, estados SIFEN, XML firmado y KuDE PDF (SCRUM-118).
 
 Submodules
 ----------
@@ -68,6 +70,30 @@ apps.invoicing.providers.factory module
 ---------------------------------------
 
 .. automodule:: apps.invoicing.providers.factory
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.models module
+----------------------------
+
+.. automodule:: apps.invoicing.models
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.services module
+------------------------------
+
+.. automodule:: apps.invoicing.services
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+apps.invoicing.admin module
+---------------------------
+
+.. automodule:: apps.invoicing.admin
    :members:
    :show-inheritance:
    :undoc-members:

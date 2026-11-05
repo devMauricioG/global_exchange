@@ -616,3 +616,386 @@ class InvoiceProviderFactoryTests(TestCase):
 
         reset_invoice_provider()
         self.assertIsNot(get_invoice_provider(), custom_mock)
+
+
+# =============================================================================
+# SCRUM-118 — Tests del modelo FacturaElectronica y servicio InvoiceService
+# =============================================================================
+
+from decimal import Decimal as D
+import tempfile
+
+from customers.models import Cliente
+from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
+from rates.models import Currency, ExchangeRate
+from transactions.models import Transaction
+
+from apps.invoicing.models import FacturaElectronica
+from apps.invoicing.services import InvoiceService
+
+
+class FacturaElectronicaModelMixin:
+    """
+    Mixin con datos maestros mínimos para tests de FacturaElectronica.
+    Reutiliza la misma estrategia del TransactionTestMixin de transactions.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.usd = Currency.objects.create(
+            code='TST', name='Test Currency', symbol='T', decimals=2, is_active=True
+        )
+        cls.pyg = Currency.objects.create(
+            code='TSG', name='Test Guarani', symbol='G', decimals=0, is_active=True
+        )
+        cls.banco, _ = EntidadFinanciera.objects.get_or_create(
+            nombre='Banco Test Invoicing',
+            defaults={'tipo': EntidadFinanciera.TipoEntidad.BANCO, 'activo': True},
+        )
+        cls.cliente = Cliente.objects.create(
+            nombre='Test Receptor',
+            documento_ruc='2595733-3',
+            correo='receptor@test.com',
+        )
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        cls.user = User.objects.create_user(
+            username='test_inv_user',
+            email='test_inv@test.com',
+            password='Password123!',
+        )
+        cls.medio_pago = PaymentMethod.objects.create(
+            cliente=cls.cliente,
+            tipo_medio=PaymentMethod.TipoMedio.TRANSFERENCIA,
+            entidad_bancaria=cls.banco,
+            numero_cuenta='11112222',
+            titular='Test Receptor',
+            documento_titular='2595733-3',
+            tipo_cuenta_bancaria=PaymentMethod.TipoCuentaBancaria.AHORRO,
+            es_predeterminado=True,
+            activo=True,
+        )
+        cls.medio_acred = ReceivingMethod.objects.create(
+            cliente=cls.cliente,
+            entidad_bancaria=cls.banco,
+            tipo_cuenta=ReceivingMethod.TipoCuenta.AHORRO,
+            numero_cuenta='22221111',
+            titular='Test Receptor',
+            documento_titular='2595733-3',
+            es_predeterminado=True,
+            activo=True,
+        )
+        cls.tasa = ExchangeRate.objects.create(
+            base_currency=cls.usd,
+            target_currency=cls.pyg,
+            buy_rate=D('7500.00'),
+            sell_rate=D('7600.00'),
+            valid_from=timezone.now() - timezone.timedelta(days=1),
+            is_active=True,
+        )
+        cls.tx = Transaction.objects.create(
+            cliente=cls.cliente,
+            tipo_operacion=Transaction.TipoOperacion.COMPRA,
+            base_currency=cls.usd,
+            target_currency=cls.pyg,
+            tasa_base=D('7600.000000'),
+            comision_segmento=D('0.00'),
+            tasa_neta=D('7600.000000'),
+            monto_origen=D('760000.00'),
+            monto_destino=D('100.00'),
+            medio_pago_origen=cls.medio_pago,
+            medio_acreditacion_destino=cls.medio_acred,
+            estado=Transaction.Estado.COMPLETADA,
+        )
+
+    @staticmethod
+    def _make_cdc(suffix='0001'):
+        """Genera un CDC de 44 dígitos de prueba único por sufijo."""
+        base = '01800123457001001000000120261105'
+        pad = suffix.zfill(12)
+        raw = base + pad
+        assert len(raw) == 44, f"CDC mal formado ({len(raw)} dígitos)"
+        return raw
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class FacturaElectronicaModelTests(FacturaElectronicaModelMixin, TestCase):
+    """
+    Tests del modelo FacturaElectronica (SCRUM-118).
+
+    Verifica persistencia, restricciones, propiedades y métodos de utilidad
+    del modelo FacturaElectronica en apps/invoicing/models.py.
+    """
+
+    def _make_factura(self, **kwargs):
+        """Helper para crear una FacturaElectronica con valores mínimos válidos."""
+        defaults = dict(
+            transaction=self.tx,
+            cdc=self._make_cdc(),
+            numero_factura='001-001-0000001',
+            ruc_receptor='2595733-3',
+            estado_sifen=FacturaElectronica.EstadoSifen.APROBADO,
+            es_simulada=True,
+        )
+        defaults.update(kwargs)
+        return FacturaElectronica.objects.create(**defaults)
+
+    def test_create_minimal_factura(self):
+        """Verifica la creación de una FacturaElectronica con campos mínimos."""
+        f = self._make_factura()
+        self.assertIsNotNone(f.pk)
+        self.assertEqual(len(f.cdc), 44)
+        self.assertTrue(f.cdc.isdigit())
+        self.assertEqual(f.estado_sifen, FacturaElectronica.EstadoSifen.APROBADO)
+        self.assertTrue(f.es_simulada)
+
+    def test_str_representation(self):
+        """Verifica __str__ incluye número de factura y estado."""
+        f = self._make_factura()
+        s = str(f)
+        self.assertIn('001-001-0000001', s)
+        self.assertIn('Aprobado', s)
+        self.assertIn('[SIMULADA]', s)
+
+    def test_cdc_formatted_property(self):
+        """Verifica que cdc_formatted retorne 11 grupos de 4 dígitos separados por guiones."""
+        f = self._make_factura()
+        formatted = f.cdc_formatted
+        parts = formatted.split('-')
+        self.assertEqual(len(parts), 11)
+        for part in parts:
+            self.assertEqual(len(part), 4)
+            self.assertTrue(part.isdigit())
+
+    def test_cdc_formatted_blank(self):
+        """Verifica que cdc_formatted retorne cadena vacía si cdc está vacío."""
+        f = FacturaElectronica.__new__(FacturaElectronica)
+        f.cdc = ''
+        self.assertEqual(f.cdc_formatted, '')
+
+    def test_is_aprobado_property(self):
+        """Verifica la propiedad is_aprobado para estados aprobados y no aprobados."""
+        f = self._make_factura(cdc=self._make_cdc('0002'))
+        f.estado_sifen = FacturaElectronica.EstadoSifen.APROBADO
+        self.assertTrue(f.is_aprobado)
+
+        f.estado_sifen = FacturaElectronica.EstadoSifen.APROBADO_OBS
+        self.assertTrue(f.is_aprobado)
+
+        f.estado_sifen = FacturaElectronica.EstadoSifen.RECHAZADO
+        self.assertFalse(f.is_aprobado)
+
+    def test_is_cancelado_property(self):
+        """Verifica la propiedad is_cancelado."""
+        f = self._make_factura(cdc=self._make_cdc('0003'))
+        f.estado_sifen = FacturaElectronica.EstadoSifen.CANCELADO
+        self.assertTrue(f.is_cancelado)
+
+        f.estado_sifen = FacturaElectronica.EstadoSifen.APROBADO
+        self.assertFalse(f.is_cancelado)
+
+    def test_is_inutilizado_property(self):
+        """Verifica la propiedad is_inutilizado."""
+        f = self._make_factura(cdc=self._make_cdc('0004'))
+        f.estado_sifen = FacturaElectronica.EstadoSifen.INUTILIZADO
+        self.assertTrue(f.is_inutilizado)
+
+        f.estado_sifen = FacturaElectronica.EstadoSifen.APROBADO
+        self.assertFalse(f.is_inutilizado)
+
+    def test_es_simulada_default_true(self):
+        """Verifica que es_simulada tenga default=True (seguridad: nunca real por defecto)."""
+        f = FacturaElectronica(
+            transaction=self.tx,
+            cdc=self._make_cdc('0005'),
+            numero_factura='001-001-0000005',
+            ruc_receptor='2595733-3',
+        )
+        self.assertTrue(f.es_simulada)
+
+    def test_unique_cdc_constraint(self):
+        """Verifica que dos facturas no puedan tener el mismo CDC."""
+        from django.db import IntegrityError
+        cdc = self._make_cdc('0006')
+        self._make_factura(cdc=cdc, numero_factura='001-001-0000006')
+        with self.assertRaises(IntegrityError):
+            # Crear otra tx para evitar conflicto OneToOne
+            tx2 = Transaction.objects.create(
+                cliente=self.cliente,
+                tipo_operacion=Transaction.TipoOperacion.VENTA,
+                base_currency=self.usd,
+                target_currency=self.pyg,
+                tasa_base=D('7600.000000'),
+                comision_segmento=D('0.00'),
+                tasa_neta=D('7600.000000'),
+                monto_origen=D('100.00'),
+                monto_destino=D('760000.00'),
+                medio_pago_origen=self.medio_pago,
+                medio_acreditacion_destino=self.medio_acred,
+                estado=Transaction.Estado.COMPLETADA,
+            )
+            FacturaElectronica.objects.create(
+                transaction=tx2,
+                cdc=cdc,  # CDC duplicado → IntegrityError
+                numero_factura='001-001-0000066',
+                ruc_receptor='2595733-3',
+            )
+
+    def test_one_to_one_relation_with_transaction(self):
+        """Verifica que la relación OneToOne a Transaction funcione correctamente."""
+        f = self._make_factura(cdc=self._make_cdc('0007'))
+        self.assertEqual(f.transaction_id, self.tx.pk)
+        # Acceso inverso desde la transacción
+        self.assertEqual(self.tx.factura_sifen, f)
+
+    def test_respuesta_sifen_raw_json(self):
+        """Verifica el almacenamiento y recuperación de un dict en respuesta_sifen_raw."""
+        payload = {'code': 0, 'description': 'OK', 'cdc': self._make_cdc('0008')}
+        f = self._make_factura(
+            cdc=payload['cdc'],
+            numero_factura='001-001-0000008',
+            respuesta_sifen_raw=payload,
+        )
+        f.refresh_from_db()
+        self.assertEqual(f.respuesta_sifen_raw['code'], 0)
+        self.assertEqual(f.respuesta_sifen_raw['description'], 'OK')
+
+    def test_save_xml_content(self):
+        """Verifica que save_xml_content rellene xml_firmado y archivo_xml."""
+        f = self._make_factura(cdc=self._make_cdc('0009'), numero_factura='001-001-0000009')
+        xml_content = '<rDE Id="test"><Signature/></rDE>'
+        f.save_xml_content(xml_content, filename='test_sifen.xml')
+
+        self.assertEqual(f.xml_firmado, xml_content)
+        self.assertTrue(bool(f.archivo_xml))
+
+    def test_save_pdf_content(self):
+        """Verifica que save_pdf_content persista el archivo KuDE PDF."""
+        f = self._make_factura(cdc=self._make_cdc('0010'), numero_factura='001-001-0000010')
+        pdf_bytes = b'%PDF-1.4 test content %%EOF'
+        f.save_pdf_content(pdf_bytes, filename='test_kude.pdf')
+
+        self.assertTrue(bool(f.archivo_pdf))
+
+    def test_created_at_updated_at_auto(self):
+        """Verifica que created_at y updated_at se rellenen automáticamente."""
+        f = self._make_factura(cdc=self._make_cdc('0011'), numero_factura='001-001-0000011')
+        self.assertIsNotNone(f.created_at)
+        self.assertIsNotNone(f.updated_at)
+
+    def test_estado_sifen_choices(self):
+        """Verifica que todos los EstadoSifen sean valores válidos del TextChoices."""
+        valid = {c[0] for c in FacturaElectronica.EstadoSifen.choices}
+        for estado in FacturaElectronica.EstadoSifen:
+            self.assertIn(estado.value, valid)
+
+    def test_condicion_venta_choices(self):
+        """Verifica los CondicionVenta TextChoices."""
+        self.assertEqual(FacturaElectronica.CondicionVenta.CONTADO, 'CONTADO')
+        self.assertEqual(FacturaElectronica.CondicionVenta.CREDITO, 'CREDITO')
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class InvoiceServiceTests(FacturaElectronicaModelMixin, TestCase):
+    """
+    Tests del servicio InvoiceService (SCRUM-118).
+
+    Verifica create_from_response, update_estado y get_or_create_for_transaction
+    usando el MockInvoiceProvider para generar InvoiceResponse reales.
+    """
+
+    def setUp(self):
+        self.provider = MockInvoiceProvider()
+        self.provider.reset_registry()
+
+    def _emit_response(self, num_doc='0000001'):
+        """Helper: emite una factura simulada con el MockProvider."""
+        return self.provider.emitir_factura({
+            'dNumDoc': num_doc,
+            'dRucEm': '80012345',
+            'dDVEmi': '0',
+            'dEst': '001',
+            'dPunExp': '001',
+            'cMoneOpe': 'PYG',
+            'gCamItem': [{
+                'dCodInt': 'TX-001',
+                'dDesProSer': 'Compra de Divisas Test',
+                'cUniMed': '77',
+                'dCantProSer': '1',
+                'dPUniProSer': '500000',
+                'dDescItem': '0',
+                'iAfecIVA': '3',
+            }],
+        })
+
+    def test_create_from_response_creates_factura(self):
+        """Verifica que create_from_response cree una FacturaElectronica en BD."""
+        response = self._emit_response('1000001')
+        factura = InvoiceService.create_from_response(self.tx, response)
+
+        self.assertIsNotNone(factura.pk)
+        self.assertEqual(factura.cdc, response.cdc)
+        self.assertEqual(factura.transaction, self.tx)
+        self.assertTrue(factura.es_simulada)
+
+    def test_create_from_response_persists_xml(self):
+        """Verifica que el XML firmado se almacene en xml_firmado."""
+        response = self._emit_response('1000002')
+        factura = InvoiceService.create_from_response(self.tx, response)
+
+        self.assertIn('<rDE', factura.xml_firmado)
+        self.assertIn(response.cdc, factura.xml_firmado)
+
+    def test_create_from_response_persists_pdf(self):
+        """Verifica que el KuDE PDF se persista en archivo_pdf."""
+        response = self._emit_response('1000003')
+        factura = InvoiceService.create_from_response(self.tx, response)
+
+        self.assertTrue(bool(factura.archivo_pdf))
+
+    def test_create_from_response_estado_aprobado(self):
+        """Verifica que el estado sea APROBADO después de emitir con MockProvider."""
+        response = self._emit_response('1000004')
+        factura = InvoiceService.create_from_response(self.tx, response)
+
+        self.assertTrue(factura.is_aprobado)
+
+    def test_update_estado(self):
+        """Verifica update_estado cambia el estado_sifen y persiste respuesta_raw."""
+        response = self._emit_response('1000005')
+        factura = InvoiceService.create_from_response(self.tx, response)
+
+        # Simular cancelación
+        self.provider.sol_cancelacion(factura.cdc)
+        status = self.provider.get_estado_sifen(factura.cdc)
+
+        updated = InvoiceService.update_estado(factura.cdc, status)
+
+        self.assertEqual(updated.estado_sifen, FacturaElectronica.EstadoSifen.CANCELADO)
+        self.assertIn('estado_sifen', updated.respuesta_sifen_raw)
+
+    def test_get_or_create_returns_existing(self):
+        """Verifica que get_or_create_for_transaction retorne la factura existente."""
+        response = self._emit_response('1000006')
+        f1 = InvoiceService.create_from_response(self.tx, response)
+
+        response2 = self._emit_response('1000007')
+        f2, created = InvoiceService.get_or_create_for_transaction(self.tx, response2)
+
+        self.assertFalse(created)
+        self.assertEqual(f1.pk, f2.pk)
+
+    def test_map_estado_normalizes_aprobado(self):
+        """Verifica que _map_estado normalice correctamente 'Aprobado' a APROBADO."""
+        result = InvoiceService._map_estado('Aprobado')
+        self.assertEqual(result, FacturaElectronica.EstadoSifen.APROBADO)
+
+    def test_map_estado_normalizes_cancelado(self):
+        """Verifica que _map_estado normalice 'Cancelado'."""
+        result = InvoiceService._map_estado('Cancelado')
+        self.assertEqual(result, FacturaElectronica.EstadoSifen.CANCELADO)
+
+    def test_map_estado_unknown_defaults_to_emitido(self):
+        """Verifica que un estado desconocido retorne EMITIDO."""
+        result = InvoiceService._map_estado('Estado Desconocido XYZ')
+        self.assertEqual(result, FacturaElectronica.EstadoSifen.EMITIDO)
