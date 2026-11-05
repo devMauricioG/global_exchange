@@ -541,3 +541,39 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Suite de **25 pruebas unitarias e integración en `apps/invoicing/tests.py`** con **93% de cobertura**.
     - Suite completa del proyecto: **561 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Redacción del reporte de ingeniería en `docs/documentacion/SCRUM-117.md` y actualización de `TAREAS.md` y `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Invoicing — Modelado de Factura Electrónica y persistencia de CDC, estados SIFEN, KuDE PDF y XML (SCRUM-118)
+
+**Resumen:**
+- Diseñé e implementé en `apps/invoicing/` la capa completa de persistencia del Documento Tributario Electrónico (DTE) y su representación gráfica KuDE en estricto cumplimiento de los estándares de la DNIT / SIFEN y la especificación ESI v01:
+  - **Modelo Canónico `FacturaElectronica` (`apps/invoicing/models.py`):**
+    - Vínculo `OneToOneField` con `transactions.Transaction` bajo `related_name='factura_sifen'`, aislando de manera limpia el nuevo modelo de los modelos heredados.
+    * Clave de Acceso (CDC) de 44 dígitos numéricos con restricción `unique=True` e indexación en base de datos.
+    * Número legal de comprobante `001-001-0000001`, timbrado fiscal, RUC y razón social de emisor y receptor.
+    * TextChoices estandarizados para condición de venta (`CondicionVenta`: `CONTADO`, `CREDITO`) y estados oficiales de autorización en SIFEN (`EstadoSifen`: 10 estados canónicos).
+    * Persistencia de respuesta cruda en JSON (`respuesta_sifen_raw`) para auditoría forense tributaria.
+    * Persistencia dual de artefactos: campo de texto `xml_firmado` y campos físicos `FileField` para archivo XML (`invoicing/xml/%Y/%m/`) y KuDE PDF binario (`invoicing/kude/%Y/%m/`).
+    * Bandera de seguridad `es_simulada` con valor predeterminado `True` (cero consumo accidental de cuota).
+    * Propiedades calculadas: `cdc_formatted` (formato canónico de 11 grupos de 4 dígitos separados por guiones), `is_aprobado`, `is_cancelado`, `is_inutilizado`.
+    * Métodos auxiliares de guardado: `save_xml_content()` y `save_pdf_content()`.
+    * Índices compuestos y optimizados para auditoría por estado, fecha y simulación.
+  - **Servicio de Dominio `InvoiceService` (`apps/invoicing/services.py`):**
+    - Implementación de `create_from_response(transaction, invoice_response)` con orquestación transaccional (`transaction.atomic`) para guardar metadatos, XML y KuDE PDF.
+    - Método `update_estado(cdc, status_response)` con bloqueo pesimista (`select_for_update`) para transiciones de estado y almacenamiento de respuestas raw.
+    - Operación idempotente `get_or_create_for_transaction()` para evitar facturación duplicada.
+    - Normalizador tolerante de strings de estado `_map_estado()`.
+  - **Panel de Administración (`apps/invoicing/admin.py`):**
+    - Panel de auditoría de solo lectura (`readonly_fields`) para salvaguardar la inmutabilidad tributaria.
+    - Badges de color HTML para estados SIFEN (`estado_sifen_badge`), formateo visual de CDC y filtros laterales.
+  - **Migraciones y Documentación Técnica Sphinx:**
+    - Generación y verificación de la migración inicial `0001_initial.py` en `apps/invoicing/migrations/`.
+    - Actualización de `invoicing.rst` para incorporar `models`, `services` y `admin`.
+    - Compilación limpia de Sphinx HTML (`build succeeded`).
+  - **Pruebas Automatizadas y Cobertura:**
+    - Diseñadas **25 nuevas pruebas unitarias e integración en `apps/invoicing/tests.py`** (`FacturaElectronicaModelTests` e `InvoiceServiceTests`), alcanzando 50 tests en la app.
+    - Suite global completa: **631 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Documentación técnica redactada en `docs/documentacion/SCRUM-118.md` y actualización de `TAREAS.md` y `RESOLUCION_TAREAS_IA.md`.

@@ -33,6 +33,7 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
 | **SCRUM-115** | Vistas y formularios para Apertura, Registro de Efectivo y Cierre con Arqueo de Caja | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
 | **SCRUM-116** | Configuración de Rol Cajero, permisos RBAC, blindaje de vistas y Módulo de Inventario de Billetes | Sprint 5 / Cajas | Pablo Elizeche | Finalizado |
 | **SCRUM-117** | Arquitectura desacoplada para Facturación Electrónica (InvoiceProvider y MockInvoiceProvider) | Sprint 5 / Invoicing | Mauricio González | Finalizado |
+| **SCRUM-118** | Modelado de Factura Electrónica y persistencia de CDC, estados SIFEN, KuDE PDF y XML | Sprint 5 / Invoicing | Mauricio González | Finalizado |
 
 
 ---
@@ -836,6 +837,54 @@ Este documento recopila de manera ordenada las tareas desarrolladas con asistenc
   * `docs/sphinx/source/invoicing.rst`
   * `docs/sphinx/source/modules.rst`
   * `docs/documentacion/SCRUM-117.md`
+  * `docs/documentacion/Jira workflow/TAREAS.md`
+  * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
+  * `docs/chat_ia.md`
+
+---
+
+### 26. SCRUM-118: Modelado de Factura Electrónica y persistencia de CDC, estados SIFEN, KuDE PDF y XML
+
+* **Objetivo:** Implementar en el módulo canónico `apps/invoicing/models.py` el modelo persistente `FacturaElectronica` vinculado `OneToOne` a `transactions.Transaction`, con campos para CDC (44 dígitos), número de factura, RUC emisor/receptor, condición de venta, `estado_sifen`, `respuesta_sifen_raw`, XML firmado, KuDE PDF y bandera de seguridad `es_simulada`.
+* **Aportes y Solución con IA:**
+  * **Modelo Canónico `FacturaElectronica` (`apps/invoicing/models.py`):**
+    * Vínculo `OneToOneField` con `transactions.Transaction` mediante `related_name='factura_sifen'` (evitando colisiones con modelos legacy).
+    * Clave de Acceso (CDC) de 44 dígitos con índice único y búsqueda indexada.
+    * Numeración legal oficial `001-001-0000001` y timbrado fiscal.
+    * Campos de auditoría tributaria: RUC y razón social de emisor y receptor, condición de venta (`CONTADO`, `CREDITO`), monto total y moneda.
+    * Enumeración formal de 10 estados de autorización en SIFEN (`EstadoSifen`), descripción oficial y protocolo de autorización.
+    * Persistencia de respuesta cruda en JSON (`respuesta_sifen_raw`) para trazabilidad forense.
+    * Almacenamiento dual de artefactos tributarios: `xml_firmado` en texto plano y archivos físicos binarios en `FileField` para XML (`invoicing/xml/%Y/%m/`) y KuDE PDF (`invoicing/kude/%Y/%m/`).
+    * Bandera de seguridad `es_simulada` con valor predeterminado `True` (cero consumo accidental de cuota).
+    * Propiedades de conveniencia: `cdc_formatted` (11 bloques de 4 dígitos), `is_aprobado`, `is_cancelado`, `is_inutilizado`.
+    * Métodos de utilidad: `save_xml_content()` y `save_pdf_content()`.
+    * 4 índices compuestos y específicos para optimizar consultas de auditoría y estado.
+  * **Servicio de Dominio `InvoiceService` (`apps/invoicing/services.py`):**
+    * Orquestación transaccional con `transaction.atomic` en `create_from_response()`, persisting metadata, XML y PDF.
+    * Actualización atómica de estados con bloqueo pesimista en `update_estado()`.
+    * Consulta/creación idempotente en `get_or_create_for_transaction()`.
+    * Normalizador defensivo de strings de estado `_map_estado()`.
+  * **Panel de Administración (`apps/invoicing/admin.py`):**
+    * Panel de auditoría inmutable con todos los campos en `readonly_fields`.
+    * Badges de colores HTML según el estado oficial de SIFEN (`estado_sifen_badge`).
+    * Formateo y truncamiento visual del CDC de 44 dígitos.
+    * Filtros laterales por estado, condición de venta, moneda y bandera simulada.
+  * **Migraciones y Documentación:**
+    * Migración `0001_initial.py` en `apps/invoicing/migrations/`.
+    * Actualización de `invoicing.rst` en Sphinx para incluir `models`, `services` y `admin`.
+    * Recompilación limpia de Sphinx HTML (`build succeeded`).
+  * **Verificación y Calidad:**
+    * 25 nuevas pruebas unitarias en `apps/invoicing/tests.py` (50 tests en la app).
+    * Suite global completa: **631 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 regresiones.
+* **Archivos intervenidos:**
+  * `apps/invoicing/models.py`
+  * `apps/invoicing/migrations/0001_initial.py`
+  * `apps/invoicing/admin.py`
+  * `apps/invoicing/services.py`
+  * `apps/invoicing/__init__.py`
+  * `apps/invoicing/tests.py`
+  * `docs/sphinx/source/invoicing.rst`
+  * `docs/documentacion/SCRUM-118.md`
   * `docs/documentacion/Jira workflow/TAREAS.md`
   * `docs/documentacion/Proyecto/RESOLUCION_TAREAS_IA.md`
   * `docs/chat_ia.md`
