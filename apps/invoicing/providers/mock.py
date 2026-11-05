@@ -451,7 +451,7 @@ class MockInvoiceProvider(InvoiceProvider):
         tx = transaction_or_data
         cliente = getattr(tx, 'cliente', None)
 
-        ruc_cliente_full = getattr(cliente, 'documento_ruc', '44444401-7')
+        ruc_cliente_full = getattr(cliente, 'documento_ruc', '44444401-7') or '44444401-7'
         if '-' in ruc_cliente_full:
             ruc_rec, dv_rec = ruc_cliente_full.split('-', 1)
         else:

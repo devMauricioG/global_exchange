@@ -1345,3 +1345,6 @@ from .tests_kiosk_kude import *
 
 # SCRUM-122: Tests para KioskCashService y FacturaSeguraClient
 from .tests_kiosk_cash_facturasegura import *
+
+# SCRUM-123: Tests para Orquestación Transaccional en Efectivo con Caja y Facturación
+from .tests_cash_orchestration import *

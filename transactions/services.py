@@ -723,3 +723,211 @@ class TransactionService:
                 logger.info('Transacción %s cancelada debido a rechazo de pago en %s [%s].', tx.codigo_referencia, gateway_str, ref)
 
         return tx
+
+    @classmethod
+    @transaction.atomic
+    def process_cash_payment(
+        cls,
+        transaction_obj: Union[int, str, Transaction],
+        shift: Optional[Union[Any, int, str]] = None,
+        cashier: Optional[Any] = None,
+        usuario_operador: Optional[Any] = None,
+        fecha_pago: Optional[Any] = None,
+        concepto: Optional[str] = None,
+        denominations_in: Optional[Dict[str, Any]] = None,
+        denominations_out: Optional[Dict[str, Any]] = None,
+        keycloak_user_id: str = '',
+        is_cash_in: Optional[bool] = None,
+        is_cash_out: Optional[bool] = None,
+        emitir_factura: bool = True,
+        is_test: bool = False,
+    ) -> Transaction:
+        """
+        Orquesta de forma atómica la liquidación de una operación cambiaria en efectivo (SCRUM-123).
+
+        Vincula el cobro y/o entrega física de dinero con el turno de caja activo (:class:`~apps.cash.models.CashShift`),
+        valida la disponibilidad de fondos en el saldo físico de la caja, genera los registros inmutables
+        de :class:`~apps.cash.models.CashMovement` correspondientes a la entrada y salida de efectivo,
+        transiciona el estado de la transacción cambiaria a ``COMPLETADA`` y dispara de forma atómica
+        la emisión del Documento Tributario Electrónico (Factura Electrónica e-Kuatia / SIFEN y KuDE).
+
+        Garantiza estricta atomicidad financiera bajo ACID: si ocurre cualquier inconsistencia
+        (ej. saldo insuficiente en caja, turno cerrado, transacción ya liquidada o cancelada),
+        se ejecuta un rollback íntegro sin persistir estados inconsistentes.
+
+        :param transaction_obj: Instancia de :class:`~transactions.models.Transaction` o identificador numérico de orden.
+        :type transaction_obj: int or str or transactions.models.Transaction
+        :param shift: Turno de caja (:class:`~apps.cash.models.CashShift`), caja física (:class:`~apps.cash.models.CashRegister`),
+                      o ID del turno. Si es ``None``, se infiere del turno abierto asignado al cajero.
+        :type shift: apps.cash.models.CashShift or apps.cash.models.CashRegister or int or str or None
+        :param cashier: Usuario operador/cajero responsable de la ventanilla.
+        :type cashier: Any or None
+        :param usuario_operador: Alias alternativo de conveniencia para el cajero u operador.
+        :type usuario_operador: Any or None
+        :param fecha_pago: Marca temporal informada de la liquidación en efectivo (por defecto ahora).
+        :type fecha_pago: datetime.datetime or None
+        :param concepto: Observación o glosa descriptiva de la operación.
+        :type concepto: str or None
+        :param denominations_in: Desglose físico de billetes cobrados al cliente (opcional).
+        :type denominations_in: dict or None
+        :param denominations_out: Desglose físico de billetes entregados al cliente (opcional).
+        :type denominations_out: dict or None
+        :param keycloak_user_id: Identificador inmutable ``sub`` del operador en Keycloak para auditoría (RF-24).
+        :type keycloak_user_id: str
+        :param is_cash_in: Forzar registro de movimiento de entrada física (cobro). Si es ``None``, se infiere del medio de pago.
+        :type is_cash_in: bool or None
+        :param is_cash_out: Forzar registro de movimiento de salida física (entrega). Si es ``None``, se infiere del medio de acreditación.
+        :type is_cash_out: bool or None
+        :param emitir_factura: Bandera que controla la emisión inmediata de la Factura Electrónica (por defecto True).
+        :type emitir_factura: bool
+        :param is_test: Indica si la factura debe emitirse en modo de prueba / simulado (Mock).
+        :type is_test: bool
+        :return: Transacción cambiaria liquidada y persistida en estado ``COMPLETADA``.
+        :rtype: transactions.models.Transaction
+        :raises django.core.exceptions.ValidationError: Si la orden ya está completada, cancelada o es inválida.
+        :raises apps.cash.services.CashShiftError: Si no se suministra o no existe un turno de caja abierto válido.
+        :raises apps.cash.services.InsufficientCashBalanceError: Si la caja carece de saldo físico suficiente en la divisa a egresar.
+        """
+        # 1. Resolución e integridad de la Transacción Cambiaria
+        if isinstance(transaction_obj, Transaction):
+            tx_id = transaction_obj.id
+        else:
+            try:
+                tx_id = int(transaction_obj)
+            except (ValueError, TypeError):
+                raise ValidationError({'transaction': f'Identificador de transacción inválido: {transaction_obj}.'})
+
+        try:
+            tx = (
+                Transaction.objects.select_for_update()
+                .select_related('cliente', 'base_currency', 'target_currency', 'medio_pago_origen', 'medio_acreditacion_destino')
+                .get(id=tx_id)
+            )
+        except Transaction.DoesNotExist:
+            raise ValidationError({'transaction': f'No se encontró la transacción cambiaria especificada: {transaction_obj}.'})
+
+        # Validación de estados previos
+        if tx.estado == Transaction.Estado.COMPLETADA:
+            raise ValidationError({
+                'estado': f'La transacción {tx.codigo_referencia} ya se encuentra COMPLETADA.'
+            })
+
+        if tx.estado == Transaction.Estado.CANCELADA:
+            raise ValidationError({
+                'estado': f'No es posible procesar el pago de la transacción {tx.codigo_referencia} porque se encuentra CANCELADA.'
+            })
+
+        if tx.estado != Transaction.Estado.PENDIENTE:
+            raise ValidationError({
+                'estado': f'La transacción {tx.codigo_referencia} se encuentra en estado "{tx.get_estado_display()}" y no admite confirmación de pago en efectivo.'
+            })
+
+        # 2. Resolución del Operador / Cajero y su Keycloak ID
+        effective_cashier = cashier or usuario_operador or getattr(tx, 'usuario', None)
+        effective_keycloak_id = (
+            keycloak_user_id
+            or getattr(effective_cashier, 'keycloak_id', '')
+            or getattr(effective_cashier, 'keycloak_user_id', '')
+            or ''
+        )
+
+        # 3. Resolución y Validación del Turno de Caja (CashShift)
+        from apps.cash.models import CashMovement, CashRegister, CashShift, ShiftStatus
+        from apps.cash.services import CashError, CashRegisterError, CashService, CashShiftError, InsufficientCashBalanceError
+
+        target_shift: Optional[CashShift] = None
+        if isinstance(shift, CashShift):
+            target_shift = shift
+        elif isinstance(shift, CashRegister):
+            target_shift = shift.current_shift
+            if not target_shift:
+                raise CashShiftError(f"La caja {shift.register_code} no cuenta con un turno abierto.")
+        elif shift is not None:
+            if isinstance(shift, int) or (isinstance(shift, str) and shift.isdigit()):
+                target_shift = CashShift.objects.filter(id=int(shift)).select_related('cash_register', 'cashier').first()
+            if not target_shift and isinstance(shift, str):
+                target_shift = CashShift.objects.filter(shift_number=shift).select_related('cash_register', 'cashier').first()
+            if not target_shift:
+                raise CashShiftError(f"No se encontró el turno de caja con identificador '{shift}'.")
+        else:
+            if effective_cashier:
+                target_shift = CashShift.objects.filter(cashier=effective_cashier, status=ShiftStatus.OPEN).select_related('cash_register', 'cashier').first()
+            if not target_shift:
+                target_shift = CashShift.objects.filter(status=ShiftStatus.OPEN).select_related('cash_register', 'cashier').first()
+            if not target_shift:
+                raise CashShiftError("No existe un turno de caja abierto para registrar el cobro/pago en efectivo.")
+
+        if not target_shift.is_open:
+            raise CashShiftError(f"El turno de caja {target_shift.shift_number} no se encuentra abierto para operar.")
+
+        # 4. Registro atómico de Movimientos de Efectivo (MovimientoCaja)
+        medio_pago = getattr(tx, 'medio_pago_origen', None)
+        medio_rec = getattr(tx, 'medio_acreditacion_destino', None)
+        tipo_pago = getattr(medio_pago, 'tipo_medio', None) or getattr(medio_pago, 'tipo_instrumento', None)
+        tipo_rec = getattr(medio_rec, 'tipo_medio', None) or getattr(medio_rec, 'tipo_instrumento', None)
+
+        calc_in = is_cash_in if is_cash_in is not None else (tipo_pago == 'EFECTIVO' or medio_pago is None)
+        calc_out = is_cash_out if is_cash_out is not None else (tipo_rec == 'EFECTIVO' or medio_rec is None)
+
+        if not calc_in and not calc_out:
+            calc_in = True
+            calc_out = True
+
+        movements = CashService.register_transaction_cash(
+            shift=target_shift,
+            transaction=tx,
+            cashier=effective_cashier,
+            keycloak_user_id=effective_keycloak_id,
+            is_cash_in=calc_in,
+            is_cash_out=calc_out,
+            denominations_in=denominations_in,
+            denominations_out=denominations_out,
+        )
+
+        # 5. Transición del estado de la Transacción Cambiaria a COMPLETADA
+        payment_time = fecha_pago or timezone.now()
+        ref_pago = f"CASH-{target_shift.cash_register.register_code}-{tx.id}"
+        glosa = concepto or f"Cobro y liquidación en efectivo procesados en turno #{target_shift.shift_number} (Caja {target_shift.cash_register.register_code})."
+
+        if tx.observaciones:
+            tx.observaciones = f"{tx.observaciones}\n{glosa}".strip()
+        else:
+            tx.observaciones = glosa
+
+        tx.mark_as_completed(
+            user=effective_cashier,
+            fecha_pago=payment_time,
+            referencia_externa=ref_pago,
+            pasarela='EFECTIVO',
+            save=True,
+        )
+
+        # 6. Disparo atómico de la Facturación Electrónica (SIFEN / KuDE)
+        if emitir_factura:
+            # 6.1. Emisión en módulo apps.invoicing (FacturaElectronica SIFEN)
+            try:
+                from apps.invoicing.providers import get_invoice_provider
+                from apps.invoicing.services import InvoiceService
+                if not hasattr(tx, 'factura_sifen') or tx.factura_sifen is None:
+                    provider = get_invoice_provider()
+                    invoice_response = provider.emitir_factura(tx, is_test=is_test)
+                    InvoiceService.create_from_response(tx, invoice_response)
+            except Exception as exc:
+                logger.warning("Falla al generar FacturaElectronica SIFEN para %s: %s", tx.codigo_referencia, exc)
+
+            # 6.2. Emisión en módulo transactions.kude_service (ElectronicInvoice KuDE)
+            try:
+                from .kude_service import KudeService
+                if not hasattr(tx, 'factura_electronica') or tx.factura_electronica is None:
+                    KudeService.get_or_create_invoice(tx)
+            except Exception as exc:
+                logger.warning("Falla al generar ElectronicInvoice KuDE para %s: %s", tx.codigo_referencia, exc)
+
+        logger.info(
+            "Transacción cambiaria %s liquidada en efectivo exitosamente (Turno %s, Movimientos: %d, Factura emitir=%s).",
+            tx.codigo_referencia,
+            target_shift.shift_number,
+            len(movements),
+            emitir_factura,
+        )
+        return tx

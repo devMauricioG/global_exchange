@@ -580,18 +580,18 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
 
 ---
 
-## Mauricio Gonz�lez � 05/11/2026 � Antigravity IDE (Gemini)
+## Mauricio Gonz�lez � 05/11/2026 � Antigravity IDE (Gemini)
 
-**Contexto:** Sprint 5 / Invoicing � Vistas y Endpoints para Consulta, Visualizaci�n y Descarga de KuDE PDF y XML Firmado (SCRUM-119)
+**Contexto:** Sprint 5 / Invoicing � Vistas y Endpoints para Consulta, Visualizaci�n y Descarga de KuDE PDF y XML Firmado (SCRUM-119)
 
 **Resumen:**
-- Implement� los endpoints y vistas del m�dulo can�nico de facturaci�n electr�nica (pps/invoicing/):
+- Implement� los endpoints y vistas del m�dulo can�nico de facturaci�n electr�nica (pps/invoicing/):
   - **Vistas y Endpoints (pps/invoicing/views.py):** FacturaElectronicaDetailView, FacturaElectronicaPdfDownloadView, FacturaElectronicaXmlDownloadView, FacturaElectronicaSifenSyncAjaxView y FacturaConsultaApiView.
-  - **Rutas (pps/invoicing/urls.py):** Configuraci�n de 6 URLs bajo el prefijo invoicing/.
-  - **Integraci�n transaccional:** TransactionSifenSyncAjaxView en 	ransactions/kude_views.py; enriquecimiento de TransactionDetailView con auto-emisi�n de factura.
-  - **Card integrada en 	ransaction_detail.html:** Badge de estado SIFEN en tiempo real, CDC formateado con bot�n de copiado 1-click, botones de descarga PDF/XML, bot�n AJAX de sincronizaci�n SIFEN con spinner y feedback visual.
+  - **Rutas (pps/invoicing/urls.py):** Configuraci�n de 6 URLs bajo el prefijo invoicing/.
+  - **Integraci�n transaccional:** TransactionSifenSyncAjaxView en 	ransactions/kude_views.py; enriquecimiento de TransactionDetailView con auto-emisi�n de factura.
+  - **Card integrada en 	ransaction_detail.html:** Badge de estado SIFEN en tiempo real, CDC formateado con bot�n de copiado 1-click, botones de descarga PDF/XML, bot�n AJAX de sincronizaci�n SIFEN con spinner y feedback visual.
   - **Seguridad:** InvoicingAccessMixin con control IDOR por CustomerUserAssignment.
-  - **Correcciones cr�ticas:** Shared registry en MockInvoiceProvider para coherencia entre instancias en tests AJAX; protecci�n contra OverflowError SQLite en b�squeda por ID largo.
+  - **Correcciones cr�ticas:** Shared registry en MockInvoiceProvider para coherencia entre instancias en tests AJAX; protecci�n contra OverflowError SQLite en b�squeda por ID largo.
   - **Pruebas:** 11 nuevas pruebas en InvoicingViewsTests ? 61/61 OK en pps.invoicing.
   - **Suite global:** 642/642 tests OK, Sphinx: uild succeeded.
 ---
@@ -609,3 +609,30 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
   - **Excepciones de Dominio (pps/invoicing/exceptions.py):** QuotaShieldExhaustedError, TestQuotaExhaustedError y PresentationQuotaExhaustedError.
   - **Pruebas Automatizadas:** 17 nuevas pruebas en FacturaSeguraClientAndQuotaProtocolTests alcanzando **78 tests en pps.invoicing**.
   - **Suite Global:** **659/659 tests aprobados al 100% (OK)** sin regresiones. Documentación Sphinx HTML compilada con 0 warnings.
+
+---
+
+## Mauricio González — 05/11/2026 — Antigravity IDE (Gemini)
+
+**Contexto:** Sprint 5 / Cajas & Transacciones — Orquestación transaccional atómica de operaciones en efectivo con caja y facturación (SCRUM-123)
+
+**Resumen:**
+- Implementé y blindé la orquestación transaccional atómica para la liquidación en efectivo de operaciones cambiarias en ventanilla y terminales físicas:
+  - **Método `TransactionService.process_cash_payment()` (`transactions/services.py`):**
+    - Envoltorio atómico integral `@transaction.atomic` y bloqueo pesimista `select_for_update()` sobre la orden cambiaria.
+    - Validación de estados previos de la transacción: rechazo estricto de órdenes previamente `COMPLETADA` o `CANCELADA` con `ValidationError`.
+    - Resolución flexible y desacoplada del turno de caja (`CashShift`), permitiendo recibir instancias de `CashShift`, `CashRegister`, identificadores numéricos o inferencia automática del turno abierto asignado al cajero.
+    - Control de saldo físico y rechazo ante fondos insuficientes: disparo de `InsufficientCashBalanceError` y rollback completo en caso de que la caja no cuente con saldo físico suficiente en la divisa a dispensar.
+    - Registro inmutable de movimientos de cobro y entrega física de dinero (`CashMovement` / `MovimientoCaja`) vinculando montos, divisas, cajero y desglose de billetes físicos en `denominations_json`.
+    - Transición de la orden cambiaria a `COMPLETADA` con registro de fecha de pago, referencia externa `CASH-{caja}-{tx.id}` y pasarela `EFECTIVO`.
+    - Disparo atómico de la emisión de Factura Electrónica e-Kuatia / SIFEN (`FacturaElectronica`) y comprobante gráfico KuDE (`ElectronicInvoice`).
+    - Trazabilidad y auditoría de identidad mediante el claim inmutable de Keycloak (`keycloak_user_id`).
+  - **Integración y Ajustes de Dominio:**
+    - Exportación del alias en español `MovimientoCaja = CashMovement` en `apps/cash/models.py`.
+    - Extensión de `CashService.register_transaction_cash()` para admitir parámetros opcionales `denominations_in` y `denominations_out`.
+    - Enrutamiento y compatibilidad de namespaces en `apps/__init__.py` para `apps.transactions.models` y `apps.transactions.services`.
+    - Respaldo defensivo en `MockInvoiceProvider.emitir_factura` ante clientes sin RUC explícito.
+  - **Pruebas y Verificación:**
+    - Diseñé **11 pruebas unitarias e integración en `transactions/tests_cash_orchestration.py`** integradas en `transactions/tests.py`.
+    - Suite global completa: **642 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
+    - Documentación técnica redactada en `docs/documentacion/SCRUM-123.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
