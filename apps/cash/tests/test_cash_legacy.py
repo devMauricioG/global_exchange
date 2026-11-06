@@ -22,12 +22,12 @@ from customers.models import Cliente
 from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 from rates.models import Currency, ExchangeRate
 from transactions.models import Transaction
-from .forms import (
+from ..forms import (
     BlindReconciliationForm,
     CashMovementForm,
     CashShiftOpenForm,
 )
-from .models import (
+from ..models import (
     Caja,
     CashMovement,
     CashRegister,
@@ -39,7 +39,7 @@ from .models import (
     ShiftStatus,
     TurnoCaja,
 )
-from .services import (
+from ..services import (
     CashRegisterError,
     CashService,
     CashShiftError,
