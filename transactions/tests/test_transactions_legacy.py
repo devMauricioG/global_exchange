@@ -1340,11 +1340,6 @@ class TransactionReceiptViewTest(TransactionTestMixin, TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 302)
 
-# SCRUM-121: Tests para Kiosco Táctil y Facturación Electrónica KuDE
-from .tests_kiosk_kude import *
-
-# SCRUM-122: Tests para KioskCashService y FacturaSeguraClient
-from .tests_kiosk_cash_facturasegura import *
-
-# SCRUM-123: Tests para Orquestación Transaccional en Efectivo con Caja y Facturación
-from .tests_cash_orchestration import *
+# Las suites de kiosco y orquestación se descubren directamente como módulos
+# ``test_*.py`` dentro de este paquete. No se importan aquí para no ejecutarlas
+# dos veces durante el descubrimiento de Django.

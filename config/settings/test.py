@@ -55,3 +55,6 @@ OIDC_VERIFY_SSL = False
 # Facturación Electrónica Mock para suite de pruebas (0 consumo de cuota real)
 FACTURA_SEGURA_LIVE_ENABLED = False
 
+# SCRUM-125: la suite completa se ejecuta offline; cualquier intento de API falla.
+TEST_RUNNER = 'config.test_runner.OfflineDiscoverRunner'
+
