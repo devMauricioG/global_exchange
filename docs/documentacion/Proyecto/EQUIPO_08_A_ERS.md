@@ -1,10 +1,10 @@
-# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v3.4)
+# ESPECIFICACIÓN DE REQUERIMIENTOS DE SOFTWARE (ERS v4.0)
 
 **Proyecto:** Global Exchange – Casa de Cambio Digital e Híbrida
 
-**Estado:** Documento Consolidado (ERS v3.3 + Sprint 4 SCRUM-105: Pasarelas Stripe/SIPAP, MFA, Alertas y RBAC)
+**Estado:** Documento Consolidado (Sprint 5 SCRUM-126: Caja/Turno/Movimiento, Factura SIFEN y pruebas offline)
 
-**Fecha de Actualización:** 12 de Octubre de 2026
+**Fecha de Actualización:** 06 de Noviembre de 2026
 
 ### TABLA DE CONTENIDOS
 
@@ -36,7 +36,7 @@
 
 #### 1.1. Propósito
 
-El presente documento constituye la Especificación de Requerimientos de Software (ERS v3.0) consolidada para el sistema de gestión digital e híbrido de la casa de cambio Global Exchange. Su propósito es describir de manera formal, completa y sin ambigüedades los requerimientos funcionales y no funcionales que deberá cumplir el software a desarrollar, integrando la gestión operativa omnicanal (digital y presencial) con la infraestructura de seguridad, autenticación y autorización centralizada basada en **Keycloak IAM**.
+El presente documento constituye la Especificación de Requerimientos de Software (ERS v4.0) consolidada para el sistema de gestión digital e híbrido de la casa de cambio Global Exchange. Su propósito es describir de manera formal, completa y sin ambigüedades los requerimientos funcionales y no funcionales que deberá cumplir el software a desarrollar, integrando la gestión operativa omnicanal (digital y presencial) con la infraestructura de seguridad, autenticación y autorización centralizada basada en **Keycloak IAM**.
 
 Este documento representa la base técnica definitiva para las etapas de arquitectura, desarrollo, pruebas y validación del producto bajo los estándares de la cátedra.
 
@@ -399,6 +399,19 @@ El núcleo central omnicanal interactúa con:
     - Retorno de código HTTP 403 Forbidden o redirección segura ante accesos no autorizados.
     - Context processor `auth_roles` y template tags `has_role`, `has_any_role` para renderizado condicional en `base.html`.
     - Restricción estricta de vistas de gestión de divisas y tasas exclusivamente al rol administrativo.
+- **RF-46: Liquidación Presencial Atómica y Facturación Electrónica**
+  - **Descripción:** El Cajero debe poder liquidar una orden pendiente en efectivo únicamente con un turno abierto. El sistema registrará los movimientos físicos, completará la orden y emitirá el DTE/KuDE asociado.
+  - **Criterios de aceptación:**
+    - Validación de turno abierto, estado pendiente y saldo físico suficiente antes de cualquier persistencia.
+    - Registro inmutable de ingresos/egresos con divisa, saldo previo/resultante, transacción y `keycloak_user_id`.
+    - Ejecución atómica: un error de caja revierte íntegramente movimientos y transición de la orden.
+    - La factura contiene CDC único de 44 dígitos, número legal, estado SIFEN, XML firmado, KuDE y datos de auditoría.
+- **RF-47: Consulta, Estado e Idempotencia de Facturación SIFEN**
+  - **Descripción:** El sistema debe persistir y consultar el ciclo de vida de la `FacturaElectronica` sin duplicar documentos para una misma transacción.
+  - **Criterios de aceptación:**
+    - Una transacción liquidada se relaciona con una única factura SIFEN.
+    - Los estados aprobado, con observación, rechazado, cancelado e inutilizado se almacenan con descripción y respuesta cruda.
+    - Desarrollo y pruebas usan `MockInvoiceProvider`; la emisión simulada no consume cuota ni realiza llamadas HTTP al PAC.
 
 
 #### 4.3. Requerimientos No Funcionales
@@ -416,6 +429,8 @@ El núcleo central omnicanal interactúa con:
 - **RNF-SEC-05 (Firma Criptográfica y Webhooks Seguros):** Los webhooks de pasarelas de pago deben validar rigurosamente la firma criptográfica (`Stripe-Signature` / secreto de firma) rechazando con HTTP 400 cualquier payload corrupto o no autenticado.
 - **RNF-SEC-06 (Control de Idempotencia en Pagos):** Todo evento de webhook o confirmación bancaria debe registrarse en `PaymentWebhookEvent` garantizando procesamiento exactamente una vez (*exactly-once semantics*), previniendo doble acreditación por reintentos de red.
 - **RNF-SEC-07 (Principio de Menor Privilegio y RBAC Estricto):** Ningún usuario estándar o cliente puede acceder a endpoints administrativos de monedas, parametrización o conciliación bancaria, respondiendo con código HTTP 403 Forbidden.
+- **RNF-INT-02 (Aislamiento de Facturación en Pruebas):** Las suites unitarias deben bloquear conexiones de red y usar exclusivamente mocks o `MockInvoiceProvider` para cubrir la lógica fiscal sin consumir cuota externa.
+- **RNF-DAT-02 (Trazabilidad e Inmutabilidad de Caja):** Los movimientos de caja persistidos no pueden editarse ni eliminarse; cada egreso debe validar el saldo físico de su turno.
 
 ### 5\. Requerimientos de Licencia
 
@@ -447,3 +462,5 @@ El núcleo central omnicanal interactúa con:
 | 24/09/2026 | \-                 | 3.3                | Hito 5 SCRUM-85: Módulo de Transacciones de Compra/Venta (RF-35), Cuentas de Acreditación (RF-32), Catálogo de Entidades Financieras (RF-33), Límites Operativos (RF-34), Cancelación y Expiración (RF-36), Comprobantes (RF-37) y Comando de Seeding (RF-38).        | Equipo IS2                                                       |
 | ---        | ---                | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
 | 12/10/2026 | \-                 | 3.4                | Sprint 4 SCRUM-105: Pasarelas de pago Stripe Checkout y SIPAP (RF-39, RF-40), Orquestación atómica en TransactionService (RF-41), Checkout web (RF-42), MFA con claims TOTP (RF-43), Alertas y Notificaciones (RF-44), RBAC granular y menú dinámico (RF-45), RNF-SEC-05/06/07. | Mauricio González / Equipo IS2                                   |
+| ---        | \-                 | ---                | ---                                                                                                                                                                                                                                                                        | ---                                                              |
+| 06/11/2026 | \-                 | 4.0                | Sprint 5 SCRUM-126: actualización formal del modelo de Caja/Turno/Movimiento, FacturaElectronica SIFEN, liquidación presencial atómica, pruebas offline de facturación y trazabilidad de paquetes/casos de prueba. | Equipo IS2 |
