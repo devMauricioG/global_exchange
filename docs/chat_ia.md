@@ -636,3 +636,16 @@ consigna. Cada integrante agrega su propia entrada al usar una IA.
     - Diseñé **11 pruebas unitarias e integración en `transactions/tests_cash_orchestration.py`** integradas en `transactions/tests.py`.
     - Suite global completa: **642 tests aprobados al 100% de éxito (OK)**, 0 fallos, 0 errores, sin regresiones.
     - Documentación técnica redactada en `docs/documentacion/SCRUM-123.md` y actualización de `RESOLUCION_TAREAS_IA.md`.
+
+---
+
+## Daniel Rivas — 06/11/2026 — Codex
+
+**Contexto:** Sprint 5 / Documentación técnica y preparación de QA (SCRUM-127)
+
+**Resumen:**
+- Revisé el comando `seed_data` y documenté los datos de prueba, los vínculos usuario-cliente y los flujos manuales de cliente, cajero/operador y kiosco en `docs/documentacion/Proyecto/MANUAL_DE_USUARIO.md`.
+- Verifiqué que los cuatro usuarios cliente de la seed poseen una asignación activa a su respectiva ficha; el usuario `operador` tiene los roles `operator` y `cajero`, y se utiliza para los flujos de caja.
+- Identifiqué la dependencia de inicio de sesión OIDC: las cuentas de prueba deben existir en Keycloak con el mismo correo y rol para conservar la sincronización con Django.
+- Compilé Sphinx en modo estricto con `sphinx-build -E -W -b html docs/sphinx/source docs/sphinx/build/html`. Corregí la referencia obsoleta a `apps.cash.tests_inventory` en `docs/sphinx/source/cash.rst`; resultado final: `build succeeded` sin errores ni advertencias.
+- El tag `v5.0.0-sprint5` queda pendiente hasta completar las pruebas funcionales y automatizadas.

@@ -60,14 +60,6 @@ apps.cash.inventory_views module
    :show-inheritance:
    :undoc-members:
 
-apps.cash.tests_inventory module
---------------------------------
-
-.. automodule:: apps.cash.tests_inventory
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
 apps.cash.models module
 -----------------------
 

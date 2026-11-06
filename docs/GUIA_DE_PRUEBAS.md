@@ -1,8 +1,9 @@
 # Guía de Pruebas por Módulos y Roles — Global Exchange
 
-Para consultar la guía detallada con los pasos de prueba por módulos y roles del sistema, acceda al documento oficial:
+Para consultar la guía actualizada con la preparación de Keycloak, los datos de
+la seed, el flujo de cliente, cajero y kiosco, acceda al documento oficial:
 
-👉 **[GUÍA DE PRUEBAS POR ROLES Y MÓDULOS](file:///c:/Users/devma/OneDrive/Documentos/Faq/7mo/IS2/django_proyects/global_exchange/docs/documentacion/Proyecto/GUIA_DE_PRUEBAS_ROLES_Y_MODULOS.md)**
+👉 **[Manual de pruebas funcionales](documentacion/Proyecto/MANUAL_DE_USUARIO.md)**
 
 ---
 
