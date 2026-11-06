@@ -1,6 +1,6 @@
 # Detalle del Diagrama de Clases — EQUIPO 88 B DIS CLA 01
 
-> Última actualización: Sprint 4 (SCRUM-105) — incorpora las clases y servicios de Pasarelas de Pago (`PaymentGatewayRecord`, `PaymentWebhookEvent`, `SipapTransferRecord`, `StripeService`, `SipapService`), Alertas y Notificaciones (`ExchangeAlert`, `NotificationService`), Autenticación Multifactor MFA (claims TOTP) y Control de Acceso RBAC (`RoleRequiredMixin`, decoradores, context processors).
+> Última actualización: Sprint 5 (SCRUM-126) — incorpora el modelo físico de Caja (`CashRegister`, `CashShift`, `CashMovement`) y la Factura Electrónica SIFEN (`FacturaElectronica`) conforme a la implementación vigente.
 
 ## 1. Descripción general
 
@@ -1883,3 +1883,27 @@ El diseño estructural consolidado formaliza la arquitectura completa para el **
 1. **Pasarelas de Pago Internacional y Local (`payments`, `transactions`)**: Integración con Stripe Checkout (tarjetas) y SIPAP (transferencias bancarias), garantizando idempotencia estricta vía `PaymentWebhookEvent`, persistencia de transacciones en `PaymentGatewayRecord` y `SipapTransferRecord`, y orquestación atómica centralizada en `TransactionService`.
 2. **Alertas Financieras y Notificaciones (`rates`)**: Modelo reactivo de alertas de cotización (`ExchangeAlert`) evaluadas por señal `post_save` y despachadas mediante `NotificationService`.
 3. **MFA y RBAC Reforzado (`authentication`)**: Detección de claims TOTP en tokens JWT y módulo transversal de permisos (`RoleRequiredMixin`, `@role_required`) asegurando aislamiento contra elevación de privilegios y ataques IDOR.
+
+---
+
+# 39. Actualización SCRUM-126 — Caja, Turno, Movimiento y Factura SIFEN
+
+La relación simplificada entre Caja y Transacción se materializa con un turno y sus movimientos auditables. La factura SIFEN es uno-a-uno con la transacción liquidada.
+
+```mermaid
+classDiagram
+    CashRegister "1" --> "0..*" CashShift : shifts
+    CashShift "1" --> "0..*" CashMovement : movements
+    CashMovement "0..*" --> "0..1" Transaction : transaction
+    CashMovement "0..*" --> "1" Currency : currency
+    Transaction "1" --> "0..1" FacturaElectronica : factura_sifen
+```
+
+| Clase | Atributos/operaciones formales | Restricción |
+|---|---|---|
+| `CashRegister` | `register_code`, `status`, `current_cashier`, saldos de apertura/cierre | Solo una sesión abierta por caja. |
+| `CashShift` | `shift_number`, fondos y arqueos JSON; `calculate_current_balance()`, `close_and_reconcile()` | Un turno cerrado no admite movimientos. |
+| `CashMovement` | tipo, flujo IN/OUT, importe, saldo previo/resultante, `keycloak_user_id` | Inmutable; no permite egreso superior al saldo físico. |
+| `FacturaElectronica` | CDC único de 44 dígitos, número legal, estado SIFEN, XML, KuDE y `es_simulada` | Una única factura SIFEN por transacción. |
+
+`TransactionService.process_cash_payment()` coordina atómicamente los movimientos y la transición a completada. La emisión se realiza por el provider configurado; en pruebas se usa `MockInvoiceProvider`, sin tráfico de red.

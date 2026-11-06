@@ -1,6 +1,6 @@
-# Detalle de la Infraestructura de Producción — EQUIPO 88 B DIS CPR 01
+# Matriz de Casos de Prueba — EQUIPO 88 B DIS CPR 01
 
-> Última actualización: Sprint 4 (SCRUM-105) — incorpora los casos de prueba para Pasarelas de Pago Stripe (CPR-STR), Transferencias SIPAP (CPR-SIP), Alertas y Notificaciones (CPR-ALT), Control de Acceso RBAC y Claims MFA (CPR-RBC) y Orquestación Atómica de Pagos (CPR-ORQ), derivados de RF-39 a RF-45 y RNF-SEC-05 a 07 de la ERS v3.4.
+> Última actualización: Sprint 5 (SCRUM-126) — incorpora los casos de Caja, arqueo, facturación electrónica y aislamiento de API derivados de la ERS v4.0.
 
 ## 1. Descripción general
 
@@ -1438,5 +1438,24 @@ Esta sección consolida la **Matriz de Casos de Prueba (CPR)** para las funciona
 - Los casos de aislamiento deben ejecutarse con dos clientes y dos usuarios para demostrar que no hay fuga horizontal de datos.
 - Las pruebas de API deben comprobar código HTTP, forma del JSON y ausencia de efectos persistentes en los escenarios de error.
 - Las suites automatizadas de PyUnit deben arrojar 100% de éxito (`OK`) con cero fallos y cero errores en todos los módulos (`payments`, `transactions`, `rates`, `authentication`).
+
+---
+
+## 28.21. Módulo 21: Caja, Arqueo y Facturación Electrónica (SCRUM-123 / 125)
+
+| ID Caso | Caso | Precondición y acción | Resultado esperado | Prioridad |
+|---|---|---|---|:---:|
+| **CPR-CAJ-001** | Apertura de turno | Caja activa; abrir con fondo PYG/USD válido | Turno abierto, fondo inicial y caja abierta | Crítica |
+| **CPR-CAJ-002** | Doble turno | Cajero con turno abierto; abrir otra caja | Rechazo sin registros adicionales | Alta |
+| **CPR-CAJ-003** | Egreso sin saldo | Turno sin fondos suficientes; registrar OUT | `InsufficientCashBalanceError`, sin cambio de saldo | Crítica |
+| **CPR-CAJ-004** | Arqueo cuadrado | Cerrar con conteo igual al esperado | Estado `RECONCILED`, diferencia cero y caja cerrada | Crítica |
+| **CPR-CAJ-005** | Arqueo con diferencia | Cerrar con conteo distinto | Estado `DISCREPANCY` y diferencia por divisa persistida | Alta |
+| **CPR-CAJ-006** | Movimiento inmutable | Movimiento persistido; editar/eliminar | Operación rechazada por auditoría | Crítica |
+| **CPR-ORQ-007** | Pago efectivo completo | Orden pendiente y turno válido; procesar efectivo | Movimientos IN/OUT, orden completada y referencia consistente | Crítica |
+| **CPR-ORQ-008** | Rollback de caja | Fondo insuficiente; procesar efectivo | No persisten movimientos ni transición de orden | Crítica |
+| **CPR-FAC-001** | DTE simulado | Transacción liquidada; provider mock | CDC de 44 dígitos, XML, KuDE y `es_simulada=True` | Crítica |
+| **CPR-FAC-002** | Idempotencia de factura | Transacción ya facturada; solicitar factura | Se retorna la existente; no hay segundo DTE | Alta |
+| **CPR-FAC-003** | Estado SIFEN | Factura existente; respuesta aprobada/cancelada | Estado, descripción y respuesta cruda actualizados | Alta |
+| **CPR-FAC-004** | Aislamiento de API | Ejecutar suite unitaria | Cero conexiones HTTP y cero consumo de cuota PAC | Crítica |
 
 

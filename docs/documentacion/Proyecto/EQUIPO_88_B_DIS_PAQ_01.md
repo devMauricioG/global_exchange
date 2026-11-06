@@ -1,6 +1,6 @@
 # Descripción detallada del diagrama de arquitectura
 
-> Última actualización: Sprint 4 (SCRUM-105) — incorpora la arquitectura de Pasarelas de Pago (`StripeService`, `SipapService`, `PaymentGatewayRecord`, `PaymentWebhookEvent`, `SipapTransferRecord`), Checkout y Liquidación Atómica en `apps.transactions`, Alertas y Notificaciones reactivas en `apps.rates` (`ExchangeAlert`, señal `post_save`, `NotificationService`), y módulo de Control de Acceso RBAC y claims MFA en `apps.authentication`.
+> Última actualización: Sprint 5 (SCRUM-126) — corrige los namespaces implementados y documenta los paquetes `apps.cash`, `apps.invoicing` y su integración con `transactions`.
 
 ## 1. Identificación general
 
@@ -14,29 +14,27 @@ El diagrama muestra módulos, archivos principales y relaciones de dependencia o
 
 El proyecto se divide modularmente en los siguientes paquetes y aplicaciones:
 
-- `apps.transactions`: Orquestación transaccional cambiaria, cotización congelada, comprobantes y ciclo de vida de operaciones.
-- `apps.rates`: Parámetros financieros, divisas, tasas de cambio, comisiones por segmento, cotizador, límites operativos y filtros de presentación.
-- `apps.payments`: Catálogo de entidades financieras, medios de pago del cliente y medios de recepción/cobro para acreditaciones.
-- `apps.customers`: Gestión de clientes, multi-representación N:M, resolución de cliente activo y comando de inicialización (`seed_data`).
-- `apps.cash_register`: Gestión de sesiones de caja, arqueo y cierre operativo.
-- `apps.electronic_docs`: Gestión de comprobantes electrónicos y conector fiscal SIFEN/DNIT.
-- `apps.authentication`: Autenticación OIDC vía Keycloak, validación JWT Bearer y control de roles RBAC.
-- `global_exchange_core`: Configuración multientorno, enrutamiento raíz y servicios transversales (Sphinx Docs).
+- `transactions`: Orquestación transaccional cambiaria, KuDE y ciclo de vida de operaciones.
+- `rates`, `payments`, `customers`, `authentication`: Parámetros financieros, medios de pago, clientes e identidad.
+- `apps.cash`: Caja física, turnos, arqueo y movimientos de efectivo.
+- `apps.invoicing`: Facturación electrónica SIFEN, providers y persistencia de DTE.
+- `config`: Configuración multientorno y enrutamiento raíz.
 
 La aplicación `apps.transactions` opera como el orquestador principal del dominio financiero, coordinando clientes, tasas congeladas, límites operativos, medios de pago/cobro y sesiones de caja.
 
-## 3. Aplicación `apps.electronic_docs`
+## 3. Aplicación `apps.invoicing`
 
 Este módulo concentra la gestión de documentos electrónicos y la comunicación con servicios externos relacionados con SIFEN/DNIT.
 
 ### Componentes
 
-- `models.py (ElectronicDocument)`: define el modelo de datos utilizado para representar documentos electrónicos.
-- `sifen_client.py (API SIFEN/DNIT)`: encapsula la integración con la API de SIFEN/DNIT. Su responsabilidad es preparar el payload fiscal, firmar y enviar/consultar documentos electrónicos ante la administración tributaria.
+- `models.py (FacturaElectronica)`: persiste CDC, número legal, XML firmado, KuDE, estado SIFEN y auditoría de respuesta.
+- `providers/`: contiene la abstracción `InvoiceProvider`, `MockInvoiceProvider`, `FacturaSeguraProvider` y su factory.
+- `services.py (InvoiceService)`: crea, actualiza e idempotentemente recupera la factura vinculada a una transacción.
 
 ### Relación principal
 
-`apps.electronic_docs` se conecta con `apps.transactions`, permitiendo que las transacciones en estado `CONFIRMADA` generen o vinculen sus comprobantes electrónicos oficiales.
+`apps.invoicing` se conecta con `transactions`, permitiendo que una transacción liquidada genere o vincule su DTE oficial o simulado.
 
 ## 4. Aplicación `apps.transactions`
 
@@ -74,7 +72,7 @@ Este módulo representa el núcleo operativo y de ejecución transaccional del s
 - **Con `apps.customers`**: resuelve el cliente activo y valida que los medios pertenezcan a dicho cliente.
 - **Con `apps.rates`**: consume `QuoteFreezeService` para cotizar y congelar la tasa, `OperationLimitValidationService` para verificar límites operativos, y `currency_filters` para renderizado en templates.
 - **Con `apps.payments`**: valida y vincula las instancias de `PaymentMethod` y `ReceivingMethod`.
-- **Con `apps.electronic_docs`**: provee transacciones confirmadas para facturación fiscal.
+- **Con `apps.invoicing`**: provee transacciones liquidadas para facturación fiscal.
 
 ## 5. Aplicación `apps.customers`
 
@@ -94,18 +92,19 @@ Este módulo administra clientes, la multi-representación de usuarios, la conte
   - Comando administrativo para poblamiento y verificación idempotente del sistema.
   - Carga monedas base (`USD`, `EUR`, `BRL`, `ARS`, `PYG`), catálogo de entidades financieras (`ITAU`, `BNF`, `CONTINENTAL`, `TIGO_MONEY`, etc.), tasas de cambio vigentes, comisiones por segmento, límites operativos (`OperationLimit`) y clientes de prueba con sus asignaciones.
 
-## 6. Aplicación `apps.cash_register`
+## 6. Aplicación `apps.cash`
 
 Este módulo gestiona la apertura, arqueo y cierre de cajas registradoras.
 
 ### Componentes
 
-- `models.py (CashRegister)`: define la entidad que representa una caja registradora o sesión de caja.
-- `views.py (Apertura, Arqueo, Cierre)`: implementa las operaciones de apertura de caja, arqueo y cierre.
+- `models.py`: define `CashRegister`, `CashShift` y `CashMovement`.
+- `services.py (CashService)`: implementa apertura, movimientos, disponibilidad de fondos, arqueo y cierre.
+- `views.py`: implementa las operaciones de apertura de caja, arqueo y cierre.
 
 ### Relaciones
 
-`apps.cash_register` se relaciona con `apps.transactions`, dado que las operaciones presenciales afectan una caja o quedan asociadas a ella.
+`apps.cash` se relaciona con `transactions`; las operaciones presenciales generan movimientos vinculados a su turno y a la transacción.
 
 ## 7. Aplicación `apps.rates`
 
@@ -217,14 +216,14 @@ graph TD
         TxAPI[views.py - CreateApi, CancelApi]
     end
 
-    subgraph CashRegisterApp [apps.cash_register]
-        CashRegisterModel[models.py - CashRegister]
-        CashRegisterViews[views.py - Apertura, Arqueo, Cierre]
+    subgraph CashRegisterApp [apps.cash]
+        CashRegisterModel[models.py - CashRegister, CashShift, CashMovement]
+        CashRegisterViews[services.py / views.py - Apertura, Arqueo, Cierre]
     end
 
-    subgraph ElectronicDocsApp [apps.electronic_docs]
-        DocModel[models.py - ElectronicDocument]
-        SifenClient[sifen_client.py - API SIFEN/DNIT]
+    subgraph ElectronicDocsApp [apps.invoicing]
+        DocModel[models.py - FacturaElectronica]
+        SifenClient[providers - MockInvoiceProvider / FacturaSeguraProvider]
     end
 
     subgraph SphinxDocs [Documentación Técnica]
@@ -371,3 +370,27 @@ El flujo integral del sistema Global Exchange en el Hito 5 opera de la siguiente
 ## 15. Conclusión
 
 El diagrama describe una arquitectura Django modular, robusta y escalable para la plataforma **Global Exchange**. El sistema satisface los requerimientos del Hito 5, integrando operaciones cambiarias seguras con cotización congelada, validación de límites operativos, soporte completo para medios de pago y cobro vinculados a entidades financieras oficiales, y un ciclo de vida transaccional completamente controlado y auditable.
+
+---
+
+## 16. Actualización SCRUM-126 — Paquetes implementados
+
+Los paquetes vigentes son `transactions`, `apps.cash` y `apps.invoicing`; los nombres conceptuales previos `apps.cash_register` y `apps.electronic_docs` se reemplazan por estos namespaces reales.
+
+| Paquete | Responsabilidad | Dependencias |
+|---|---|---|
+| `apps.cash` | `CashRegister`, `CashShift`, `CashMovement`, servicios de apertura, arqueo y movimientos | `rates.Currency`, usuario Django y referencia a `transactions.Transaction` |
+| `apps.invoicing` | `FacturaElectronica`, `InvoiceService`, factory y providers SIFEN | `transactions.Transaction`, almacenamiento Django |
+| `transactions` | Orquesta pagos en efectivo, Kiosk/KuDE y el ciclo de la operación | `apps.cash.services`, `apps.invoicing.services` y `apps.invoicing.providers` |
+
+```mermaid
+graph LR
+  TX[transactions.services] --> CASH[apps.cash.services]
+  TX --> PROVIDER[apps.invoicing.providers]
+  TX --> INVSVC[apps.invoicing.services]
+  CASH --> CASHMODEL[apps.cash.models]
+  INVSVC --> INV[apps.invoicing.models]
+  CASH --> CUR[rates.models.Currency]
+```
+
+`transactions` es el único orquestador de los dos módulos. En test y desarrollo, la factory de facturación selecciona `MockInvoiceProvider`; por contrato, la suite no consume la API ni la cuota de Factura Segura.
