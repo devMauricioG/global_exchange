@@ -527,3 +527,263 @@ class KioskCashService:
             'currencies': list(currencies_data.values()),
         }
 
+    @classmethod
+    def decompose_amount_into_bills(
+        cls,
+        currency: Currency,
+        amount: Decimal
+    ) -> Dict[int, int]:
+        """
+        Descompone un importe en la combinación óptima de billetes legales para la divisa indicada
+        según las denominaciones de curso legal activas.
+        """
+        code = currency.code.upper()
+        allowed = sorted(DENOMINACIONES_PERMITIDAS.get(code, []), reverse=True)
+        if not allowed:
+            from apps.cash.inventory_models import CurrencyDenomination
+            db_denoms = CurrencyDenomination.objects.filter(currency=currency, is_active=True).values_list('value', flat=True)
+            allowed = sorted([int(v) for v in db_denoms if v > 0], reverse=True)
+
+        if not allowed:
+            return {}
+
+        int_amt = int(amount)
+        rem = int_amt
+        breakdown: Dict[int, int] = {}
+        for denom in allowed:
+            if denom <= 0 or denom > rem:
+                continue
+            count = rem // denom
+            if count > 0:
+                breakdown[denom] = count
+                rem -= count * denom
+            if rem == 0:
+                break
+
+        return breakdown
+
+    @classmethod
+    @db_transaction.atomic
+    def get_or_create_kiosk_register(cls, totem: KioskTotem) -> Tuple[Any, Any]:
+        """
+        Obtiene o aprovisiona la Caja Registradora física (CashRegister) asociada a la terminal
+        de autoservicio Kiosco y asegura que cuente con un turno de caja (CashShift) activo y abierto.
+        """
+        from apps.cash.models import CashRegister, CashRegisterStatus, CashShift, ShiftStatus
+        from apps.cash.services import CashService
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Group
+
+        User = get_user_model()
+        user_name = f'kiosk_{totem.codigo.lower().replace("-", "_")}'
+        kiosk_user, _ = User.objects.get_or_create(
+            username=user_name,
+            defaults={
+                'first_name': 'Terminal',
+                'last_name': f'Kiosco {totem.codigo}',
+                'email': f'{user_name}@kiosk.globalexchange.com.py',
+                'is_active': True,
+            }
+        )
+        cajero_group, _ = Group.objects.get_or_create(name='cajero')
+        kiosk_user.groups.add(cajero_group)
+
+        reg_code = f"CAJA-{totem.codigo}"
+        register, _ = CashRegister.objects.get_or_create(
+            register_code=reg_code,
+            defaults={
+                'name': f"Caja {totem.nombre}",
+                'branch_name': totem.ubicacion.split('-')[0].strip() if '-' in totem.ubicacion else 'Casa Central',
+                'status': CashRegisterStatus.CLOSED,
+                'is_active': True,
+            }
+        )
+
+        shift = CashShift.objects.filter(cash_register=register, status=ShiftStatus.OPEN).first()
+        if not shift:
+            # Asegurar que el usuario no tenga otro turno abierto en otra caja
+            CashShift.objects.filter(cashier=kiosk_user, status=ShiftStatus.OPEN).exclude(cash_register=register).update(
+                status=ShiftStatus.CLOSED, closed_at=timezone.now()
+            )
+
+            # Fondo inicial de apertura para simulación
+            initial_balances = {
+                'PYG': Decimal('100000000'),
+                'USD': Decimal('20000'),
+                'EUR': Decimal('20000'),
+            }
+            active_codes = set(Currency.objects.filter(is_active=True).values_list('code', flat=True))
+            initial_balances = {k: v for k, v in initial_balances.items() if k in active_codes}
+
+            register.status = CashRegisterStatus.CLOSED
+            register.save(update_fields=['status'])
+
+            shift = CashService.open_shift(
+                cash_register=register,
+                cashier=kiosk_user,
+                initial_balances=initial_balances,
+                opening_notes=f"Turno de autoservicio Kiosk {totem.codigo}",
+            )
+
+        # Garantizar inventario físico en caja para todas las monedas activas
+        cls._ensure_kiosk_banknote_inventory(register, shift)
+        return register, shift
+
+    @classmethod
+    def _ensure_kiosk_banknote_inventory(cls, register: Any, shift: Any) -> None:
+        """
+        Aprovisiona existencias físicas de billetes en la caja registradora del kiosco
+        para todas las denominaciones de divisas con tasas de cambio activas.
+        """
+        from apps.cash.inventory_models import (
+            CurrencyDenomination, BanknoteInventory, LocationType, ShiftDenominationCount
+        )
+        from rates.models import ExchangeRate
+
+        active_codes = set(
+            ExchangeRate.objects.filter(is_active=True).values_list('base_currency__code', flat=True)
+        ) | set(
+            ExchangeRate.objects.filter(is_active=True).values_list('target_currency__code', flat=True)
+        )
+        if not active_codes:
+            active_codes = set(Currency.objects.filter(is_active=True).values_list('code', flat=True))
+
+        for code in active_codes:
+            curr = Currency.objects.filter(code=code).first()
+            if not curr:
+                continue
+            allowed_denoms = DENOMINACIONES_PERMITIDAS.get(code, [])
+            for val in allowed_denoms:
+                denom_obj, _ = CurrencyDenomination.objects.get_or_create(
+                    currency=curr,
+                    value=Decimal(str(val)),
+                    defaults={'is_coin': False, 'is_active': True, 'order': val}
+                )
+
+                inv, created = BanknoteInventory.objects.get_or_create(
+                    location_type=LocationType.REGISTER,
+                    cash_register=register,
+                    currency=curr,
+                    denomination=denom_obj,
+                    defaults={'quantity': 500}
+                )
+                if not created and inv.quantity < 50:
+                    inv.quantity = 500
+                    inv.save(update_fields=['quantity', 'updated_at'])
+
+                ShiftDenominationCount.objects.get_or_create(
+                    shift=shift,
+                    currency=curr,
+                    denomination=denom_obj,
+                    defaults={
+                        'opening_quantity': inv.quantity,
+                        'system_expected_quantity': inv.quantity,
+                    }
+                )
+
+    @classmethod
+    @db_transaction.atomic
+    def sync_transaction_to_cash_register(
+        cls,
+        totem: KioskTotem,
+        transaction: Transaction,
+        breakdown_in: Dict[int, int],
+        breakdown_out: Dict[int, int],
+    ) -> Dict[str, Any]:
+        """
+        Registra la transacción del Kiosco en la Caja Registradora asociada:
+        1. Movimientos contables de caja (CashMovement: TRANSACTION_IN / TRANSACTION_OUT).
+        2. Movimientos físicos de billetes (BanknoteInventory, BanknoteMovement, ShiftDenominationCount).
+        """
+        from apps.cash.services import CashService
+        from apps.cash.inventory_services import InventoryService
+        from apps.cash.inventory_models import (
+            CurrencyDenomination, BanknoteInventory, LocationType, ShiftDenominationCount
+        )
+
+        register, shift = cls.get_or_create_kiosk_register(totem)
+
+        # 1. Movimientos contables de caja
+        movements = CashService.register_transaction_cash(
+            shift=shift,
+            transaction=transaction,
+            cashier=shift.cashier,
+            keycloak_user_id=getattr(shift.cashier, 'username', 'kiosk_system'),
+            is_cash_in=True,
+            is_cash_out=True,
+        )
+
+        # 2. Desglose de entradas a IDs de CurrencyDenomination
+        denom_in_amounts: Dict[int, int] = {}
+        for denom_val, qty in breakdown_in.items():
+            if qty <= 0:
+                continue
+            denom_obj, _ = CurrencyDenomination.objects.get_or_create(
+                currency=transaction.moneda_origen,
+                value=Decimal(str(denom_val)),
+                defaults={'is_coin': False, 'is_active': True, 'order': denom_val}
+            )
+            BanknoteInventory.objects.get_or_create(
+                location_type=LocationType.REGISTER,
+                cash_register=register,
+                currency=transaction.moneda_origen,
+                denomination=denom_obj,
+                defaults={'quantity': 0}
+            )
+            ShiftDenominationCount.objects.get_or_create(
+                shift=shift,
+                currency=transaction.moneda_origen,
+                denomination=denom_obj,
+                defaults={'opening_quantity': 0, 'system_expected_quantity': 0}
+            )
+            denom_in_amounts[denom_obj.id] = qty
+
+        # 3. Desglose de salidas a IDs de CurrencyDenomination
+        denom_out_amounts: Dict[int, int] = {}
+        for denom_val, qty in breakdown_out.items():
+            if qty <= 0:
+                continue
+            denom_obj, _ = CurrencyDenomination.objects.get_or_create(
+                currency=transaction.moneda_destino,
+                value=Decimal(str(denom_val)),
+                defaults={'is_coin': False, 'is_active': True, 'order': denom_val}
+            )
+            inv, _ = BanknoteInventory.objects.get_or_create(
+                location_type=LocationType.REGISTER,
+                cash_register=register,
+                currency=transaction.moneda_destino,
+                denomination=denom_obj,
+                defaults={'quantity': 500}
+            )
+            if inv.quantity < qty:
+                inv.quantity += (qty + 100)
+                inv.save(update_fields=['quantity', 'updated_at'])
+
+            ShiftDenominationCount.objects.get_or_create(
+                shift=shift,
+                currency=transaction.moneda_destino,
+                denomination=denom_obj,
+                defaults={'opening_quantity': inv.quantity, 'system_expected_quantity': inv.quantity}
+            )
+            denom_out_amounts[denom_obj.id] = qty
+
+        # 4. Impacto en inventario físico de billetes
+        InventoryService.register_exchange_operation(
+            shift=shift,
+            currency_in=transaction.moneda_origen,
+            denomination_in_amounts=denom_in_amounts,
+            currency_out=transaction.moneda_destino,
+            denomination_out_amounts=denom_out_amounts,
+            performed_by=shift.cashier,
+            transaction=transaction,
+            keycloak_id=getattr(shift.cashier, 'username', 'kiosk_system'),
+        )
+
+        return {
+            'register_code': register.register_code,
+            'shift_number': shift.shift_number,
+            'movements': movements,
+            'breakdown_in': breakdown_in,
+            'breakdown_out': breakdown_out,
+        }
+

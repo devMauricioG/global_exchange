@@ -445,6 +445,7 @@ class KioskTransactApiView(View):
 
             # 1. Aceptación física de billetes (moneda entregada por el cliente)
             accept_op = None
+            breakdown_in = {}
             try:
                 if bills_data:
                     try:
@@ -452,12 +453,7 @@ class KioskTransactApiView(View):
                     except Exception:
                         bills_input = [int(Decimal(x.strip())) for x in bills_data.split(',') if x.strip()]
                 else:
-                    int_origen = int(monto_origen)
-                    allowed = DENOMINACIONES_PERMITIDAS.get(tx.moneda_origen.code, [])
-                    if int_origen in allowed:
-                        bills_input = {int_origen: 1}
-                    else:
-                        bills_input = None
+                    bills_input = KioskCashService.decompose_amount_into_bills(tx.moneda_origen, monto_origen)
 
                 if bills_input:
                     accept_op = KioskCashService.accept_cash(
@@ -466,11 +462,13 @@ class KioskTransactApiView(View):
                         bills=bills_input,
                         transaction=tx,
                     )
+                    breakdown_in = accept_op.desglose_billetes if accept_op else {}
             except Exception as e:
                 logger.warning("Aceptación física de efectivo en Kiosco: %s", e)
 
             # 2. Dispensación física de billetes (divisa entregada al cliente)
             dispense_op = None
+            breakdown_out = {}
             try:
                 dispense_op = KioskCashService.dispense_cash(
                     totem=totem,
@@ -478,10 +476,29 @@ class KioskTransactApiView(View):
                     target_amount=monto_destino,
                     transaction=tx,
                 )
+                breakdown_out = dispense_op.desglose_billetes if dispense_op else {}
             except Exception as e:
                 logger.warning("Dispensación física de divisas en Kiosco: %s", e)
 
-            # 3. Emisión de Factura Electrónica e-Kuatia vía PAC FacturaSegura con protocolo de cuota
+            # 3. Simulación y Registro en Caja Registradora / Inventario de Billetes (SCRUM-116)
+            kiosk_reg_sync = None
+            try:
+                if not breakdown_in:
+                    breakdown_in = KioskCashService.decompose_amount_into_bills(tx.moneda_origen, monto_origen)
+                if not breakdown_out:
+                    breakdown_out = KioskCashService.decompose_amount_into_bills(tx.moneda_destino, monto_destino)
+
+                if breakdown_in and breakdown_out:
+                    kiosk_reg_sync = KioskCashService.sync_transaction_to_cash_register(
+                        totem=totem,
+                        transaction=tx,
+                        breakdown_in=breakdown_in,
+                        breakdown_out=breakdown_out,
+                    )
+            except Exception as e:
+                logger.warning("Sincronización de Kiosco con Caja Registradora: %s", e)
+
+            # 4. Emisión de Factura Electrónica e-Kuatia vía PAC FacturaSegura con protocolo de cuota
             fs_client = FacturaSeguraClient()
             try:
                 fs_data = fs_client.emitir_factura(tx, is_test=is_test)
@@ -516,6 +533,10 @@ class KioskTransactApiView(View):
             'cash_dispense_uuid': str(dispense_op.uuid) if dispense_op else None,
             'cash_receipt_url': reverse('kiosk:cash_receipt', kwargs={'uuid': dispense_op.uuid}) if dispense_op else None,
             'dispense_breakdown': dispense_op.desglose_billetes if dispense_op else {},
+            'kiosk_register_code': kiosk_reg_sync.get('register_code') if kiosk_reg_sync else f"CAJA-{totem.codigo}",
+            'kiosk_shift_number': kiosk_reg_sync.get('shift_number') if kiosk_reg_sync else None,
+            'bills_received': breakdown_in,
+            'bills_dispensed': breakdown_out,
         }
         return JsonResponse(data)
 

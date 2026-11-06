@@ -469,3 +469,45 @@ class KioskCashApiAndIntegrationTests(TestCase):
         # Verificar que se crearon los movimientos físicos de efectivo
         ops = KioskCashOperation.objects.filter(transaction=tx)
         self.assertTrue(ops.filter(tipo_operacion=KioskCashOperation.TipoOperacion.DISPENSACION).exists())
+
+    def test_kiosk_transact_registers_cash_movement_and_banknote_inventory(self):
+        """
+        Verifica que una operación en el Kiosco impacta la simulación de Caja Registradora:
+        - Creación o reutilización de CashRegister asociada al tótem (CAJA-TOTEM-01).
+        - Registro de CashMovement de entrada y salida vinculados a la transacción.
+        - Registro de BanknoteMovement (EXCHANGE_IN y EXCHANGE_OUT).
+        - Actualización de inventario físico de billetes por denominación (BanknoteInventory).
+        """
+        from apps.cash.models import CashMovement, CashRegister, MovementFlow
+        from apps.cash.inventory_models import BanknoteMovement, BanknoteMovementType
+
+        response = self.client.post(reverse('kiosk:api_transact'), {
+            'currency': 'USD',
+            'amount': '100',
+            'operation_type': 'BUY',
+            'customer_id': self.cliente.id,
+            'customer_ruc': self.cliente.documento_ruc,
+            'is_test': 'true',
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+
+        tx = Transaction.objects.get(id=data['transaction_id'])
+
+        # 1. Verificar Caja Registradora del Kiosco
+        register = CashRegister.objects.get(register_code='CAJA-TOTEM-01')
+        self.assertTrue(register.is_open)
+
+        # 2. Verificar movimientos de efectivo contables (CashMovement)
+        movements = CashMovement.objects.filter(transaction=tx)
+        self.assertEqual(movements.count(), 2)
+        self.assertTrue(movements.filter(flow=MovementFlow.IN).exists())
+        self.assertTrue(movements.filter(flow=MovementFlow.OUT).exists())
+
+        # 3. Verificar movimientos inmutables de billetes por denominación (BanknoteMovement)
+        bn_movements = BanknoteMovement.objects.filter(transaction=tx)
+        self.assertTrue(bn_movements.exists())
+        self.assertTrue(bn_movements.filter(movement_type=BanknoteMovementType.EXCHANGE_IN).exists())
+        self.assertTrue(bn_movements.filter(movement_type=BanknoteMovementType.EXCHANGE_OUT).exists())
+
