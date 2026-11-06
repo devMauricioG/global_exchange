@@ -28,6 +28,8 @@ from customers.models import Cliente, CustomerUserAssignment
 from payments.models import EntidadFinanciera, PaymentMethod, ReceivingMethod
 from rates.models import Currency, ExchangeRate, OperationLimit, SegmentCommission
 from transactions.models import Transaction
+from apps.cash.models import CashRegister, CashRegisterStatus
+from transactions.kiosk_cash_service import KioskCashService
 
 User = get_user_model()
 
@@ -62,6 +64,7 @@ class Command(BaseCommand):
             pm_rm_map = self._seed_payment_and_receiving_methods(customers_map, financial_entities_map)
             self._seed_operation_limits(currencies_map)
             self._seed_transactions(customers_map, currencies_map, pm_rm_map, users_map)
+            self._seed_cash_and_kiosk()
 
         self.stdout.write(
             self.style.SUCCESS("=== Seeding de datos completado exitosamente de forma idempotente ===")
@@ -83,6 +86,7 @@ class Command(BaseCommand):
         # 1. Grupos
         admin_group, _ = Group.objects.get_or_create(name="admin")
         operator_group, _ = Group.objects.get_or_create(name="operator")
+        cashier_group, _ = Group.objects.get_or_create(name="cajero")
         user_group, _ = Group.objects.get_or_create(name="user")
 
         users_data = [
@@ -104,7 +108,7 @@ class Command(BaseCommand):
                 "last_name": "Cajero",
                 "is_staff": True,
                 "is_superuser": False,
-                "groups": [operator_group],
+                "groups": [operator_group, cashier_group],
             },
             {
                 "key": "cliente_minorista",
@@ -789,3 +793,23 @@ class Command(BaseCommand):
             )
 
         self.stdout.write(f"   [OK] {len(transactions_data)} transacciones de prueba sembradas.")
+
+    def _seed_cash_and_kiosk(self):
+        """Crea puestos físicos demo y el inventario simulado del kiosco."""
+        self.stdout.write("10. Sembrando cajas y kiosco de prueba...")
+        registers = [
+            ("CAJA-01", "Ventanilla 1 - Casa Central"),
+            ("CAJA-02", "Ventanilla 2 - Casa Central"),
+        ]
+        for code, name in registers:
+            CashRegister.objects.get_or_create(
+                register_code=code,
+                defaults={
+                    "name": name,
+                    "branch_name": "Casa Central",
+                    "status": CashRegisterStatus.CLOSED,
+                    "is_active": True,
+                },
+            )
+        KioskCashService.get_or_create_default_totem("TOTEM-01")
+        self.stdout.write("   [OK] 2 cajas cerradas y tótem demo configurados.")
